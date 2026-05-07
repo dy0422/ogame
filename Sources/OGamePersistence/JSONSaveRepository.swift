@@ -5,6 +5,7 @@ public struct JSONSaveRepository: Sendable {
     public enum RepositoryError: Error, Equatable, Sendable {
         case missingSave
         case unsupportedSchema(Int)
+        case invalidFileName(String)
     }
 
     public var saveDirectory: URL
@@ -27,6 +28,7 @@ public struct JSONSaveRepository: Sendable {
     }
 
     public func save(_ universe: Universe, wallClockDate: Date = Date()) throws {
+        let saveURL = try validatedSaveURL()
         try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
 
         let envelope = SaveEnvelope(lastSavedAt: wallClockDate, universe: universe)
@@ -39,6 +41,7 @@ public struct JSONSaveRepository: Sendable {
     }
 
     public func load() throws -> SaveEnvelope {
+        let saveURL = try validatedSaveURL()
         guard FileManager.default.fileExists(atPath: saveURL.path) else {
             throw RepositoryError.missingSave
         }
@@ -47,14 +50,33 @@ public struct JSONSaveRepository: Sendable {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
-        let envelope = try decoder.decode(SaveEnvelope.self, from: data)
-        guard envelope.schemaVersion == SaveEnvelope.currentSchemaVersion else {
-            throw RepositoryError.unsupportedSchema(envelope.schemaVersion)
+        let header = try decoder.decode(SaveHeader.self, from: data)
+        guard header.schemaVersion == SaveEnvelope.currentSchemaVersion else {
+            throw RepositoryError.unsupportedSchema(header.schemaVersion)
         }
+
+        let envelope = try decoder.decode(SaveEnvelope.self, from: data)
         return envelope
     }
 
-    private var saveURL: URL {
-        saveDirectory.appendingPathComponent(fileName, isDirectory: false)
+    private func validatedSaveURL() throws -> URL {
+        guard Self.isValidFileName(fileName) else {
+            throw RepositoryError.invalidFileName(fileName)
+        }
+        return saveDirectory.appendingPathComponent(fileName, isDirectory: false)
+    }
+
+    private static func isValidFileName(_ fileName: String) -> Bool {
+        guard !fileName.isEmpty, fileName != ".", fileName != ".." else {
+            return false
+        }
+        guard !fileName.contains("/"), !fileName.contains("\\") else {
+            return false
+        }
+        return URL(fileURLWithPath: fileName).lastPathComponent == fileName
+    }
+
+    private struct SaveHeader: Decodable {
+        var schemaVersion: Int
     }
 }

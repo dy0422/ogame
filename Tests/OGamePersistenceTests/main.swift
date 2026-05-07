@@ -80,7 +80,61 @@ func testRepositoryRejectsUnsupportedSchema() throws {
     }
 }
 
+func testRepositoryRejectsInvalidFileNamesBeforeSaving() throws {
+    let directory = uniqueTemporaryDirectory()
+    let escapedFileName = "NativeOGamePersistenceTests-\(UUID().uuidString)-escape.json"
+    let outsideURL = directory.deletingLastPathComponent().appendingPathComponent(escapedFileName)
+    let universe = StarterUniverseFactory.makeNewGame(seed: 13, playerName: "Commander")
+
+    for fileName in ["../\(escapedFileName)", "nested/escape.json"] {
+        let repository = JSONSaveRepository(saveDirectory: directory, fileName: fileName)
+
+        requireRepositoryError(.invalidFileName(fileName), "Repository should reject invalid save file names") {
+            try repository.save(universe, wallClockDate: Date(timeIntervalSince1970: 3_000))
+        }
+
+        require(!FileManager.default.fileExists(atPath: outsideURL.path), "Repository should not write outside save directory")
+        require(
+            !FileManager.default.fileExists(atPath: directory.appendingPathComponent("nested/escape.json").path),
+            "Repository should not write nested save paths"
+        )
+    }
+}
+
+func testRepositoryRejectsInvalidFileNamesBeforeLoading() {
+    let fileName = "../escape.json"
+    let repository = JSONSaveRepository(saveDirectory: uniqueTemporaryDirectory(), fileName: fileName)
+
+    requireRepositoryError(.invalidFileName(fileName), "Repository should reject invalid load file names") {
+        _ = try repository.load()
+    }
+}
+
+func testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    let unsupportedVersion = SaveEnvelope.currentSchemaVersion + 1
+    let futureSchemaJSON = """
+    {
+      "schemaVersion": \(unsupportedVersion),
+      "payload": {
+        "futureOnlyField": true
+      }
+    }
+    """
+
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try Data(futureSchemaJSON.utf8).write(to: directory.appendingPathComponent("autosave.json"), options: [.atomic])
+
+    requireRepositoryError(.unsupportedSchema(unsupportedVersion), "Repository should reject unsupported schema before full decode") {
+        _ = try repository.load()
+    }
+}
+
 try testRepositorySavesAndLoadsUniverse()
 testRepositoryReportsMissingSave()
 try testRepositoryRejectsUnsupportedSchema()
+try testRepositoryRejectsInvalidFileNamesBeforeSaving()
+testRepositoryRejectsInvalidFileNamesBeforeLoading()
+try testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode()
 print("OGamePersistenceTests passed")
