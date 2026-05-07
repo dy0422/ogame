@@ -55,6 +55,7 @@ public enum OfflineSimulationEngine {
             didMutate: false
         )
 
+        var preservedVictoryEventCount = 0
         while remaining > 0 {
             let delta = min(chunkInterval, remaining)
             let eventStartCount = universe.events.count
@@ -62,11 +63,13 @@ public enum OfflineSimulationEngine {
             SimulationEngine.tick(universe: &universe, delta: delta)
 
             let generatedEvents = Array(universe.events[eventStartCount..<universe.events.count])
-            summary.completedConstructionCount += generatedEvents.filter { $0.title == "Construction Complete" }.count
+            summary.completedConstructionCount += generatedEvents.filter(isConstructionCompletionEvent).count
             summary.completedResearchCount += generatedEvents.filter { $0.title == "Research Complete" }.count
             summary.generatedEventCount += generatedEvents.count
             if universe.events.count > eventStartCount {
-                universe.events.removeSubrange(eventStartCount..<universe.events.count)
+                let preservedVictoryEvents = generatedEvents.filter { $0.kind == .victory }
+                preservedVictoryEventCount += preservedVictoryEvents.count
+                universe.events.replaceSubrange(eventStartCount..<universe.events.count, with: preservedVictoryEvents)
             }
 
             summary.processedChunks += 1
@@ -74,7 +77,7 @@ public enum OfflineSimulationEngine {
         }
 
         summary.didMutate = true
-        summary.recordedEventCount = 1
+        summary.recordedEventCount = preservedVictoryEventCount + 1
         universe.lastSimulatedWallClockTime = now
         universe.events.append(summaryEvent(for: summary, in: universe, initialGameTime: initialGameTime))
 
@@ -99,6 +102,12 @@ public enum OfflineSimulationEngine {
         }
 
         return max(ruleSet.offlineChunkInterval, minimumChunkInterval)
+    }
+
+    private static func isConstructionCompletionEvent(_ event: GameEvent) -> Bool {
+        event.title == "Construction Complete" ||
+            event.title == "Ship Construction Complete" ||
+            event.title == "Defense Construction Complete"
     }
 
     private static func summaryEvent(
