@@ -4055,6 +4055,60 @@ func testOfflineCatchUpPreservesVictoryEventAndDoesNotRepeatIt() {
     requireEqual(universe.events.filter { $0.kind == .victory }.count, 1, "Later catch-up and ticks should not repeat preserved victory event")
 }
 
+func testOfflineCatchUpOneDayWithAIAndFleetsUsesBoundedChunksAndSummarizedFeed() {
+    var universe = makeCombatUniverse()
+    universe.ruleSet = fastSkirmishRules(offlineChunkInterval: 300)
+    universe.planets[0].resources = ResourceBundle(metal: 150_000, crystal: 100_000, deuterium: 80_000)
+    universe.planets[0].shipInventory = [.lightFighter: 8, .smallCargo: 2]
+    universe.planets[1].resources = ResourceBundle(metal: 20_000, crystal: 10_000, deuterium: 4_000)
+    universe.planets[1].buildingLevels = [.metalMine: 1, .crystalMine: 1, .solarPlant: 2]
+
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .attack,
+        ships: [.lightFighter: 8, .smallCargo: 2],
+        cargo: .zero
+    )
+    guard case .launched = launch else {
+        fatalError("Stress fixture should launch an attack fleet before offline catch-up")
+    }
+
+    let preCatchUpEventCount = universe.events.count
+    let summary = OfflineSimulationEngine.catchUp(
+        universe: &universe,
+        elapsed: 86_400,
+        now: Date(timeIntervalSince1970: 86_400)
+    )
+
+    requireEqual(summary.elapsedSeconds, 86_400, "One-day catch-up should process exactly twenty-four hours")
+    requireEqual(summary.processedChunks, 288, "One-day catch-up should stay bounded to five-minute chunks")
+    requireEqual(universe.gameTime, 86_410, "One-day catch-up should preserve initial game time and advance by the capped day")
+    requireEqual(universe.fleets, [], "One-day catch-up should resolve outbound combat and returning fleet phases")
+    require(universe.reports.contains { $0.kind == .battle }, "One-day fleet catch-up should preserve generated battle reports")
+    let aiPlanet = requirePlanet(fleetPlanetID(2), in: universe, "AI planet should remain after one-day catch-up")
+    require(
+        aiPlanet.buildingLevels.values.reduce(0, +) > 4,
+        "One-day catch-up should run AI economy decisions through completed upgrades"
+    )
+    requireEqual(universe.victoryState.winningFactionID, fleetPlayerID(), "One-day catch-up should allow victory to trigger")
+    requireEqual(universe.events.filter { $0.kind == .victory }.count, 1, "One-day catch-up should preserve one victory event")
+    requireEqual(universe.events.last?.title, "Offline Catch-Up Complete", "One-day catch-up should append one summary event")
+    require(
+        universe.events.count <= preCatchUpEventCount + 2,
+        "One-day catch-up should summarize generated feed events instead of retaining every chunk"
+    )
+    require(
+        summary.generatedEventCount > summary.recordedEventCount,
+        "One-day catch-up summary should expose that generated events were squashed"
+    )
+
+    SimulationEngine.tick(universe: &universe, delta: 60)
+    requireEqual(universe.gameTime, 86_470, "Simulation should continue after one-day offline victory")
+    requireEqual(universe.events.filter { $0.kind == .victory }.count, 1, "Post-victory simulation should not repeat victory events")
+}
+
 func testOfflineCatchUpIgnoresInvalidElapsedValues() {
     let invalidElapsedValues: [TimeInterval] = [0, -1, .infinity, -.infinity, .nan]
 
@@ -4214,6 +4268,7 @@ testOfflineCatchUpProducesResourcesWithoutFloodingEvents()
 testOfflineCatchUpCompletesQueuesAndSummarizesCompletionCounts()
 testOfflineCatchUpCompletesUnitQueuesAndSummarizesConstructionCounts()
 testOfflineCatchUpPreservesVictoryEventAndDoesNotRepeatIt()
+testOfflineCatchUpOneDayWithAIAndFleetsUsesBoundedChunksAndSummarizedFeed()
 testOfflineCatchUpIgnoresInvalidElapsedValues()
 testOfflineCatchUpCapsHugeElapsedValuesToOneDay()
 try testOfflineCatchUpSummaryIsCodableEquatableAndDeterministic()

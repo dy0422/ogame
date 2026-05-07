@@ -122,10 +122,6 @@ final class AppModel: ObservableObject {
         [.transport, .attack, .espionage, .recycle, .colonize, .explore]
     }
 
-    var fleetTargetPlanets: [Planet] {
-        universe.planets
-    }
-
     var activeFleets: [Fleet] {
         universe.fleets.sorted { lhs, rhs in
             fleetNextTime(lhs) < fleetNextTime(rhs)
@@ -136,11 +132,7 @@ final class AppModel: ObservableObject {
         let factionNamesByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.name) })
         let factionKindsByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.kind) })
         let playerOwnedPlanetIDs = Set(playerFaction?.ownedPlanetIDs ?? [])
-        let exploredPlanetIDs = Set(
-            StrategicEngine
-                .explorationRecords(for: universe.playerFactionID, in: universe)
-                .map(\.targetPlanetID)
-        )
+        let exploredPlanetIDs = playerExploredPlanetIDs
 
         let summaries = universe.planets
             .sorted(by: Self.sortPlanetsByCoordinate)
@@ -675,9 +667,7 @@ final class AppModel: ObservableObject {
     }
 
     func defaultTargetPlanetID(excluding originID: PlanetID?) -> PlanetID? {
-        fleetTargetPlanets.first { planet in
-            Optional(planet.id) != originID
-        }?.id
+        fleetTargetSummaries(excluding: originID).first?.id
     }
 
     func planet(for planetID: PlanetID?) -> Planet? {
@@ -688,10 +678,28 @@ final class AppModel: ObservableObject {
         return universe.planets.first { $0.id == planetID }
     }
 
-    func targetPlanets(excluding originID: PlanetID?) -> [Planet] {
-        fleetTargetPlanets.filter { planet in
-            Optional(planet.id) != originID
+    func fleetTargetSummaries(excluding originID: PlanetID?) -> [FleetTargetSummary] {
+        universe.planets
+            .sorted(by: Self.sortPlanetsByCoordinate)
+            .filter { planet in
+                Optional(planet.id) != originID
+            }
+            .map(fleetTargetSummary(for:))
+    }
+
+    func fleetTargetStateSignature(targetID: PlanetID?) -> String {
+        guard let target = planet(for: targetID) else {
+            return "missing"
         }
+
+        let summary = fleetTargetSummary(for: target)
+        return [
+            summary.id.rawValue.uuidString,
+            summary.isVisible ? "visible" : "hidden",
+            summary.isPlayerOwned ? "owned" : "not-owned",
+            summary.ownerName,
+            Self.formattedWholeNumber(summary.debrisTotal)
+        ].joined(separator: "|")
     }
 
     func isMissionAvailable(_ mission: Fleet.Mission, originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int]) -> Bool {
@@ -704,17 +712,22 @@ final class AppModel: ObservableObject {
         }
 
         let normalizedShips = normalizedShips(ships)
+        let targetIsVisible = isVisibleToPlayer(target)
+        let targetIsPlayerOwned = isPlayerOwned(target)
+
         switch mission {
         case .transport:
-            return isPlayerOwned(target)
+            return targetIsPlayerOwned
         case .attack, .espionage:
-            return !isPlayerOwned(target) && target.ownerID != nil
+            return targetIsVisible && !targetIsPlayerOwned && target.ownerID != nil
         case .explore:
-            return origin.id != target.id
+            return origin.id != target.id && !targetIsPlayerOwned
         case .recycle:
-            return (normalizedShips[.recycler] ?? 0) > 0 && target.debrisField.totalAmountForDisplay > 0
+            return targetIsVisible &&
+                (normalizedShips[.recycler] ?? 0) > 0 &&
+                target.debrisField.totalAmountForDisplay > 0
         case .colonize:
-            return target.ownerID == nil && (normalizedShips[.colonyShip] ?? 0) > 0
+            return targetIsVisible && target.ownerID == nil && (normalizedShips[.colonyShip] ?? 0) > 0
         case .returning:
             return false
         }
@@ -1378,6 +1391,36 @@ final class AppModel: ObservableObject {
             playerFaction?.ownedPlanetIDs.contains(planet.id) == true
     }
 
+    private var playerExploredPlanetIDs: Set<PlanetID> {
+        Set(
+            StrategicEngine
+                .explorationRecords(for: universe.playerFactionID, in: universe)
+                .map(\.targetPlanetID)
+        )
+    }
+
+    private func isVisibleToPlayer(_ planet: Planet) -> Bool {
+        isPlayerOwned(planet) || playerExploredPlanetIDs.contains(planet.id)
+    }
+
+    private func fleetTargetSummary(for planet: Planet) -> FleetTargetSummary {
+        let isPlayerOwned = isPlayerOwned(planet)
+        let isVisible = isVisibleToPlayer(planet)
+        let ownerName = isPlayerOwned
+            ? (playerFaction?.name ?? "Player")
+            : isVisible ? planet.ownerID.map(factionName(for:)) ?? "Neutral" : "Unscouted"
+
+        return FleetTargetSummary(
+            id: planet.id,
+            displayName: isVisible ? planet.name : "Unknown Sector",
+            coordinateText: planet.coordinate.displayText,
+            ownerName: ownerName,
+            isPlayerOwned: isPlayerOwned,
+            isVisible: isVisible,
+            debrisTotal: isVisible ? planet.debrisField.totalAmountForDisplay : 0
+        )
+    }
+
     private func factionName(for factionID: FactionID) -> String {
         universe.factions.first { $0.id == factionID }?.name ?? "Unknown faction"
     }
@@ -1554,6 +1597,24 @@ struct StarMapPlanetSummary: Identifiable {
     let otherFleetCount: Int
 
     var id: PlanetID { planet.id }
+}
+
+struct FleetTargetSummary: Identifiable {
+    let id: PlanetID
+    let displayName: String
+    let coordinateText: String
+    let ownerName: String
+    let isPlayerOwned: Bool
+    let isVisible: Bool
+    let debrisTotal: Double
+
+    var pickerTitle: String {
+        "\(displayName) \(coordinateText)"
+    }
+
+    var detailText: String {
+        isVisible ? ownerName : "Unscouted"
+    }
 }
 
 struct VictoryBannerSummary {

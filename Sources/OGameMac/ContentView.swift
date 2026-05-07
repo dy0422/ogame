@@ -143,6 +143,7 @@ private struct DashboardView: View {
                     }
 
                     HeaderView(universe: model.universe, faction: model.playerFaction)
+                    VictoryBannerView(summary: model.victoryBannerSummary, compact: true)
                     PlanetSummaryView(planets: model.playerPlanets, model: model)
                     RecentEventsView(events: Array(model.universe.events.suffix(6).reversed()))
                 }
@@ -314,6 +315,10 @@ private struct EnergyStatusLine: View {
 private struct RecentEventsView: View {
     let events: [GameEvent]
 
+    private var groups: [EventFeedGroup] {
+        EventFeedGroup.group(events)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionTitle(title: "Recent Events", detail: "\(events.count) shown")
@@ -322,10 +327,10 @@ private struct RecentEventsView: View {
                 EmptyStateView(title: "No events recorded", systemImage: "text.bubble")
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(events) { event in
-                        EventRow(event: event)
+                    ForEach(groups) { group in
+                        EventFeedGroupView(group: group)
 
-                        if event.id != events.last?.id {
+                        if group.id != groups.last?.id {
                             Divider()
                         }
                     }
@@ -341,12 +346,97 @@ private struct RecentEventsView: View {
     }
 }
 
+private struct EventFeedGroup: Identifiable {
+    let kindRawValue: String
+    let title: String
+    let events: [GameEvent]
+
+    var id: String {
+        kindRawValue
+    }
+
+    static func group(_ events: [GameEvent]) -> [EventFeedGroup] {
+        var groupedEvents: [String: [GameEvent]] = [:]
+        var orderedKinds: [String] = []
+
+        for event in events {
+            let kindRawValue = event.kind.rawValue
+            if groupedEvents[kindRawValue] == nil {
+                orderedKinds.append(kindRawValue)
+            }
+            groupedEvents[kindRawValue, default: []].append(event)
+        }
+
+        return orderedKinds.compactMap { kindRawValue in
+            guard let events = groupedEvents[kindRawValue], !events.isEmpty else {
+                return nil
+            }
+
+            return EventFeedGroup(
+                kindRawValue: kindRawValue,
+                title: eventGroupTitle(for: events[0].kind),
+                events: events
+            )
+        }
+    }
+
+    private static func eventGroupTitle(for kind: GameEvent.Kind) -> String {
+        switch kind {
+        case .system:
+            return "System"
+        case .economy:
+            return "Economy"
+        case .intelligence:
+            return "Intel"
+        case .combat:
+            return "Combat"
+        case .exploration:
+            return "Exploration"
+        case .victory:
+            return "Victory"
+        }
+    }
+}
+
+private struct EventFeedGroupView: View {
+    let group: EventFeedGroup
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: group.events.first?.symbolName ?? "circle")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+
+                Text(group.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text("\(group.events.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .padding(.top, 10)
+
+            ForEach(group.events) { event in
+                EventRow(event: event)
+
+                if event.id != group.events.last?.id {
+                    Divider()
+                }
+            }
+        }
+    }
+}
+
 private struct EventRow: View {
     let event: GameEvent
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbolName)
+            Image(systemName: event.symbolName)
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
 
@@ -355,6 +445,7 @@ private struct EventRow: View {
                     Text(event.title)
                         .font(.headline)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.85)
 
                     Spacer(minLength: 12)
 
@@ -368,26 +459,10 @@ private struct EventRow: View {
                 Text(event.message)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, 10)
-    }
-
-    private var symbolName: String {
-        switch event.kind {
-        case .system:
-            return "gearshape"
-        case .economy:
-            return "chart.line.uptrend.xyaxis"
-        case .intelligence:
-            return "eye"
-        case .combat:
-            return "target"
-        case .exploration:
-            return "sparkles"
-        case .victory:
-            return "flag.checkered"
-        }
+        .padding(.vertical, 8)
     }
 }
 
@@ -416,7 +491,9 @@ private struct ActivityPanel: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut("t", modifiers: [.command])
                 .disabled(!model.canSave)
+                .help(model.canSave ? model.advanceActionTitle : "Start a new game before advancing")
 
                 Button {
                     model.save()
@@ -424,7 +501,9 @@ private struct ActivityPanel: View {
                     Label("Save", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity)
                 }
+                .keyboardShortcut("s", modifiers: [.command])
                 .disabled(!model.canSave)
+                .help(model.canSave ? "Save universe" : "Saving is disabled until a new game starts")
 
                 if !model.canSave {
                     Button {
@@ -478,6 +557,7 @@ private struct OnboardingPanel: View {
                     } label: {
                         Label("Save Now", systemImage: "square.and.arrow.down")
                     }
+                    .keyboardShortcut("s", modifiers: [.command])
                     .disabled(!model.canSave)
                 }
             }
@@ -608,7 +688,9 @@ private struct SettingsPanel: View {
                         Label("Save Settings", systemImage: "square.and.arrow.down")
                     }
                     .buttonStyle(.borderedProminent)
+                    .keyboardShortcut("s", modifiers: [.command])
                     .disabled(!model.canSave)
+                    .help(model.canSave ? "Save settings" : "Saving is disabled until a new game starts")
                 }
             }
         }
@@ -1357,17 +1439,7 @@ private struct FleetOverviewView: View {
     }
 
     private var targetStateSignature: String {
-        guard let target = model.planet(for: targetID) else {
-            return "missing"
-        }
-
-        return [
-            target.id.rawValue.uuidString,
-            target.ownerID?.rawValue.uuidString ?? "unowned",
-            Formatters.wholeNumber(target.debrisField.metal),
-            Formatters.wholeNumber(target.debrisField.crystal),
-            Formatters.wholeNumber(target.debrisField.deuterium)
-        ].joined(separator: "|")
+        model.fleetTargetStateSignature(targetID: targetID)
     }
 
     var body: some View {
@@ -1516,7 +1588,12 @@ private struct FleetDispatchPanel: View {
                     spacing: 12
                 ) {
                     PlanetPicker(title: "Origin", selection: $originID, planets: model.playerPlanets, emptyTitle: "No colony")
-                    PlanetPicker(title: "Target", selection: $targetID, planets: model.targetPlanets(excluding: originID), emptyTitle: "No target")
+                    FleetTargetPicker(
+                        title: "Target",
+                        selection: $targetID,
+                        targets: model.fleetTargetSummaries(excluding: originID),
+                        emptyTitle: "No target"
+                    )
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Mission")
@@ -1610,6 +1687,44 @@ private struct PlanetPicker: View {
             }
             .labelsHidden()
             .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+private struct FleetTargetPicker: View {
+    let title: String
+    @Binding var selection: PlanetID?
+    let targets: [FleetTargetSummary]
+    let emptyTitle: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Picker(title, selection: $selection) {
+                if targets.isEmpty {
+                    Text(emptyTitle)
+                        .tag(Optional<PlanetID>.none)
+                } else {
+                    ForEach(targets) { target in
+                        Text(target.pickerTitle)
+                            .lineLimit(1)
+                            .tag(Optional(target.id))
+                    }
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: .infinity)
+
+            if let selected = targets.first(where: { $0.id == selection }) {
+                Label(selected.detailText, systemImage: selected.isVisible ? "location.viewfinder" : "questionmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
     }
 }
@@ -1868,6 +1983,18 @@ private struct ActiveFleetRow: View {
 private struct ReportsPanel: View {
     @ObservedObject var model: AppModel
 
+    private var battleReports: [Report] {
+        model.recentReports.filter { $0.kind == .battle }
+    }
+
+    private var espionageReports: [Report] {
+        model.recentReports.filter { $0.kind == .espionage }
+    }
+
+    private var explorationReports: [Report] {
+        model.recentReports.filter { $0.kind == .exploration }
+    }
+
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
@@ -1877,21 +2004,31 @@ private struct ReportsPanel: View {
                     QueueEmptyLine(title: "No reports recorded", systemImage: "doc.text.magnifyingglass")
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(model.recentReports) { report in
-                            ReportRow(report: report, model: model)
+                        ReportRowsSection(
+                            title: "Battle",
+                            systemImage: "target",
+                            reports: battleReports,
+                            model: model
+                        )
+                        SectionDivider(isVisible: !battleReports.isEmpty && (!espionageReports.isEmpty || !explorationReports.isEmpty || !model.recentExplorationEvents.isEmpty))
 
-                            if report.id != model.recentReports.last?.id || !model.recentExplorationEvents.isEmpty {
-                                Divider()
-                            }
-                        }
+                        ReportRowsSection(
+                            title: "Espionage",
+                            systemImage: "eye",
+                            reports: espionageReports,
+                            model: model
+                        )
+                        SectionDivider(isVisible: !espionageReports.isEmpty && (!explorationReports.isEmpty || !model.recentExplorationEvents.isEmpty))
 
-                        ForEach(model.recentExplorationEvents) { event in
-                            ExplorationEventReportRow(event: event)
+                        ReportRowsSection(
+                            title: "Exploration",
+                            systemImage: "sparkles",
+                            reports: explorationReports,
+                            model: model
+                        )
+                        SectionDivider(isVisible: !explorationReports.isEmpty && !model.recentExplorationEvents.isEmpty)
 
-                            if event.id != model.recentExplorationEvents.last?.id {
-                                Divider()
-                            }
-                        }
+                        ExplorationEventRowsSection(events: model.recentExplorationEvents)
                     }
                 }
             }
@@ -1902,6 +2039,84 @@ private struct ReportsPanel: View {
     private var reportsDetail: String {
         let count = model.recentReports.count + model.recentExplorationEvents.count
         return count == 0 ? "None" : "\(count) recent"
+    }
+}
+
+private struct ReportRowsSection: View {
+    let title: String
+    let systemImage: String
+    let reports: [Report]
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        if !reports.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ReportGroupHeader(title: title, systemImage: systemImage, count: reports.count)
+
+                ForEach(reports) { report in
+                    ReportRow(report: report, model: model)
+
+                    if report.id != reports.last?.id {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ExplorationEventRowsSection: View {
+    let events: [GameEvent]
+
+    var body: some View {
+        if !events.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ReportGroupHeader(title: "Exploration Events", systemImage: "sparkles", count: events.count)
+
+                ForEach(events) { event in
+                    ExplorationEventReportRow(event: event)
+
+                    if event.id != events.last?.id {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ReportGroupHeader: View {
+    let title: String
+    let systemImage: String
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text("\(count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.top, 10)
+    }
+}
+
+private struct SectionDivider: View {
+    let isVisible: Bool
+
+    var body: some View {
+        if isVisible {
+            Divider()
+        }
     }
 }
 
@@ -1920,6 +2135,7 @@ private struct ReportRow: View {
                     Text(report.title)
                         .font(.headline)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.85)
 
                     Spacer(minLength: 12)
 
@@ -1934,6 +2150,7 @@ private struct ReportRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text(model.reportDetailSummary(report))
                     .font(.caption)
@@ -2382,6 +2599,7 @@ private struct VictoryProgressView: View {
 
 private struct VictoryBannerView: View {
     let summary: VictoryBannerSummary
+    var compact = false
 
     var body: some View {
         PanelSurface {
@@ -2392,12 +2610,12 @@ private struct VictoryBannerView: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(summary.title)
-                        .font(.title2.bold())
+                        .font(compact ? .headline : .title2.bold())
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
 
                     Text(summary.detail)
-                        .font(.callout)
+                        .font(compact ? .caption : .callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -2825,10 +3043,12 @@ private struct EventStyleRow: View {
                 Text(title)
                     .font(.headline)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
 
                 Text(detail)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 12)
@@ -3025,12 +3245,14 @@ private struct SectionTitle: View {
             Text(title)
                 .font(.title2.bold())
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
             if let detail {
                 Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.85)
             }
         }
     }
@@ -3046,6 +3268,25 @@ private struct EmptyStateView: View {
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private extension GameEvent {
+    var symbolName: String {
+        switch kind {
+        case .system:
+            return "gearshape"
+        case .economy:
+            return "chart.line.uptrend.xyaxis"
+        case .intelligence:
+            return "eye"
+        case .combat:
+            return "target"
+        case .exploration:
+            return "sparkles"
+        case .victory:
+            return "flag.checkered"
+        }
     }
 }
 

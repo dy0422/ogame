@@ -112,6 +112,62 @@ func testRepositorySavesAndLoadsQueueMetadata() throws {
     )
 }
 
+func testRepositorySavesAndLoadsFleetsReportsAndSettings() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    var universe = StarterUniverseFactory.makeNewGame(seed: 22, playerName: "Commander")
+    let playerID = universe.playerFactionID
+    let originID = universe.planets[0].id
+    let targetID = universe.planets[1].id
+    let fleet = Fleet(
+        id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-0000000007b0")!),
+        ownerID: playerID,
+        mission: .espionage,
+        origin: universe.planets[0].coordinate,
+        target: universe.planets[1].coordinate,
+        ships: [.espionageProbe: 1],
+        launchTime: 100,
+        arrivalTime: 140,
+        returnTime: 180,
+        originPlanetID: originID,
+        targetPlanetID: targetID
+    )
+    let report = Report(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000007b1")!,
+        time: 140,
+        kind: .espionage,
+        title: "Espionage at \(universe.planets[1].coordinate.displayText)",
+        summary: "Probe returned scanner data.",
+        participants: [
+            ReportParticipant(
+                role: .observer,
+                factionID: playerID,
+                planetID: targetID,
+                name: "Commander",
+                beforeShips: [.espionageProbe: 1],
+                afterShips: [.espionageProbe: 1]
+            )
+        ]
+    )
+    let settings = GameSettings(
+        offlineIntensity: .intense,
+        gameSpeed: 2.5,
+        isAutosaveEnabled: false,
+        difficulty: .hard
+    )
+
+    universe.fleets = [fleet]
+    universe.reports = [report]
+
+    try repository.save(universe, wallClockDate: Date(timeIntervalSince1970: 8_000), settings: settings)
+    let loaded = try repository.load()
+
+    requireEqual(loaded.universe.fleets, [fleet], "Repository should preserve active fleets through save/load")
+    requireEqual(loaded.universe.reports, [report], "Repository should preserve reports through save/load")
+    requireEqual(loaded.settings, settings, "Repository should preserve settings with fleets and reports")
+    requireEqual(loaded.universe, universe, "Repository should preserve the full universe with fleet/report state")
+}
+
 func testLoadedEnvelopePreparesOfflineCatchUpWithoutSavingUntilExplicitWrite() throws {
     let directory = uniqueTemporaryDirectory()
     let repository = JSONSaveRepository(saveDirectory: directory)
@@ -384,6 +440,7 @@ func testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode() throws {
 
 try testRepositorySavesAndLoadsUniverse()
 try testRepositorySavesAndLoadsQueueMetadata()
+try testRepositorySavesAndLoadsFleetsReportsAndSettings()
 try testLoadedEnvelopePreparesOfflineCatchUpWithoutSavingUntilExplicitWrite()
 testRepositoryReportsMissingSave()
 try testRepositoryRejectsUnsupportedSchema()
