@@ -217,6 +217,24 @@ func testSeededGeneratorProducesDeterministicDistinctSequences() {
     require(firstSequence != differentSequence, "Different seeds should produce different generator sequences")
 }
 
+func testSeededGeneratorEqualityTracksSeedAndState() {
+    let first = SeededGenerator(seed: 21)
+    let second = SeededGenerator(seed: 21)
+    let different = SeededGenerator(seed: 22)
+
+    requireEqual(first, second, "Generators with the same seed should compare equal before advancing")
+    require(first != different, "Generators with different seeds should not compare equal")
+
+    var advanced = first
+    var advancedSame = second
+    _ = advanced.next()
+
+    require(first != advanced, "Advanced generator state should not compare equal to its initial state")
+
+    _ = advancedSame.next()
+    requireEqual(advanced, advancedSame, "Generators advanced the same number of steps should compare equal")
+}
+
 func testSeededGeneratorNextIntRespectsClosedRanges() {
     var generator = SeededGenerator(seed: 42)
 
@@ -306,6 +324,7 @@ testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
 try testUniverseModelRoundTripsThroughJSON()
 try testPlanetEnumDictionaryDecodesRawValueKeysAndRejectsUnknownKeys()
 testSeededGeneratorProducesDeterministicDistinctSequences()
+testSeededGeneratorEqualityTracksSeedAndState()
 testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
 print("OGameCoreTests passed")
