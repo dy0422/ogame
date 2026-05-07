@@ -767,6 +767,12 @@ func makeQueueUniverse(
     )
 }
 
+func fastSkirmishRules(offlineChunkInterval: TimeInterval) -> RuleSet {
+    var ruleSet = RuleSet.fastSkirmish
+    ruleSet.offlineChunkInterval = offlineChunkInterval
+    return ruleSet
+}
+
 func testQueueEngineStartsBuildingUpgradeAndPaysCost() {
     var universe = makeQueueUniverse(
         resources: ResourceBundle(metal: 1_000, crystal: 1_000, deuterium: 1_000),
@@ -1396,6 +1402,168 @@ func testSimulationTickAcceptsHugeFinitePositiveDeltas() {
     )
 }
 
+func testOfflineCatchUpUsesBoundedChunksAndMinimumChunkInterval() {
+    let now = Date(timeIntervalSince1970: 1_000)
+    var boundedUniverse = makeQueueUniverse(ruleSet: fastSkirmishRules(offlineChunkInterval: 120))
+
+    let boundedSummary = OfflineSimulationEngine.catchUp(
+        universe: &boundedUniverse,
+        elapsed: 500,
+        now: now
+    )
+
+    requireEqual(boundedSummary.elapsedSeconds, 500, "Offline catch-up should process the requested elapsed time")
+    requireEqual(boundedSummary.processedChunks, 5, "Offline catch-up should split elapsed time into bounded chunks and one remainder")
+    requireEqual(boundedUniverse.gameTime, 500, "Offline catch-up chunks should advance the universe by the full capped elapsed time")
+    requireEqual(boundedUniverse.lastSimulatedWallClockTime, now, "Offline catch-up should store the wall-clock time it caught up to")
+
+    var minimumUniverse = makeQueueUniverse(ruleSet: fastSkirmishRules(offlineChunkInterval: 10))
+    let minimumSummary = OfflineSimulationEngine.catchUp(
+        universe: &minimumUniverse,
+        elapsed: 150,
+        now: now
+    )
+
+    requireEqual(minimumSummary.processedChunks, 3, "Offline catch-up should clamp chunk interval to at least sixty seconds")
+    requireEqual(minimumUniverse.gameTime, 150, "Minimum chunk interval should still process the exact elapsed time")
+}
+
+func testOfflineCatchUpProducesResourcesWithoutFloodingEvents() {
+    let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000d1")!)
+    let planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000d2")!),
+        name: "Offline Mine",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 11),
+        ownerID: playerID,
+        resources: .zero,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.metalMine: 1, .solarPlant: 1]
+    )
+    var universe = makeEconomyUniverse(
+        planets: [planet],
+        factions: [
+            Faction(
+                id: playerID,
+                name: "Player",
+                kind: .player,
+                strategy: .balanced,
+                ownedPlanetIDs: [planet.id]
+            )
+        ]
+    )
+    universe.ruleSet = fastSkirmishRules(offlineChunkInterval: 300)
+
+    let summary = OfflineSimulationEngine.catchUp(
+        universe: &universe,
+        elapsed: 3_600,
+        now: Date(timeIntervalSince1970: 2_000)
+    )
+
+    requireApproxEqual(universe.planets[0].resources.metal, 180, "Offline catch-up should produce owned-planet resources")
+    requireEqual(summary.processedChunks, 12, "One hour at five-minute offline chunks should process twelve chunks")
+    requireEqual(summary.completedConstructionCount, 0, "Resource-only catch-up should not report construction completions")
+    requireEqual(summary.completedResearchCount, 0, "Resource-only catch-up should not report research completions")
+    requireEqual(summary.generatedEventCount, 24, "Offline catch-up should count per-chunk economy and simulation events")
+    requireEqual(summary.recordedEventCount, 1, "Offline catch-up should record one final summary event")
+    requireEqual(universe.events.count, 1, "Offline catch-up should squash per-chunk events into one feed item")
+    requireEqual(universe.events[0].title, "Offline Catch-Up Complete", "Offline catch-up should record a deterministic summary title")
+}
+
+func testOfflineCatchUpCompletesQueuesAndSummarizesCompletionCounts() {
+    var universe = makeQueueUniverse(ruleSet: fastSkirmishRules(offlineChunkInterval: 300))
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &universe, kind: .solarPlant),
+        QueueResult.queued,
+        "Building queue should start before offline completion test"
+    )
+    requireEqual(
+        QueueEngine.startResearch(for: queuePlayerID(), in: &universe, technology: .computer),
+        QueueResult.queued,
+        "Research queue should start before offline completion test"
+    )
+
+    let summary = OfflineSimulationEngine.catchUp(
+        universe: &universe,
+        elapsed: 60,
+        now: Date(timeIntervalSince1970: 3_000)
+    )
+
+    requireEqual(universe.planets[0].buildQueue, [], "Offline catch-up should remove completed construction queue items")
+    requireEqual(universe.factions[0].researchQueue, [], "Offline catch-up should remove completed research queue items")
+    requireEqual(universe.planets[0].buildingLevels[.solarPlant], 1, "Offline catch-up should apply completed construction levels")
+    requireEqual(universe.factions[0].technology.levels[.computer], 1, "Offline catch-up should apply completed research levels")
+    requireEqual(summary.completedConstructionCount, 1, "Offline catch-up summary should count completed construction")
+    requireEqual(summary.completedResearchCount, 1, "Offline catch-up summary should count completed research")
+    requireEqual(summary.generatedEventCount, 4, "Offline catch-up should count completion, economy, and simulation events generated by ticks")
+    requireEqual(universe.events.map(\.title), ["Offline Catch-Up Complete"], "Offline catch-up should leave only the final summary event")
+    require(universe.events[0].message.contains("1 construction"), "Offline summary event should describe construction completions")
+    require(universe.events[0].message.contains("1 research"), "Offline summary event should describe research completions")
+}
+
+func testOfflineCatchUpIgnoresInvalidElapsedValues() {
+    let invalidElapsedValues: [TimeInterval] = [0, -1, .infinity, -.infinity, .nan]
+
+    for elapsed in invalidElapsedValues {
+        var universe = StarterUniverseFactory.makeNewGame(seed: 15, playerName: "Commander")
+        let originalUniverse = universe
+
+        let summary = OfflineSimulationEngine.catchUp(
+            universe: &universe,
+            elapsed: elapsed,
+            now: Date(timeIntervalSince1970: 4_000)
+        )
+
+        requireEqual(universe, originalUniverse, "Offline catch-up should ignore invalid elapsed value \(elapsed)")
+        requireEqual(summary.elapsedSeconds, 0, "Invalid elapsed values should return a zero elapsed summary")
+        requireEqual(summary.processedChunks, 0, "Invalid elapsed values should not process chunks")
+        requireEqual(summary.generatedEventCount, 0, "Invalid elapsed values should not generate events")
+        requireEqual(summary.recordedEventCount, 0, "Invalid elapsed values should not record summary events")
+        requireEqual(summary.didMutate, false, "Invalid elapsed values should report no mutation")
+    }
+}
+
+func testOfflineCatchUpCapsHugeElapsedValuesToOneDay() {
+    var universe = makeQueueUniverse(ruleSet: fastSkirmishRules(offlineChunkInterval: 3_600))
+
+    let summary = OfflineSimulationEngine.catchUp(
+        universe: &universe,
+        elapsed: TimeInterval.greatestFiniteMagnitude,
+        now: Date(timeIntervalSince1970: 5_000)
+    )
+
+    requireEqual(summary.elapsedSeconds, 86_400, "Offline catch-up should cap huge elapsed values to twenty-four hours")
+    requireEqual(summary.processedChunks, 24, "Offline catch-up should process the capped day in hourly chunks")
+    requireEqual(universe.gameTime, 86_400, "Offline catch-up should advance only the capped elapsed time")
+    requireEqual(summary.didMutate, true, "Capped positive elapsed catch-up should report mutation")
+}
+
+func testOfflineCatchUpSummaryIsCodableEquatableAndDeterministic() throws {
+    var first = makeQueueUniverse(ruleSet: fastSkirmishRules(offlineChunkInterval: 60))
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &first, kind: .solarPlant),
+        QueueResult.queued,
+        "Building queue should start before summary determinism test"
+    )
+    let data = try JSONEncoder().encode(first)
+    var second = try JSONDecoder().decode(Universe.self, from: data)
+    let now = Date(timeIntervalSince1970: 6_000)
+
+    let firstSummary = OfflineSimulationEngine.catchUp(universe: &first, elapsed: 60, now: now)
+    let secondSummary = OfflineSimulationEngine.catchUp(universe: &second, elapsed: 60, now: now)
+    let summaryData = try JSONEncoder().encode(firstSummary)
+    let decodedSummary = try JSONDecoder().decode(OfflineCatchUpSummary.self, from: summaryData)
+
+    requireEqual(firstSummary, secondSummary, "Offline catch-up summaries should be deterministic across save/load equality")
+    requireEqual(decodedSummary, firstSummary, "Offline catch-up summary should round-trip through JSON")
+    requireEqual(first, second, "Offline catch-up events should be deterministic across save/load equality")
+    requireEqual(firstSummary.elapsedSeconds, 60, "Offline catch-up summary should expose elapsed seconds")
+    requireEqual(firstSummary.processedChunks, 1, "Offline catch-up summary should expose processed chunks")
+    requireEqual(firstSummary.completedConstructionCount, 1, "Offline catch-up summary should expose completed construction count")
+    requireEqual(firstSummary.completedResearchCount, 0, "Offline catch-up summary should expose completed research count")
+    require(firstSummary.generatedEventCount > firstSummary.recordedEventCount, "Offline catch-up summary should expose squashed event counts")
+    requireEqual(firstSummary.didMutate, true, "Offline catch-up summary should expose whether catch-up mutated the universe")
+}
+
 try testEntityIDsAreCodableAndEquatable()
 testResourceBundleClampsToStorageLimits()
 testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
@@ -1438,4 +1606,10 @@ testSimulationTickAdvancesGameTimeAndRecordsEvent()
 testSimulationTickIgnoresNonPositiveDeltas()
 testSimulationTickIgnoresNonFiniteDeltas()
 testSimulationTickAcceptsHugeFinitePositiveDeltas()
+testOfflineCatchUpUsesBoundedChunksAndMinimumChunkInterval()
+testOfflineCatchUpProducesResourcesWithoutFloodingEvents()
+testOfflineCatchUpCompletesQueuesAndSummarizesCompletionCounts()
+testOfflineCatchUpIgnoresInvalidElapsedValues()
+testOfflineCatchUpCapsHugeElapsedValuesToOneDay()
+try testOfflineCatchUpSummaryIsCodableEquatableAndDeterministic()
 print("OGameCoreTests passed")
