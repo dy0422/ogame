@@ -25,6 +25,20 @@ func requireApproxEqual(_ actual: ResourceBundle, _ expected: ResourceBundle, _ 
     requireApproxEqual(actual.deuterium, expected.deuterium, "\(message) deuterium", accuracy: accuracy)
 }
 
+func requireRelation(
+    from factionID: FactionID,
+    toward otherFactionID: FactionID,
+    in universe: Universe,
+    _ message: String
+) -> FactionRelation {
+    let faction = requireFaction(factionID, in: universe, "\(message) source faction")
+    guard let relation = faction.relations.first(where: { $0.factionID == otherFactionID }) else {
+        fatalError(message)
+    }
+
+    return relation
+}
+
 func resourceTotal(_ resources: ResourceBundle) -> Double {
     resources.metal + resources.crystal + resources.deuterium
 }
@@ -1167,6 +1181,146 @@ func testStrategicStateRoundTripsThroughJSONAndDefaultsWhenMissing() throws {
     requireEqual(olderDecoded.victoryState, VictoryState(), "Older universe JSON should default missing victory state")
 }
 
+func testExplorationAndRelationStateRoundTripsAndDefaultsWhenMissing() throws {
+    let playerID = strategicPlayerID()
+    let rivalID = strategicAIID()
+    let targetID = strategicPlanetID(91)
+    let postures = RelationPosture.allCases
+    var universe = makeStrategicUniverse()
+    universe.explorationRecords = [
+        ExplorationRecord(
+            factionID: playerID,
+            targetPlanetID: targetID,
+            exploredAt: 240,
+            reward: ResourceBundle(metal: 75, crystal: 20, deuterium: 5),
+            discoveredResources: ResourceBundle(metal: 900, crystal: 100, deuterium: 40),
+            discoveredDebris: ResourceBundle(metal: 25, crystal: 10),
+            discoveredOwnerID: nil,
+            discoveredNeutral: true
+        )
+    ]
+    universe.factions[0].relations = [
+        FactionRelation(factionID: rivalID, posture: .wary, threatScore: 1, lastInteractionTime: 120, attackCount: 1)
+    ]
+
+    let data = try JSONEncoder().encode(universe)
+    let decoded = try JSONDecoder().decode(Universe.self, from: data)
+    let decodedPostures = try JSONDecoder().decode([RelationPosture].self, from: try JSONEncoder().encode(postures))
+    let sparseRelationJSON = """
+    {
+      "factionID": { "rawValue": "00000000-0000-0000-0000-0000000006af" },
+      "threatScore": -4,
+      "lastInteractionTime": -30,
+      "attackCount": -2
+    }
+    """
+    let sparseRelation = try JSONDecoder().decode(FactionRelation.self, from: Data(sparseRelationJSON.utf8))
+
+    requireEqual(decoded.explorationRecords, universe.explorationRecords, "Exploration records should round-trip through JSON")
+    requireEqual(decoded.factions[0].relations, universe.factions[0].relations, "Faction relation memory should round-trip through JSON")
+    require(decoded.factions[0].relations.allSatisfy { $0.threatScore >= 0 }, "Relation threat scores should remain nonnegative")
+    requireEqual(decodedPostures, [.neutral, .wary, .hostile, .pressured], "Relation postures should expose neutral, wary, hostile, and pressured")
+    requireEqual(sparseRelation.posture, .neutral, "Sparse relation JSON should default posture to neutral")
+    requireEqual(sparseRelation.threatScore, 0, "Sparse relation JSON should clamp negative threat")
+    requireEqual(sparseRelation.lastInteractionTime, 0, "Sparse relation JSON should clamp negative interaction time")
+    requireEqual(sparseRelation.attackCount, 0, "Sparse relation JSON should clamp negative attack count")
+
+    let olderUniverseJSON = """
+    {
+      "id": { "rawValue": "00000000-0000-0000-0000-0000000006a0" },
+      "name": "Older Relations Universe",
+      "seed": 21,
+      "gameTime": 45,
+      "playerFactionID": { "rawValue": "00000000-0000-0000-0000-0000000006a1" },
+      "factions": [
+        {
+          "id": { "rawValue": "00000000-0000-0000-0000-0000000006a1" },
+          "name": "Player",
+          "kind": "player",
+          "strategy": "balanced",
+          "technology": { "levels": {} },
+          "ownedPlanetIDs": [
+            { "rawValue": "00000000-0000-0000-0000-0000000006a2" }
+          ]
+        }
+      ],
+      "planets": [
+        {
+          "id": { "rawValue": "00000000-0000-0000-0000-0000000006a2" },
+          "name": "Homeworld",
+          "coordinate": { "galaxy": 1, "system": 1, "position": 4 },
+          "ownerID": { "rawValue": "00000000-0000-0000-0000-0000000006a1" },
+          "resources": { "metal": 100, "crystal": 50, "deuterium": 25 },
+          "storage": { "metal": 10000, "crystal": 10000, "deuterium": 10000 },
+          "energy": { "produced": 20, "used": 8 },
+          "buildingLevels": {},
+          "shipInventory": {},
+          "defenseInventory": {}
+        }
+      ],
+      "fleets": [],
+      "events": [],
+      "ruleSet": {
+        "id": "fast-skirmish-v1",
+        "displayName": "Fast Skirmish",
+        "baseTickInterval": 1,
+        "offlineChunkInterval": 300
+      }
+    }
+    """
+
+    let olderDecoded = try JSONDecoder().decode(Universe.self, from: Data(olderUniverseJSON.utf8))
+    requireEqual(olderDecoded.explorationRecords, [], "Older universe JSON should default missing exploration records to empty")
+    requireEqual(olderDecoded.factions[0].relations, [], "Older faction JSON should default missing relations to empty")
+}
+
+func testStrategicExplorationRecordsAreFilteredByFaction() {
+    let playerID = strategicPlayerID()
+    let aiID = strategicAIID()
+    let playerTargetID = strategicPlanetID(41)
+    let aiTargetID = strategicPlanetID(42)
+    var universe = makeStrategicUniverse()
+    universe.explorationRecords = [
+        ExplorationRecord(
+            factionID: playerID,
+            targetPlanetID: playerTargetID,
+            exploredAt: 180,
+            reward: ResourceBundle(metal: 30),
+            discoveredResources: ResourceBundle(metal: 100, crystal: 50, deuterium: 20),
+            discoveredDebris: ResourceBundle(metal: 25),
+            discoveredNeutral: true
+        ),
+        ExplorationRecord(
+            factionID: aiID,
+            targetPlanetID: aiTargetID,
+            exploredAt: 240,
+            reward: ResourceBundle(crystal: 45),
+            discoveredResources: ResourceBundle(metal: 777, crystal: 333, deuterium: 111),
+            discoveredDebris: ResourceBundle(crystal: 99),
+            discoveredNeutral: true
+        )
+    ]
+
+    let playerRecords = StrategicEngine.explorationRecords(for: playerID, in: universe)
+    let aiRecords = StrategicEngine.explorationRecords(for: aiID, in: universe)
+    StrategicEngine.updateStrategicState(in: &universe)
+
+    requireEqual(playerRecords.map(\.targetPlanetID), [playerTargetID], "Player exploration accessor should return only player records")
+    requireEqual(aiRecords.map(\.targetPlanetID), [aiTargetID], "AI exploration accessor should return only AI records")
+    requireEqual(playerRecords[0].discoveredResources, ResourceBundle(metal: 100, crystal: 50, deuterium: 20), "Player filtered records should preserve own discoveries")
+    require(playerRecords.allSatisfy { $0.discoveredResources.metal != 777 }, "Player filtered records should not reveal rival discoveries")
+    requireEqual(
+        requireVictoryProgress(universe.victoryState, factionID: playerID, route: .exploration).currentValue,
+        1,
+        "Player exploration progress should use player records"
+    )
+    requireEqual(
+        requireVictoryProgress(universe.victoryState, factionID: aiID, route: .exploration).currentValue,
+        1,
+        "AI exploration progress should use AI records"
+    )
+}
+
 func testStrategicRankingsClampInvalidNumericInputs() {
     let playerID = strategicPlayerID()
     let planetID = strategicPlanetID(70)
@@ -2091,6 +2245,86 @@ func testExploreMissionAdvancesStrategicExplorationVictoryThroughSimulationTick(
     requireEqual(universe.events.filter { $0.kind == .victory }.count, 1, "Exploration victory should announce once through simulation tick")
 }
 
+func testExplorationMissionRecordsBoundedDiscoveriesAndFeedsProgress() {
+    var universe = makeFleetUniverse(
+        targetResources: ResourceBundle(metal: 900, crystal: 300, deuterium: 75),
+        targetDebris: ResourceBundle(metal: 120, crystal: 40)
+    )
+    let targetID = fleetPlanetID(2)
+    universe.victoryState.exploredPlanetIDs = [targetID, targetID]
+
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: targetID,
+        in: &universe,
+        mission: .explore,
+        ships: [.espionageProbe: 1],
+        cargo: .zero
+    )
+    guard case .launched(let launchedFleet) = launch else {
+        fatalError("Exploration fleet should launch for discovery recording")
+    }
+
+    universe.gameTime = launchedFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+    StrategicEngine.updateStrategicState(in: &universe)
+
+    requireEqual(universe.explorationRecords.count, 1, "Exploration should keep one record per faction and target")
+    let record = universe.explorationRecords[0]
+    requireEqual(record.factionID, fleetPlayerID(), "Exploration record should identify the exploring faction")
+    requireEqual(record.targetPlanetID, targetID, "Exploration record should identify the explored planet")
+    requireEqual(record.exploredAt, launchedFleet.arrivalTime, "Exploration record should preserve arrival time")
+    require(record.reward != .zero, "Exploration record should summarize the resource reward")
+    requireEqual(record.reward, universe.fleets[0].cargo, "Exploration record reward should match returning cargo")
+    requireEqual(record.discoveredResources, ResourceBundle(metal: 900, crystal: 300, deuterium: 75), "Exploration should discover visible target resources")
+    requireEqual(record.discoveredDebris, ResourceBundle(metal: 120, crystal: 40), "Exploration should discover target debris")
+    requireEqual(record.discoveredOwnerID, nil, "Neutral exploration should not invent an owner")
+    requireEqual(record.discoveredNeutral, true, "Exploration should mark neutral targets")
+    requireEqual(universe.victoryState.exploredPlanetIDs, [targetID], "Strategic state should dedupe explored target IDs")
+    requireEqual(
+        requireVictoryProgress(universe.victoryState, factionID: fleetPlayerID(), route: .exploration).currentValue,
+        1,
+        "Exploration records should feed exploration progress"
+    )
+}
+
+func testExploreMissionCreatesExplorationReport() {
+    var universe = makeFleetUniverse(
+        targetResources: ResourceBundle(metal: 900, crystal: 300, deuterium: 75),
+        targetDebris: ResourceBundle(metal: 120, crystal: 40)
+    )
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .explore,
+        ships: [.espionageProbe: 1],
+        cargo: .zero
+    )
+    guard case .launched(let launchedFleet) = launch else {
+        fatalError("Exploration fleet should launch for report creation")
+    }
+
+    universe.gameTime = launchedFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    guard let report = universe.reports.last else {
+        fatalError("Exploration should create a report")
+    }
+
+    requireEqual(report.kind, .exploration, "Exploration should create an exploration report")
+    requireEqual(report.time, launchedFleet.arrivalTime, "Exploration report should use arrival time")
+    require(report.title.contains("[1:2:6]"), "Exploration report title should identify the target coordinate")
+    require(report.summary.contains("reward"), "Exploration report should summarize the reward")
+    require(report.summary.contains("neutral"), "Exploration report should summarize neutral status")
+    requireEqual(report.participants.count, 1, "Exploration report should include the explorer")
+    requireEqual(report.participants[0].role, .observer, "Exploration report participant should be an observer")
+    requireEqual(report.participants[0].factionID, fleetPlayerID(), "Exploration report should expose the exploring faction")
+    requireEqual(report.participants[0].planetID, fleetPlanetID(2), "Exploration report should expose the explored target")
+    requireEqual(report.loot, universe.fleets[0].cargo, "Exploration report loot should match returning reward cargo")
+    requireEqual(report.debris, ResourceBundle(metal: 120, crystal: 40), "Exploration report should include discovered debris")
+}
+
 func testEspionageMissionCreatesStableReportWithoutChangingTargetState() throws {
     var first = makeCombatUniverse()
     let launch = FleetEngine.launchFleet(
@@ -2128,6 +2362,175 @@ func testEspionageMissionCreatesStableReportWithoutChangingTargetState() throws 
     requireEqual(first.events.last?.kind, .intelligence, "Espionage should record an intelligence event")
     requireEqual(first.fleets.first?.phase, .returning, "Espionage probe should deterministically return")
     requireEqual(first.fleets.first?.ships[.espionageProbe], 1, "Returning espionage fleet should preserve the probe")
+}
+
+func testTransportAndExplorationDoNotShiftFactionRelations() {
+    var transportUniverse = makeCombatUniverse()
+    let transport = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &transportUniverse,
+        mission: .transport,
+        ships: [.smallCargo: 1],
+        cargo: ResourceBundle(metal: 100)
+    )
+    guard case .launched(let transportFleet) = transport else {
+        fatalError("Transport fleet should launch toward rival planet")
+    }
+    transportUniverse.gameTime = transportFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &transportUniverse)
+    requireEqual(transportUniverse.factions.flatMap(\.relations), [], "Transport should not create relation memory")
+
+    var explorationUniverse = makeCombatUniverse()
+    let exploration = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &explorationUniverse,
+        mission: .explore,
+        ships: [.espionageProbe: 1],
+        cargo: .zero
+    )
+    guard case .launched(let explorationFleet) = exploration else {
+        fatalError("Exploration fleet should launch toward rival planet")
+    }
+    explorationUniverse.gameTime = explorationFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &explorationUniverse)
+    requireEqual(explorationUniverse.factions.flatMap(\.relations), [], "Exploration should not create hostility memory")
+}
+
+func testAttackShiftsFactionRelationsWithoutHiddenTargetDetails() {
+    var universe = makeCombatUniverse()
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .attack,
+        ships: [.lightFighter: 8, .smallCargo: 2],
+        cargo: .zero
+    )
+    guard case .launched(let launchedFleet) = launch else {
+        fatalError("Attack fleet should launch for relation update")
+    }
+
+    universe.gameTime = launchedFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    let attackerView = requireRelation(from: fleetPlayerID(), toward: fleetEnemyID(), in: universe, "Attacker should remember pressure on defender")
+    let defenderView = requireRelation(from: fleetEnemyID(), toward: fleetPlayerID(), in: universe, "Defender should remember hostile attacker")
+    requireEqual(attackerView.posture, .pressured, "Attacker relation should record applied pressure")
+    requireEqual(defenderView.posture, .hostile, "Defender relation should move toward hostile after attack")
+    requireEqual(attackerView.threatScore, 1, "Attacker pressure score should increment once")
+    requireEqual(defenderView.threatScore, 1, "Defender threat score should increment once")
+    requireEqual(attackerView.attackCount, 1, "Attacker relation should summarize attack count")
+    requireEqual(defenderView.attackCount, 1, "Defender relation should summarize attack count")
+    requireEqual(attackerView.lastInteractionTime, launchedFleet.arrivalTime, "Attacker relation should expose interaction time")
+    requireEqual(defenderView.lastInteractionTime, launchedFleet.arrivalTime, "Defender relation should expose interaction time")
+    require(!attackerView.summary.contains(fleetPlanetID(2).rawValue.uuidString), "Relation summaries should not expose target planet details")
+    require(!defenderView.summary.contains(fleetPlanetID(2).rawValue.uuidString), "Threat summaries should not expose target planet details")
+}
+
+func testRepeatedAttacksIncrementThreatWithoutDuplicateRelations() {
+    var universe = makeCombatUniverse()
+
+    for _ in 0..<2 {
+        universe.fleets = []
+        universe.planets[0].shipInventory[.lightFighter] = 8
+        universe.planets[0].shipInventory[.smallCargo] = 2
+        let launch = FleetEngine.launchFleet(
+            from: fleetPlanetID(1),
+            to: fleetPlanetID(2),
+            in: &universe,
+            mission: .attack,
+            ships: [.lightFighter: 8, .smallCargo: 2],
+            cargo: .zero
+        )
+        guard case .launched(let launchedFleet) = launch else {
+            fatalError("Repeated attack fleet should launch")
+        }
+        universe.gameTime = launchedFleet.arrivalTime
+        FleetEngine.resolveDueFleets(in: &universe)
+    }
+
+    let attackerRelations = requireFaction(fleetPlayerID(), in: universe, "Attacker should remain").relations
+    let defenderRelations = requireFaction(fleetEnemyID(), in: universe, "Defender should remain").relations
+    requireEqual(attackerRelations.filter { $0.factionID == fleetEnemyID() }.count, 1, "Repeated attacks should not duplicate attacker relation rows")
+    requireEqual(defenderRelations.filter { $0.factionID == fleetPlayerID() }.count, 1, "Repeated attacks should not duplicate defender relation rows")
+    requireEqual(attackerRelations[0].threatScore, 2, "Repeated attacks should increment attacker pressure score")
+    requireEqual(defenderRelations[0].threatScore, 2, "Repeated attacks should increment defender threat score")
+    requireEqual(attackerRelations[0].attackCount, 2, "Repeated attacks should increment attacker attack summary")
+    requireEqual(defenderRelations[0].attackCount, 2, "Repeated attacks should increment defender attack summary")
+}
+
+func testFactionRelationsNormalizeDuplicatesOnDecodeAndAttackUpdate() throws {
+    let factionJSON = """
+    {
+      "id": { "rawValue": "00000000-0000-0000-0000-000000000301" },
+      "name": "Duplicate Relations",
+      "kind": "player",
+      "strategy": "balanced",
+      "technology": { "levels": {} },
+      "ownedPlanetIDs": [],
+      "relations": [
+        {
+          "factionID": { "rawValue": "00000000-0000-0000-0000-000000000302" },
+          "posture": "wary",
+          "threatScore": 2,
+          "lastInteractionTime": 50,
+          "attackCount": 1
+        },
+        {
+          "factionID": { "rawValue": "00000000-0000-0000-0000-000000000302" },
+          "posture": "neutral",
+          "threatScore": 4,
+          "lastInteractionTime": 40,
+          "attackCount": 3
+        },
+        {
+          "factionID": { "rawValue": "00000000-0000-0000-0000-000000000333" },
+          "posture": "hostile",
+          "threatScore": 5000,
+          "lastInteractionTime": 60,
+          "attackCount": 5000
+        }
+      ]
+    }
+    """
+    let decoded = try JSONDecoder().decode(Faction.self, from: Data(factionJSON.utf8))
+
+    requireEqual(decoded.relations.count, 2, "Decoded faction relations should merge duplicate rows")
+    requireEqual(decoded.relations[0].factionID, fleetEnemyID(), "Merged relation rows should sort deterministically by faction ID")
+    requireEqual(decoded.relations[0].posture, .hostile, "Merged relation posture should be derived from threat")
+    requireEqual(decoded.relations[0].threatScore, 4, "Merged relation should keep the highest threat")
+    requireEqual(decoded.relations[0].lastInteractionTime, 50, "Merged relation should keep latest interaction time")
+    requireEqual(decoded.relations[0].attackCount, 4, "Merged relation should sum attack counts")
+    requireEqual(decoded.relations[1].threatScore, 999, "Merged relation threat should be capped")
+    requireEqual(decoded.relations[1].attackCount, 999, "Merged relation attack count should be capped")
+
+    var universe = makeCombatUniverse()
+    universe.factions[1].relations = [
+        FactionRelation(factionID: fleetPlayerID(), posture: .wary, threatScore: 1, lastInteractionTime: 20, attackCount: 1),
+        FactionRelation(factionID: fleetPlayerID(), posture: .neutral, threatScore: 2, lastInteractionTime: 25, attackCount: 2)
+    ]
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .attack,
+        ships: [.lightFighter: 8, .smallCargo: 2],
+        cargo: .zero
+    )
+    guard case .launched(let launchedFleet) = launch else {
+        fatalError("Attack fleet should launch for duplicate relation update")
+    }
+    universe.gameTime = launchedFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    let defenderRelations = requireFaction(fleetEnemyID(), in: universe, "Defender should remain after relation update").relations
+    requireEqual(defenderRelations.filter { $0.factionID == fleetPlayerID() }.count, 1, "Attack update should normalize duplicate relation rows")
+    requireEqual(defenderRelations[0].posture, .hostile, "Attack update should keep defender hostile toward attacker")
+    requireEqual(defenderRelations[0].threatScore, 3, "Attack update should increment merged threat once")
+    requireEqual(defenderRelations[0].lastInteractionTime, launchedFleet.arrivalTime, "Attack update should keep latest interaction time")
+    requireEqual(defenderRelations[0].attackCount, 4, "Attack update should increment merged attack count once")
 }
 
 func testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense() {
@@ -3742,6 +4145,8 @@ testStrategicRankingsScoreFactionStrengthsAndVictoryProgress()
 testStrategicVictoryRoutesTriggerForEconomyTechnologyDominationAndExploration()
 testSimulationContinuesTickingAfterVictoryWithoutRepeatingVictoryEvent()
 try testStrategicStateRoundTripsThroughJSONAndDefaultsWhenMissing()
+try testExplorationAndRelationStateRoundTripsAndDefaultsWhenMissing()
+testStrategicExplorationRecordsAreFilteredByFaction()
 testStrategicRankingsClampInvalidNumericInputs()
 testEconomyProductionPerHourUsesMineLevelsAndEnergyRatio()
 testEconomyOneHourTickIncreasesOwnedPlanetResources()
@@ -3783,7 +4188,13 @@ testReturningFleetDoesNotLoseCargoWhenOriginStorageIsFull()
 testRecycleMissionCollectsDebrisFromTargetPlanet()
 try testExploreMissionCreatesDeterministicEventAndReward()
 testExploreMissionAdvancesStrategicExplorationVictoryThroughSimulationTick()
+testExplorationMissionRecordsBoundedDiscoveriesAndFeedsProgress()
+testExploreMissionCreatesExplorationReport()
 try testEspionageMissionCreatesStableReportWithoutChangingTargetState()
+testTransportAndExplorationDoNotShiftFactionRelations()
+testAttackShiftsFactionRelationsWithoutHiddenTargetDetails()
+testRepeatedAttacksIncrementThreatWithoutDuplicateRelations()
+try testFactionRelationsNormalizeDuplicatesOnDecodeAndAttackUpdate()
 testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense()
 testAttackReturnCargoIsCappedAfterCargoShipLosses()
 testAttackWithMissingCombatRulesDoesNotMutateTargetOrCreateUnbalancedReport()

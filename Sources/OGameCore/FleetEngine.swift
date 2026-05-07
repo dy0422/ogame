@@ -279,7 +279,9 @@ public enum FleetEngine {
         case .explore:
             let reward = explorationReward(for: fleet, universe: universe)
             returningFleet.cargo = safeAdding(fleet.cargo, reward)
-            recordExploredTarget(for: fleet, in: &universe)
+            if let record = recordExploredTarget(for: fleet, reward: reward, in: &universe) {
+                universe.reports.append(explorationReport(for: fleet, record: record, in: universe))
+            }
             universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .exploration, title: "Exploration Complete"))
         case .colonize:
             if let targetIndex = targetPlanetIndex(for: fleet, in: universe),
@@ -298,11 +300,14 @@ public enum FleetEngine {
                 universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .system, title: "Colony Established"))
             }
         case .attack:
+            let defenderID = targetPlanetIndex(for: fleet, in: universe).flatMap { universe.planets[$0].ownerID }
             guard let combatReturn = CombatEngine.resolveAttack(fleet, in: &universe) else {
+                recordAttackRelations(attackerID: fleet.ownerID, defenderID: defenderID, time: fleet.arrivalTime, in: &universe)
                 universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .combat, title: "Combat Resolved"))
                 return nil
             }
             returningFleet = combatReturn
+            recordAttackRelations(attackerID: fleet.ownerID, defenderID: defenderID, time: fleet.arrivalTime, in: &universe)
             universe.events.append(missionEvent(for: returningFleet, time: fleet.arrivalTime, kind: .combat, title: "Combat Resolved"))
         case .espionage:
             guard let espionageReturn = CombatEngine.resolveEspionage(fleet, in: &universe) else {
@@ -426,19 +431,156 @@ public enum FleetEngine {
         return universe.planets.firstIndex(where: { $0.coordinate == fleet.target })
     }
 
-    private static func recordExploredTarget(for fleet: Fleet, in universe: inout Universe) {
-        guard fleet.ownerID == universe.playerFactionID,
-              let targetIndex = targetPlanetIndex(for: fleet, in: universe)
+    private static func recordExploredTarget(for fleet: Fleet, reward: ResourceBundle, in universe: inout Universe) -> ExplorationRecord? {
+        guard let targetIndex = targetPlanetIndex(for: fleet, in: universe)
         else {
+            return nil
+        }
+
+        let target = universe.planets[targetIndex]
+        let record = ExplorationRecord(
+            factionID: fleet.ownerID,
+            targetPlanetID: target.id,
+            exploredAt: fleet.arrivalTime,
+            reward: reward,
+            discoveredResources: target.resources,
+            discoveredDebris: target.debrisField,
+            discoveredOwnerID: target.ownerID,
+            discoveredNeutral: target.ownerID == nil
+        )
+        upsertExplorationRecord(record, in: &universe)
+
+        guard fleet.ownerID == universe.playerFactionID,
+              !universe.victoryState.exploredPlanetIDs.contains(target.id)
+        else {
+            return record
+        }
+
+        universe.victoryState.exploredPlanetIDs.append(target.id)
+        return record
+    }
+
+    private static func upsertExplorationRecord(_ record: ExplorationRecord, in universe: inout Universe) {
+        universe.explorationRecords.removeAll {
+            $0.factionID == record.factionID && $0.targetPlanetID == record.targetPlanetID
+        }
+        universe.explorationRecords.append(record)
+        universe.explorationRecords.sort { lhs, rhs in
+            if lhs.exploredAt != rhs.exploredAt {
+                return lhs.exploredAt < rhs.exploredAt
+            }
+            if lhs.factionID != rhs.factionID {
+                return lhs.factionID.rawValue.uuidString < rhs.factionID.rawValue.uuidString
+            }
+            return lhs.targetPlanetID.rawValue.uuidString < rhs.targetPlanetID.rawValue.uuidString
+        }
+        if universe.explorationRecords.count > 128 {
+            universe.explorationRecords.removeFirst(universe.explorationRecords.count - 128)
+        }
+    }
+
+    private static func recordAttackRelations(
+        attackerID: FactionID,
+        defenderID: FactionID?,
+        time: TimeInterval,
+        in universe: inout Universe
+    ) {
+        guard let defenderID, defenderID != attackerID else {
             return
         }
 
-        let planetID = universe.planets[targetIndex].id
-        guard !universe.victoryState.exploredPlanetIDs.contains(planetID) else {
+        updateRelation(from: attackerID, toward: defenderID, posture: .pressured, time: time, in: &universe)
+        updateRelation(from: defenderID, toward: attackerID, posture: .hostile, time: time, in: &universe)
+    }
+
+    private static func updateRelation(
+        from sourceID: FactionID,
+        toward targetID: FactionID,
+        posture: RelationPosture,
+        time: TimeInterval,
+        in universe: inout Universe
+    ) {
+        guard let factionIndex = universe.factions.firstIndex(where: { $0.id == sourceID }) else {
             return
         }
 
-        universe.victoryState.exploredPlanetIDs.append(planetID)
+        let safeTime = time.isFinite ? max(time, 0) : 0
+        universe.factions[factionIndex].relations = FactionRelation.normalized(universe.factions[factionIndex].relations)
+        if let relationIndex = universe.factions[factionIndex].relations.firstIndex(where: { $0.factionID == targetID }) {
+            var relation = universe.factions[factionIndex].relations[relationIndex]
+            relation.posture = posture
+            relation.threatScore = incrementedNonnegative(relation.threatScore)
+            relation.attackCount = incrementedNonnegative(relation.attackCount)
+            relation.lastInteractionTime = max(relation.lastInteractionTime, safeTime)
+            universe.factions[factionIndex].relations[relationIndex] = FactionRelation(
+                factionID: relation.factionID,
+                posture: relation.posture,
+                threatScore: relation.threatScore,
+                lastInteractionTime: relation.lastInteractionTime,
+                attackCount: relation.attackCount
+            )
+        } else {
+            universe.factions[factionIndex].relations.append(
+                FactionRelation(
+                    factionID: targetID,
+                    posture: posture,
+                    threatScore: 1,
+                    lastInteractionTime: safeTime,
+                    attackCount: 1
+                )
+            )
+        }
+
+        universe.factions[factionIndex].relations.sort {
+            $0.factionID.rawValue.uuidString < $1.factionID.rawValue.uuidString
+        }
+    }
+
+    private static func incrementedNonnegative(_ value: Int) -> Int {
+        let safeValue = max(value, 0)
+        let result = safeValue.addingReportingOverflow(1)
+        return result.overflow ? FactionRelation.memoryCap : min(result.partialValue, FactionRelation.memoryCap)
+    }
+
+    private static func explorationReport(for fleet: Fleet, record: ExplorationRecord, in universe: Universe) -> Report {
+        let target = universe.planets.first { $0.id == record.targetPlanetID }
+        let explorerName = universe.factions.first { $0.id == fleet.ownerID }?.name ?? "Explorer"
+        let coordinate = target?.coordinate.displayText ?? fleet.target.displayText
+        let status = record.discoveredNeutral ? "neutral" : "occupied"
+
+        return Report(
+            id: stableUUID(
+                namespace: "000f",
+                payload: [
+                    "exploration-report",
+                    universe.id.rawValue.uuidString,
+                    fleet.id.rawValue.uuidString,
+                    record.factionID.rawValue.uuidString,
+                    record.targetPlanetID.rawValue.uuidString,
+                    String(record.exploredAt),
+                    resourcePayload(record.reward),
+                    resourcePayload(record.discoveredResources),
+                    resourcePayload(record.discoveredDebris),
+                    status
+                ].joined(separator: "|")
+            ),
+            time: record.exploredAt,
+            kind: .exploration,
+            title: "Exploration at \(coordinate)",
+            summary: "Exploration found a \(status) target; reward \(resourcePayload(record.reward)); resources \(resourcePayload(record.discoveredResources)); debris \(resourcePayload(record.discoveredDebris)).",
+            participants: [
+                ReportParticipant(
+                    role: .observer,
+                    factionID: fleet.ownerID,
+                    planetID: record.targetPlanetID,
+                    name: explorerName,
+                    beforeShips: normalizedShips(fleet.ships),
+                    afterShips: normalizedShips(fleet.ships)
+                )
+            ],
+            loot: record.reward,
+            debris: record.discoveredDebris
+        )
     }
 
     private static func collectResources(from resources: ResourceBundle, limit: Double) -> ResourceBundle {

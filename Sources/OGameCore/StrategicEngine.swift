@@ -4,6 +4,7 @@ public enum StrategicEngine {
     private static let economyVictoryTarget = 25_000.0
     private static let technologyVictoryTarget = 24.0
     private static let dominationVictoryTarget = 0.75
+    private static let maxExplorationRecords = 128
 
     public static func rankings(in universe: Universe) -> [FactionScore] {
         let progress = victoryProgress(in: universe)
@@ -29,9 +30,15 @@ public enum StrategicEngine {
         return scores
     }
 
+    public static func explorationRecords(for factionID: FactionID, in universe: Universe) -> [ExplorationRecord] {
+        normalizedExplorationRecords(in: universe)
+            .filter { $0.factionID == factionID }
+    }
+
     public static func updateStrategicState(in universe: inout Universe) {
-        let exploredPlanetIDs = normalizedExploredPlanetIDs(in: universe)
-        let progress = victoryProgress(in: universe, exploredPlanetIDs: exploredPlanetIDs)
+        universe.explorationRecords = normalizedExplorationRecords(in: universe)
+        let exploredPlanetIDs = normalizedExploredPlanetIDs(for: universe.playerFactionID, in: universe)
+        let progress = victoryProgress(in: universe, playerExploredPlanetIDs: exploredPlanetIDs)
         let previousWinner = universe.victoryState.winningFactionID
         let previousRoute = universe.victoryState.winningRoute
         let previousAchievedAt = universe.victoryState.achievedAt
@@ -166,18 +173,24 @@ public enum StrategicEngine {
     }
 
     private static func victoryProgress(in universe: Universe) -> [VictoryProgress] {
-        victoryProgress(in: universe, exploredPlanetIDs: normalizedExploredPlanetIDs(in: universe))
+        victoryProgress(
+            in: universe,
+            playerExploredPlanetIDs: normalizedExploredPlanetIDs(for: universe.playerFactionID, in: universe)
+        )
     }
 
-    private static func victoryProgress(in universe: Universe, exploredPlanetIDs: [PlanetID]) -> [VictoryProgress] {
+    private static func victoryProgress(in universe: Universe, playerExploredPlanetIDs: [PlanetID]) -> [VictoryProgress] {
         let rawInhabitedPlanetCount = universe.planets.filter { $0.ownerID != nil }.count
         let inhabitedPlanetCount = max(rawInhabitedPlanetCount, 1)
         let neutralPlanetIDs = Set(universe.planets.filter { $0.ownerID == nil }.map(\.id))
-        let exploredNeutralCount = exploredPlanetIDs.filter { neutralPlanetIDs.contains($0) }.count
         let explorationTarget = neutralPlanetIDs.count
 
         return universe.factions.flatMap { faction in
             let ownedPlanets = universe.planets.filter { $0.ownerID == faction.id }
+            let exploredPlanetIDs = faction.id == universe.playerFactionID
+                ? playerExploredPlanetIDs
+                : normalizedExploredPlanetIDs(for: faction.id, in: universe)
+            let exploredNeutralCount = exploredPlanetIDs.filter { neutralPlanetIDs.contains($0) }.count
             let economyValue = sanitizedNonnegative(economyScore(for: ownedPlanets, ruleSet: universe.ruleSet))
             let technologyValue = sanitizedNonnegative(
                 faction.technology.levels.values.reduce(0) { $0 + sanitizedQuantity($1) }
@@ -185,7 +198,7 @@ public enum StrategicEngine {
             let dominationValue = rawInhabitedPlanetCount >= 3
                 ? Double(ownedPlanets.count) / Double(inhabitedPlanetCount)
                 : 0
-            let explorationValue = explorationTarget > 0 && faction.id == universe.playerFactionID
+            let explorationValue = explorationTarget > 0
                 ? sanitizedQuantity(exploredNeutralCount)
                 : 0
 
@@ -248,18 +261,71 @@ public enum StrategicEngine {
         return min(max(current / target, 0), 1)
     }
 
-    private static func normalizedExploredPlanetIDs(in universe: Universe) -> [PlanetID] {
-        let knownPlanetIDs = Set(universe.planets.map(\.id))
-        var seen: Set<PlanetID> = []
+    private static func normalizedExploredPlanetIDs(for factionID: FactionID, in universe: Universe) -> [PlanetID] {
+        let recordPlanetIDs = explorationRecords(for: factionID, in: universe).map(\.targetPlanetID)
+        let legacyPlanetIDs = factionID == universe.playerFactionID ? universe.victoryState.exploredPlanetIDs : []
+        let exploredSet = Set(legacyPlanetIDs + recordPlanetIDs)
 
-        return universe.victoryState.exploredPlanetIDs.filter { planetID in
-            guard knownPlanetIDs.contains(planetID), !seen.contains(planetID) else {
-                return false
+        return universe.planets
+            .map(\.id)
+            .filter { exploredSet.contains($0) }
+    }
+
+    private static func normalizedExplorationRecords(in universe: Universe) -> [ExplorationRecord] {
+        let knownPlanetIDs = Set(universe.planets.map(\.id))
+        let knownFactionIDs = Set(universe.factions.map(\.id))
+        var latestByPair: [String: ExplorationRecord] = [:]
+
+        for record in universe.explorationRecords {
+            guard knownFactionIDs.contains(record.factionID),
+                  knownPlanetIDs.contains(record.targetPlanetID)
+            else {
+                continue
             }
 
-            seen.insert(planetID)
-            return true
+            let key = explorationRecordKey(factionID: record.factionID, targetPlanetID: record.targetPlanetID)
+            if let existing = latestByPair[key],
+               explorationRecordSortKey(existing) >= explorationRecordSortKey(record)
+            {
+                continue
+            }
+
+            latestByPair[key] = ExplorationRecord(
+                factionID: record.factionID,
+                targetPlanetID: record.targetPlanetID,
+                exploredAt: record.exploredAt,
+                reward: record.reward,
+                discoveredResources: record.discoveredResources,
+                discoveredDebris: record.discoveredDebris,
+                discoveredOwnerID: record.discoveredOwnerID,
+                discoveredNeutral: record.discoveredNeutral
+            )
         }
+
+        return Array(latestByPair.values
+            .sorted { lhs, rhs in
+                let lhsKey = explorationRecordSortKey(lhs)
+                let rhsKey = explorationRecordSortKey(rhs)
+                if lhsKey != rhsKey {
+                    return lhsKey < rhsKey
+                }
+
+                return explorationRecordKey(factionID: lhs.factionID, targetPlanetID: lhs.targetPlanetID) <
+                    explorationRecordKey(factionID: rhs.factionID, targetPlanetID: rhs.targetPlanetID)
+            }
+            .suffix(maxExplorationRecords))
+    }
+
+    private static func explorationRecordSortKey(_ record: ExplorationRecord) -> String {
+        [
+            String(format: "%020.6f", record.exploredAt),
+            record.factionID.rawValue.uuidString,
+            record.targetPlanetID.rawValue.uuidString
+        ].joined(separator: "|")
+    }
+
+    private static func explorationRecordKey(factionID: FactionID, targetPlanetID: PlanetID) -> String {
+        "\(factionID.rawValue.uuidString)|\(targetPlanetID.rawValue.uuidString)"
     }
 
     private static func resourceValue(_ resources: ResourceBundle) -> Double {
