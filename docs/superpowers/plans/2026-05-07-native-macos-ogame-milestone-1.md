@@ -56,6 +56,11 @@ Create this Swift project alongside the existing PHP source. Do not remove or re
 
 **Files:**
 - Create: `Package.swift`
+- Create: `Sources/OGameCore/PackageAnchor.swift`
+- Create: `Sources/OGamePersistence/PackageAnchor.swift`
+- Create: `Sources/OGameMac/main.swift`
+- Create: `Tests/OGameCoreTests/PackageAnchorTests.swift`
+- Create: `Tests/OGamePersistenceTests/PackageAnchorTests.swift`
 - Create directories: `Sources/OGameCore`, `Sources/OGamePersistence`, `Sources/OGameMac`, `Tests/OGameCoreTests`, `Tests/OGamePersistenceTests`
 
 - [ ] **Step 1: Create SwiftPM directories**
@@ -111,7 +116,55 @@ let package = Package(
 )
 ```
 
-- [ ] **Step 3: Run package description check**
+- [ ] **Step 3: Add minimal target anchors**
+
+Create minimal target anchor files so SwiftPM can describe the package before real source files are added.
+
+Create `Sources/OGameCore/PackageAnchor.swift` with:
+
+```swift
+public enum OGameCorePackageAnchor {}
+```
+
+Create `Sources/OGamePersistence/PackageAnchor.swift` with:
+
+```swift
+public enum OGamePersistencePackageAnchor {}
+```
+
+Create `Sources/OGameMac/main.swift` with:
+
+```swift
+print("NativeOGame skeleton")
+```
+
+Create `Tests/OGameCoreTests/PackageAnchorTests.swift` with:
+
+```swift
+import XCTest
+@testable import OGameCore
+
+final class OGameCorePackageAnchorTests: XCTestCase {
+    func testPackageAnchorExists() {
+        XCTAssertNotNil(OGameCorePackageAnchor.self)
+    }
+}
+```
+
+Create `Tests/OGamePersistenceTests/PackageAnchorTests.swift` with:
+
+```swift
+import XCTest
+@testable import OGamePersistence
+
+final class OGamePersistencePackageAnchorTests: XCTestCase {
+    func testPackageAnchorExists() {
+        XCTAssertNotNil(OGamePersistencePackageAnchor.self)
+    }
+}
+```
+
+- [ ] **Step 4: Run package description check**
 
 Run:
 
@@ -129,7 +182,21 @@ OGameCoreTests
 OGamePersistenceTests
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Run skeleton tests**
+
+Run:
+
+```bash
+swift test
+```
+
+Expected: output includes:
+
+```text
+Test Suite 'All tests' passed
+```
+
+- [ ] **Step 6: Commit**
 
 Run:
 
