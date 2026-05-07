@@ -11,6 +11,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
     public var planets: [Planet]
     public var fleets: [Fleet]
     public var events: [GameEvent]
+    public var reports: [Report]
     public var ruleSet: RuleSet
 
     public init(
@@ -24,6 +25,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         planets: [Planet],
         fleets: [Fleet],
         events: [GameEvent],
+        reports: [Report] = [],
         ruleSet: RuleSet
     ) {
         self.id = id
@@ -36,6 +38,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         self.planets = planets
         self.fleets = fleets
         self.events = events
+        self.reports = reports
         self.ruleSet = ruleSet
     }
 
@@ -50,6 +53,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         case planets
         case fleets
         case events
+        case reports
         case ruleSet
     }
 
@@ -66,6 +70,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         self.planets = try container.decode([Planet].self, forKey: .planets)
         self.fleets = try container.decode([Fleet].self, forKey: .fleets)
         self.events = try container.decode([GameEvent].self, forKey: .events)
+        self.reports = try container.decodeIfPresentStrict([Report].self, forKey: .reports) ?? []
         self.ruleSet = try container.decode(RuleSet.self, forKey: .ruleSet)
     }
 
@@ -82,6 +87,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         try container.encode(planets, forKey: .planets)
         try container.encode(fleets, forKey: .fleets)
         try container.encode(events, forKey: .events)
+        try container.encode(reports, forKey: .reports)
         try container.encode(ruleSet, forKey: .ruleSet)
     }
 }
@@ -587,6 +593,126 @@ public struct GameEvent: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+public struct ReportParticipant: Codable, Equatable, Sendable {
+    public enum Role: String, Codable, Sendable {
+        case attacker
+        case defender
+        case observer
+    }
+
+    public var role: Role
+    public var factionID: FactionID?
+    public var planetID: PlanetID?
+    public var name: String
+    public var beforeShips: [ShipKind: Int]
+    public var afterShips: [ShipKind: Int]
+    public var beforeDefenses: [DefenseKind: Int]
+    public var afterDefenses: [DefenseKind: Int]
+    public var losses: ResourceBundle
+
+    public init(
+        role: Role,
+        factionID: FactionID?,
+        planetID: PlanetID?,
+        name: String,
+        beforeShips: [ShipKind: Int] = [:],
+        afterShips: [ShipKind: Int] = [:],
+        beforeDefenses: [DefenseKind: Int] = [:],
+        afterDefenses: [DefenseKind: Int] = [:],
+        losses: ResourceBundle = .zero
+    ) {
+        self.role = role
+        self.factionID = factionID
+        self.planetID = planetID
+        self.name = name
+        self.beforeShips = beforeShips
+        self.afterShips = afterShips
+        self.beforeDefenses = beforeDefenses
+        self.afterDefenses = afterDefenses
+        self.losses = losses
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case role
+        case factionID
+        case planetID
+        case name
+        case beforeShips
+        case afterShips
+        case beforeDefenses
+        case afterDefenses
+        case losses
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.role = try container.decode(Role.self, forKey: .role)
+        self.factionID = try container.decodeIfPresent(FactionID.self, forKey: .factionID)
+        self.planetID = try container.decodeIfPresent(PlanetID.self, forKey: .planetID)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.beforeShips = try container.decodeRawValueDictionary(ShipKind.self, forKey: .beforeShips)
+        self.afterShips = try container.decodeRawValueDictionary(ShipKind.self, forKey: .afterShips)
+        self.beforeDefenses = try container.decodeRawValueDictionary(DefenseKind.self, forKey: .beforeDefenses)
+        self.afterDefenses = try container.decodeRawValueDictionary(DefenseKind.self, forKey: .afterDefenses)
+        self.losses = try container.decode(ResourceBundle.self, forKey: .losses)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        try container.encode(role, forKey: .role)
+        try container.encodeIfPresent(factionID, forKey: .factionID)
+        try container.encodeIfPresent(planetID, forKey: .planetID)
+        try container.encode(name, forKey: .name)
+        try container.encodeRawValueDictionary(beforeShips, forKey: .beforeShips)
+        try container.encodeRawValueDictionary(afterShips, forKey: .afterShips)
+        try container.encodeRawValueDictionary(beforeDefenses, forKey: .beforeDefenses)
+        try container.encodeRawValueDictionary(afterDefenses, forKey: .afterDefenses)
+        try container.encode(losses, forKey: .losses)
+    }
+}
+
+public struct Report: Codable, Equatable, Sendable, Identifiable {
+    public enum Kind: String, Codable, Sendable {
+        case battle
+        case espionage
+        case exploration
+    }
+
+    public var id: UUID
+    public var time: TimeInterval
+    public var kind: Kind
+    public var title: String
+    public var summary: String
+    public var participants: [ReportParticipant]
+    public var loot: ResourceBundle
+    public var debris: ResourceBundle
+    public var losses: ResourceBundle
+
+    public init(
+        id: UUID = UUID(),
+        time: TimeInterval,
+        kind: Kind,
+        title: String,
+        summary: String,
+        participants: [ReportParticipant],
+        loot: ResourceBundle = .zero,
+        debris: ResourceBundle = .zero,
+        losses: ResourceBundle = .zero
+    ) {
+        self.id = id
+        self.time = time
+        self.kind = kind
+        self.title = title
+        self.summary = summary
+        self.participants = participants
+        self.loot = loot
+        self.debris = debris
+        self.losses = losses
+    }
+}
+
 public struct RuleSet: Codable, Equatable, Sendable {
     public var id: String
     public var displayName: String
@@ -649,8 +775,9 @@ public struct RuleSet: Codable, Equatable, Sendable {
         let decodedShipRules = try container.decodeRawValueDictionaryIfPresent(ShipKind.self, forKey: .shipRules)
             ?? RuleSet.fastSkirmish.shipRules
         self.shipRules = RuleSet.migrateShipRulesForFleetFields(decodedShipRules)
-        self.defenseRules = try container.decodeRawValueDictionaryIfPresent(DefenseKind.self, forKey: .defenseRules)
+        let decodedDefenseRules = try container.decodeRawValueDictionaryIfPresent(DefenseKind.self, forKey: .defenseRules)
             ?? RuleSet.fastSkirmish.defenseRules
+        self.defenseRules = RuleSet.migrateDefenseRulesForCombatFields(decodedDefenseRules)
     }
 
     public func encode(to encoder: Encoder) throws {

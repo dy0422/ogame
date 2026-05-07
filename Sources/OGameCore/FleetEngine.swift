@@ -297,9 +297,19 @@ public enum FleetEngine {
                 universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .system, title: "Colony Established"))
             }
         case .attack:
-            universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .combat, title: "Combat Deferred"))
+            guard let combatReturn = CombatEngine.resolveAttack(fleet, in: &universe) else {
+                universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .combat, title: "Combat Resolved"))
+                return nil
+            }
+            returningFleet = combatReturn
+            universe.events.append(missionEvent(for: returningFleet, time: fleet.arrivalTime, kind: .combat, title: "Combat Resolved"))
         case .espionage:
-            universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .intelligence, title: "Espionage Report Deferred"))
+            guard let espionageReturn = CombatEngine.resolveEspionage(fleet, in: &universe) else {
+                universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .intelligence, title: "Espionage Report"))
+                return nil
+            }
+            returningFleet = espionageReturn
+            universe.events.append(missionEvent(for: returningFleet, time: fleet.arrivalTime, kind: .intelligence, title: "Espionage Report"))
         case .returning:
             resolveReturn(fleet, in: &universe)
             return nil

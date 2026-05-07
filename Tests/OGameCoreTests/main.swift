@@ -25,6 +25,17 @@ func requireApproxEqual(_ actual: ResourceBundle, _ expected: ResourceBundle, _ 
     requireApproxEqual(actual.deuterium, expected.deuterium, "\(message) deuterium", accuracy: accuracy)
 }
 
+func resourceTotal(_ resources: ResourceBundle) -> Double {
+    resources.metal + resources.crystal + resources.deuterium
+}
+
+func testCargoCapacity(_ ships: [ShipKind: Int], ruleSet: RuleSet) -> Double {
+    ships.reduce(0) { total, element in
+        let rule = ruleSet.shipRules[element.key]
+        return total + ((rule?.cargoCapacity ?? 0) * Double(max(element.value, 0)))
+    }
+}
+
 func requireIdentifiable<Entity: Identifiable, ID: Equatable>(_ entity: Entity, id expected: ID, _ message: String) where Entity.ID == ID {
     requireEqual(entity.id, expected, message)
 }
@@ -206,7 +217,12 @@ func testFastSkirmishUnitRulesCoverShipsAndDefenses() {
         require(rule.baseCost != .zero, "Defense \(defense.rawValue) should have a nonzero cost")
         require(rule.baseDuration > 0, "Defense \(defense.rawValue) should have a positive duration")
         require(rule.aiPriorityWeight > 0, "Defense \(defense.rawValue) should have a positive AI weight")
+        require(rule.attack >= 0, "Defense \(defense.rawValue) should have nonnegative attack")
+        require(rule.shield >= 0, "Defense \(defense.rawValue) should have nonnegative shield")
+        require(rule.hull >= 0, "Defense \(defense.rawValue) should have nonnegative hull")
     }
+
+    require((defenseRules[.rocketLauncher]?.attack ?? 0) > 0, "Rocket launcher should contribute attack to combat")
 }
 
 func testRuleSetBalanceRulesUseRawValueKeyedJSONObjects() throws {
@@ -533,6 +549,7 @@ func testQueueFieldsDefaultWhenDecodingOlderUniverseJSON() throws {
     requireEqual(decoded.planets[0].shipBuildQueue, [], "Older planet JSON should default missing ship build queue to empty")
     requireEqual(decoded.planets[0].defenseBuildQueue, [], "Older planet JSON should default missing defense build queue to empty")
     requireEqual(decoded.planets[0].debrisField, .zero, "Older planet JSON should default missing debris field to zero")
+    requireEqual(decoded.reports, [], "Older universe JSON should default missing reports to empty")
     requireEqual(decoded.planets[0].buildingLevels, [.metalMine: 2], "Older planet JSON should keep raw-value building map behavior")
     requireEqual(decoded.ruleSet.buildingRules, RuleSet.fastSkirmish.buildingRules, "Older universe JSON should keep RuleSet defaults")
 }
@@ -586,6 +603,7 @@ func testUniverseModelRoundTripsThroughJSON() throws {
     let homeworld = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000020")!)
     let fleetID = FleetID(UUID(uuidString: "00000000-0000-0000-0000-000000000040")!)
     let eventID = EventID(UUID(uuidString: "00000000-0000-0000-0000-000000000050")!)
+    let reportID = UUID(uuidString: "00000000-0000-0000-0000-000000000055")!
     let universe = Universe(
         id: UniverseID(UUID(uuidString: "00000000-0000-0000-0000-000000000030")!),
         name: "Test Universe",
@@ -639,6 +657,31 @@ func testUniverseModelRoundTripsThroughJSON() throws {
                 message: "The first command loop is running."
             )
         ],
+        reports: [
+            Report(
+                id: reportID,
+                time: 122,
+                kind: .battle,
+                title: "Battle at [1:2:8]",
+                summary: "The attacker won.",
+                participants: [
+                    ReportParticipant(
+                        role: .attacker,
+                        factionID: player,
+                        planetID: homeworld,
+                        name: "Player",
+                        beforeShips: [.smallCargo: 2],
+                        afterShips: [.smallCargo: 1],
+                        beforeDefenses: [:],
+                        afterDefenses: [:],
+                        losses: ResourceBundle(metal: 2_000, crystal: 2_000)
+                    )
+                ],
+                loot: ResourceBundle(metal: 100),
+                debris: ResourceBundle(metal: 600, crystal: 600),
+                losses: ResourceBundle(metal: 2_000, crystal: 2_000)
+            )
+        ],
         ruleSet: RuleSet.fastSkirmish
     )
 
@@ -649,6 +692,7 @@ func testUniverseModelRoundTripsThroughJSON() throws {
     requireIdentifiable(universe.factions[0], id: player, "Faction should be Identifiable by its id")
     requireIdentifiable(universe.planets[0], id: homeworld, "Planet should be Identifiable by its id")
     requireIdentifiable(universe.fleets[0], id: fleetID, "Fleet should be Identifiable by its id")
+    requireIdentifiable(universe.reports[0], id: reportID, "Report should be Identifiable by its id")
     requireEqual(decoded, universe, "Universe should round-trip through JSON")
 
     let json = requireDictionary(try JSONSerialization.jsonObject(with: data), "Universe should encode as a JSON object")
@@ -676,6 +720,10 @@ func testUniverseModelRoundTripsThroughJSON() throws {
     let fleetShipsJSON = requireDictionary(fleetJSON["ships"], "Fleet ships should encode as raw-value keyed JSON object")
     requireEqual(Array(fleetShipsJSON.keys).sorted(), ["espionageProbe", "smallCargo"], "Fleet ship keys should be ship raw values")
     requireInt(fleetShipsJSON["espionageProbe"], 1, "Espionage probe count should encode by raw value")
+
+    let reportsJSON = requireArray(json["reports"], "Reports should encode as a JSON array")
+    let reportJSON = requireDictionary(reportsJSON.first, "Report should encode as a JSON object")
+    requireEqual(reportJSON["kind"] as? String, "battle", "Report kind should encode by raw value")
 }
 
 func testPlanetEnumDictionaryDecodesRawValueKeysAndRejectsUnknownKeys() throws {
@@ -917,6 +965,10 @@ func fleetPlanetID(_ index: Int) -> PlanetID {
     PlanetID(UUID(uuidString: String(format: "00000000-0000-0000-0003-%012d", index))!)
 }
 
+func fleetEnemyID() -> FactionID {
+    FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000302")!)
+}
+
 func makeFleetUniverse(
     gameTime: TimeInterval = 0,
     originResources: ResourceBundle = ResourceBundle(metal: 5_000, crystal: 3_000, deuterium: 1_000),
@@ -969,6 +1021,64 @@ func makeFleetUniverse(
         fleets: fleets,
         events: [],
         ruleSet: ruleSet
+    )
+}
+
+func makeCombatUniverse(seed: UInt64 = 77) -> Universe {
+    let attackerID = fleetPlayerID()
+    let defenderID = fleetEnemyID()
+    let originID = fleetPlanetID(1)
+    let targetID = fleetPlanetID(2)
+
+    return Universe(
+        id: UniverseID(UUID(uuidString: "00000000-0000-0000-0000-000000000333")!),
+        name: "Combat Test",
+        seed: seed,
+        gameTime: 10,
+        playerFactionID: attackerID,
+        factions: [
+            Faction(
+                id: attackerID,
+                name: "Attacker",
+                kind: .player,
+                strategy: .raider,
+                technology: ResearchState(levels: [.weapons: 2, .shielding: 1, .armor: 1]),
+                ownedPlanetIDs: [originID]
+            ),
+            Faction(
+                id: defenderID,
+                name: "Defender",
+                kind: .ai,
+                strategy: .miner,
+                technology: ResearchState(levels: [.weapons: 1, .shielding: 1, .armor: 2]),
+                ownedPlanetIDs: [targetID]
+            )
+        ],
+        planets: [
+            Planet(
+                id: originID,
+                name: "Sword",
+                coordinate: Coordinate(galaxy: 1, system: 1, position: 4),
+                ownerID: attackerID,
+                resources: ResourceBundle(metal: 25_000, crystal: 12_000, deuterium: 8_000),
+                storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+                shipInventory: [.lightFighter: 8, .smallCargo: 2, .espionageProbe: 1]
+            ),
+            Planet(
+                id: targetID,
+                name: "Shield",
+                coordinate: Coordinate(galaxy: 1, system: 2, position: 6),
+                ownerID: defenderID,
+                resources: ResourceBundle(metal: 8_000, crystal: 4_000, deuterium: 1_000),
+                storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+                shipInventory: [.lightFighter: 2],
+                defenseInventory: [.rocketLauncher: 3],
+                debrisField: ResourceBundle(metal: 200, crystal: 50)
+            )
+        ],
+        fleets: [],
+        events: [],
+        ruleSet: .fastSkirmish
     )
 }
 
@@ -1564,6 +1674,203 @@ func testExploreMissionCreatesDeterministicEventAndReward() throws {
     requireEqual(first, second, "Exploration arrival should be deterministic across save/load equality")
     requireEqual(first.events.last?.kind, .exploration, "Exploration should record an exploration event")
     require(first.fleets[0].cargo != .zero, "Exploration should generate a resource reward to return")
+}
+
+func testEspionageMissionCreatesStableReportWithoutChangingTargetState() throws {
+    var first = makeCombatUniverse()
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &first,
+        mission: .espionage,
+        ships: [.espionageProbe: 1],
+        cargo: .zero
+    )
+    guard case .launched(let launchedFleet) = launch else {
+        fatalError("Espionage probe should launch")
+    }
+
+    let targetBefore = requirePlanet(fleetPlanetID(2), in: first, "Espionage target should exist before arrival")
+    let defenderBefore = requireFaction(fleetEnemyID(), in: first, "Espionage defender should exist before arrival")
+    let encoded = try JSONEncoder().encode(first)
+    var second = try JSONDecoder().decode(Universe.self, from: encoded)
+
+    first.gameTime = launchedFleet.arrivalTime
+    second.gameTime = launchedFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &first)
+    FleetEngine.resolveDueFleets(in: &second)
+
+    let targetAfter = requirePlanet(fleetPlanetID(2), in: first, "Espionage target should exist after arrival")
+    let defenderAfter = requireFaction(fleetEnemyID(), in: first, "Espionage defender should exist after arrival")
+    requireEqual(first, second, "Espionage result should be deterministic across save/load equality")
+    requireEqual(targetAfter.resources, targetBefore.resources, "Espionage should not steal target resources")
+    requireEqual(targetAfter.shipInventory, targetBefore.shipInventory, "Espionage should not mutate target ships")
+    requireEqual(targetAfter.defenseInventory, targetBefore.defenseInventory, "Espionage should not mutate target defenses")
+    requireEqual(defenderAfter, defenderBefore, "Espionage should not mutate defender faction state")
+    requireEqual(first.reports.count, 1, "Espionage should create one report")
+    requireEqual(first.reports[0].kind, .espionage, "Espionage report should use intelligence kind")
+    requireEqual(first.reports[0].participants.map(\.role), [.attacker, .defender], "Espionage report should identify both sides")
+    requireEqual(first.events.last?.kind, .intelligence, "Espionage should record an intelligence event")
+    requireEqual(first.fleets.first?.phase, .returning, "Espionage probe should deterministically return")
+    requireEqual(first.fleets.first?.ships[.espionageProbe], 1, "Returning espionage fleet should preserve the probe")
+}
+
+func testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense() {
+    var universe = makeCombatUniverse()
+    let defenderBefore = requirePlanet(fleetPlanetID(2), in: universe, "Combat target should exist before launch")
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .attack,
+        ships: [.lightFighter: 8, .smallCargo: 2],
+        cargo: .zero
+    )
+    guard case .launched(let launchedFleet) = launch else {
+        fatalError("Attack fleet should launch")
+    }
+
+    universe.gameTime = launchedFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    guard let returningFleet = universe.fleets.first else {
+        fatalError("Winning attack should return surviving ships")
+    }
+    let defenderAfter = requirePlanet(fleetPlanetID(2), in: universe, "Combat target should exist after battle")
+    guard let report = universe.reports.last else {
+        fatalError("Attack should create a battle report")
+    }
+
+    requireEqual(report.kind, .battle, "Attack should create a battle report")
+    requireEqual(report.participants.count, 2, "Battle report should include attacker and defender")
+    requireEqual(report.participants[0].role, .attacker, "Battle report should list attacker first")
+    requireEqual(report.participants[1].role, .defender, "Battle report should list defender second")
+    requireEqual(report.participants[0].factionID, fleetPlayerID(), "Battle report should include attacker faction")
+    requireEqual(report.participants[1].factionID, fleetEnemyID(), "Battle report should include defender faction")
+    requireEqual(report.participants[0].beforeShips, [.lightFighter: 8, .smallCargo: 2], "Battle report should include attacker starting fleet")
+    requireEqual(report.participants[0].afterShips, returningFleet.ships, "Battle report should include attacker surviving fleet")
+    requireEqual(report.participants[1].beforeShips, defenderBefore.shipInventory, "Battle report should include defender starting ships")
+    requireEqual(report.participants[1].afterShips, defenderAfter.shipInventory, "Battle report should include defender remaining ships")
+    requireEqual(report.participants[1].beforeDefenses, defenderBefore.defenseInventory, "Battle report should include defender starting defenses")
+    requireEqual(report.participants[1].afterDefenses, defenderAfter.defenseInventory, "Battle report should include defender recovered defenses")
+    require(resourceTotal(report.participants[0].losses) > 0, "Battle report should include attacker losses")
+    require(resourceTotal(report.participants[1].losses) > 0, "Battle report should include defender losses")
+    requireEqual(report.losses, report.participants[0].losses.adding(report.participants[1].losses), "Battle report should include total losses")
+    requireEqual(returningFleet.cargo, report.loot, "Surviving attackers should return with reported loot")
+    require(resourceTotal(returningFleet.cargo) <= testCargoCapacity(returningFleet.ships, ruleSet: universe.ruleSet), "Loot should be bounded by surviving cargo")
+    require(defenderAfter.resources.canAfford(.zero), "Defender resources should remain nonnegative")
+    require(defenderBefore.resources.subtracting(defenderAfter.resources).nonnegative == report.loot, "Reported loot should match removed defender resources")
+    require(resourceTotal(defenderAfter.debrisField) > resourceTotal(defenderBefore.debrisField), "Destroyed units should add debris to the defending planet")
+    requireEqual(report.debris, defenderAfter.debrisField.subtracting(defenderBefore.debrisField).nonnegative, "Battle report should include newly created debris")
+    require((defenderAfter.defenseInventory[.rocketLauncher] ?? 0) > 0, "Some destroyed defenses should recover deterministically")
+    require((defenderAfter.defenseInventory[.rocketLauncher] ?? 0) < (defenderBefore.defenseInventory[.rocketLauncher] ?? 0), "Recovered defenses should still reflect combat damage")
+    requireEqual(universe.events.last?.kind, .combat, "Attack should record a combat event")
+}
+
+func testAttackReturnCargoIsCappedAfterCargoShipLosses() {
+    var universe = makeCombatUniverse()
+    let launchCargo = ResourceBundle(metal: 8_000)
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .attack,
+        ships: [.lightFighter: 8, .smallCargo: 2],
+        cargo: launchCargo
+    )
+    guard case .launched(let launchedFleet) = launch else {
+        fatalError("Cargo attack fleet should launch")
+    }
+
+    universe.gameTime = launchedFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    guard let returningFleet = universe.fleets.first else {
+        fatalError("Cargo attack should leave surviving ships returning")
+    }
+    let survivingCapacity = testCargoCapacity(returningFleet.ships, ruleSet: universe.ruleSet)
+
+    require((returningFleet.ships[.smallCargo] ?? 0) < 2, "Combat fixture should destroy at least one cargo ship")
+    require(resourceTotal(returningFleet.cargo) <= survivingCapacity, "Returning cargo should be capped to surviving fleet capacity")
+    require(resourceTotal(returningFleet.cargo) < resourceTotal(launchCargo), "Cargo above surviving capacity should not remain on the returning fleet")
+}
+
+func testAttackWithMissingCombatRulesDoesNotMutateTargetOrCreateUnbalancedReport() {
+    var ruleSet = RuleSet.fastSkirmish
+    ruleSet.shipRules[.lightFighter] = nil
+    ruleSet.defenseRules[.rocketLauncher] = nil
+    var universe = makeCombatUniverse()
+    universe.ruleSet = ruleSet
+    let targetBefore = requirePlanet(fleetPlanetID(2), in: universe, "Target should exist before missing-rule combat")
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .attack,
+        ships: [.smallCargo: 2],
+        cargo: .zero
+    )
+    guard case .launched(let launchedFleet) = launch else {
+        fatalError("Attack with valid attacker rules should launch")
+    }
+
+    universe.gameTime = launchedFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    let targetAfter = requirePlanet(fleetPlanetID(2), in: universe, "Target should exist after missing-rule combat")
+    guard let report = universe.reports.last else {
+        fatalError("Missing-rule combat should create a report")
+    }
+
+    requireEqual(targetAfter.resources, targetBefore.resources, "Missing combat rules should not mutate defender resources")
+    requireEqual(targetAfter.shipInventory, targetBefore.shipInventory, "Missing combat rules should not delete defender ships")
+    requireEqual(targetAfter.defenseInventory, targetBefore.defenseInventory, "Missing combat rules should not delete defender defenses")
+    requireEqual(targetAfter.debrisField, targetBefore.debrisField, "Missing combat rules should not create debris")
+    requireEqual(report.loot, .zero, "Missing combat rules should not report loot")
+    requireEqual(report.debris, .zero, "Missing combat rules should not report debris")
+    requireEqual(report.losses, .zero, "Missing combat rules should not report uncosted losses")
+    require(report.summary.contains("deferred"), "Missing combat rules should produce a deferred report")
+    requireEqual(universe.fleets.first?.ships, [.smallCargo: 2], "Missing combat rules should send the attack fleet home unchanged")
+}
+
+func testAttackMissionIsDeterministicAcrossSaveLoadAndUsesDistinctReportIDs() throws {
+    var first = makeCombatUniverse()
+    let firstLaunch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &first,
+        mission: .attack,
+        ships: [.lightFighter: 8, .smallCargo: 2],
+        cargo: .zero
+    )
+    guard case .launched(let firstFleet) = firstLaunch else {
+        fatalError("Attack fleet should launch for determinism check")
+    }
+    let encoded = try JSONEncoder().encode(first)
+    var second = try JSONDecoder().decode(Universe.self, from: encoded)
+
+    first.gameTime = firstFleet.arrivalTime
+    second.gameTime = firstFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &first)
+    FleetEngine.resolveDueFleets(in: &second)
+
+    var differentBattle = makeCombatUniverse(seed: 78)
+    let differentLaunch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &differentBattle,
+        mission: .attack,
+        ships: [.lightFighter: 8, .smallCargo: 2],
+        cargo: .zero
+    )
+    guard case .launched(let differentFleet) = differentLaunch else {
+        fatalError("Second attack fleet should launch")
+    }
+    differentBattle.gameTime = differentFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &differentBattle)
+
+    requireEqual(first, second, "Attack resolution should be deterministic across save/load equality")
+    require(first.reports[0].id != differentBattle.reports[0].id, "Different battles should not collide on report IDs")
 }
 
 func testColonizeMissionClaimsUnownedPlanetWhenColonyShipIsPresent() {
@@ -3029,6 +3336,11 @@ testTransportOverflowCargoStaysWithReturningFleet()
 testReturningFleetDoesNotLoseCargoWhenOriginStorageIsFull()
 testRecycleMissionCollectsDebrisFromTargetPlanet()
 try testExploreMissionCreatesDeterministicEventAndReward()
+try testEspionageMissionCreatesStableReportWithoutChangingTargetState()
+testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense()
+testAttackReturnCargoIsCappedAfterCargoShipLosses()
+testAttackWithMissingCombatRulesDoesNotMutateTargetOrCreateUnbalancedReport()
+try testAttackMissionIsDeterministicAcrossSaveLoadAndUsesDistinctReportIDs()
 testColonizeMissionClaimsUnownedPlanetWhenColonyShipIsPresent()
 testFleetReturnsRestoreShipsAndCargoToOrigin()
 testSimulationTickResolvesDueFleetArrivalsBeforeSystemEvent()
