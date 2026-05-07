@@ -1,0 +1,1 @@
+print("NativeOGame skeleton")
