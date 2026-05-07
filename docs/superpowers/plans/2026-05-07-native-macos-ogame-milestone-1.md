@@ -6,7 +6,9 @@
 
 **Architecture:** This is the first executable slice of the larger native OGame sandbox. It creates `OGameCore` without SwiftUI dependencies, `OGamePersistence` for save/load, and `OGameMac` as a SwiftUI executable target that displays a live starter universe. Later plans build economy, AI, fleets, combat, and victory systems on this foundation.
 
-**Tech Stack:** Swift 5.9+, Swift Package Manager, SwiftUI, Foundation, XCTest, JSON `Codable` persistence.
+**Tech Stack:** Swift 5.9+, Swift Package Manager, SwiftUI, Foundation, executable Swift test runners, JSON `Codable` persistence.
+
+**Environment amendment:** The local Command Line Tools Swift toolchain lacks Apple's standard unit-test modules, so this milestone uses executable test runners instead of SwiftPM test target entries. Verify with `swift run OGameCoreTests`, `swift run OGamePersistenceTests`, and `swift build`.
 
 ---
 
@@ -23,7 +25,7 @@ This plan implements Milestone 1 only:
 - Starter universe factory.
 - JSON save/load repository.
 - Basic SwiftUI app shell.
-- Unit tests for model identity, ticking, and persistence round trip.
+- Executable test runners for model identity, ticking, and persistence round trip.
 
 Follow-up plans should cover:
 
@@ -37,7 +39,7 @@ Follow-up plans should cover:
 
 Create this Swift project alongside the existing PHP source. Do not remove or rewrite the PHP files.
 
-- `Package.swift`: SwiftPM package definition with three targets and one test target.
+- `Package.swift`: SwiftPM package definition with three app/library targets and two executable test runner targets.
 - `Sources/OGameCore/Identifiers.swift`: stable id wrappers for universe entities.
 - `Sources/OGameCore/Resources.swift`: resource and storage value types.
 - `Sources/OGameCore/DomainModels.swift`: `Universe`, `Faction`, `Planet`, `Fleet`, `ResearchState`, `GameEvent`, `RuleSet`, and supporting enums.
@@ -49,13 +51,18 @@ Create this Swift project alongside the existing PHP source. Do not remove or re
 - `Sources/OGameMac/OGameMacApp.swift`: SwiftUI executable app entry.
 - `Sources/OGameMac/AppModel.swift`: observable app state and save/load/tick orchestration.
 - `Sources/OGameMac/ContentView.swift`: basic modern management shell.
-- `Tests/OGameCoreTests/SimulationFoundationTests.swift`: core unit tests.
-- `Tests/OGamePersistenceTests/PersistenceTests.swift`: persistence unit tests.
+- `Tests/OGameCoreTests/main.swift`: executable core test runner.
+- `Tests/OGamePersistenceTests/main.swift`: executable persistence test runner.
 
 ## Task 1: Create Swift Package Skeleton
 
 **Files:**
 - Create: `Package.swift`
+- Create: `Sources/OGameCore/PackageAnchor.swift`
+- Create: `Sources/OGamePersistence/PackageAnchor.swift`
+- Create: `Sources/OGameMac/main.swift`
+- Create: `Tests/OGameCoreTests/main.swift`
+- Create: `Tests/OGamePersistenceTests/main.swift`
 - Create directories: `Sources/OGameCore`, `Sources/OGamePersistence`, `Sources/OGameMac`, `Tests/OGameCoreTests`, `Tests/OGamePersistenceTests`
 
 - [ ] **Step 1: Create SwiftPM directories**
@@ -85,7 +92,9 @@ let package = Package(
     products: [
         .library(name: "OGameCore", targets: ["OGameCore"]),
         .library(name: "OGamePersistence", targets: ["OGamePersistence"]),
-        .executable(name: "OGameMac", targets: ["OGameMac"])
+        .executable(name: "OGameMac", targets: ["OGameMac"]),
+        .executable(name: "OGameCoreTests", targets: ["OGameCoreTests"]),
+        .executable(name: "OGamePersistenceTests", targets: ["OGamePersistenceTests"])
     ],
     targets: [
         .target(
@@ -99,19 +108,73 @@ let package = Package(
             name: "OGameMac",
             dependencies: ["OGameCore", "OGamePersistence"]
         ),
-        .testTarget(
+        .executableTarget(
             name: "OGameCoreTests",
-            dependencies: ["OGameCore"]
+            dependencies: ["OGameCore"],
+            path: "Tests/OGameCoreTests"
         ),
-        .testTarget(
+        .executableTarget(
             name: "OGamePersistenceTests",
-            dependencies: ["OGameCore", "OGamePersistence"]
+            dependencies: ["OGameCore", "OGamePersistence"],
+            path: "Tests/OGamePersistenceTests"
         )
     ]
 )
 ```
 
-- [ ] **Step 3: Run package description check**
+- [ ] **Step 3: Add minimal target anchors**
+
+Create minimal target anchor files so SwiftPM can describe the package before real source files are added.
+
+Create `Sources/OGameCore/PackageAnchor.swift` with:
+
+```swift
+public enum OGameCorePackageAnchor {}
+```
+
+Create `Sources/OGamePersistence/PackageAnchor.swift` with:
+
+```swift
+public enum OGamePersistencePackageAnchor {}
+```
+
+Create `Sources/OGameMac/main.swift` with:
+
+```swift
+print("NativeOGame skeleton")
+```
+
+Create `Tests/OGameCoreTests/main.swift` with:
+
+```swift
+import OGameCore
+
+func require(_ condition: @autoclosure () -> Bool, _ message: String) {
+    if !condition() {
+        fatalError(message)
+    }
+}
+
+require(OGameCorePackageAnchor.self == OGameCorePackageAnchor.self, "OGameCore package anchor should exist")
+print("OGameCoreTests passed")
+```
+
+Create `Tests/OGamePersistenceTests/main.swift` with:
+
+```swift
+import OGamePersistence
+
+func require(_ condition: @autoclosure () -> Bool, _ message: String) {
+    if !condition() {
+        fatalError(message)
+    }
+}
+
+require(OGamePersistencePackageAnchor.self == OGamePersistencePackageAnchor.self, "OGamePersistence package anchor should exist")
+print("OGamePersistenceTests passed")
+```
+
+- [ ] **Step 4: Run package description check**
 
 Run:
 
@@ -129,7 +192,25 @@ OGameCoreTests
 OGamePersistenceTests
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Run skeleton tests**
+
+Run:
+
+```bash
+swift run OGameCoreTests
+swift run OGamePersistenceTests
+swift build
+```
+
+Expected: output includes:
+
+```text
+OGameCoreTests passed
+OGamePersistenceTests passed
+Build complete!
+```
+
+- [ ] **Step 6: Commit**
 
 Run:
 
@@ -145,32 +226,50 @@ Expected: commit succeeds.
 **Files:**
 - Create: `Sources/OGameCore/Identifiers.swift`
 - Create: `Sources/OGameCore/Resources.swift`
-- Test: `Tests/OGameCoreTests/SimulationFoundationTests.swift`
+- Modify: `Tests/OGameCoreTests/main.swift`
 
 - [ ] **Step 1: Write failing identifier and resource tests**
 
-Create `Tests/OGameCoreTests/SimulationFoundationTests.swift` with:
+Replace `Tests/OGameCoreTests/main.swift` with:
 
 ```swift
-import XCTest
-@testable import OGameCore
+import Foundation
+import OGameCore
 
-final class SimulationFoundationTests: XCTestCase {
-    func testEntityIDsAreCodableAndEquatable() throws {
-        let id = FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
-        let data = try JSONEncoder().encode(id)
-        let decoded = try JSONDecoder().decode(FactionID.self, from: data)
-
-        XCTAssertEqual(decoded, id)
-    }
-
-    func testResourceBundleClampsToStorageLimits() {
-        let resources = ResourceBundle(metal: 120, crystal: 80, deuterium: 40)
-        let storage = ResourceStorage(metal: 100, crystal: 100, deuterium: 20)
-
-        XCTAssertEqual(resources.clamped(to: storage), ResourceBundle(metal: 100, crystal: 80, deuterium: 20))
+func require(_ condition: @autoclosure () -> Bool, _ message: String) {
+    if !condition() {
+        fatalError(message)
     }
 }
+
+func requireEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String) {
+    if actual != expected {
+        fatalError("\(message): \(actual) != \(expected)")
+    }
+}
+
+func testEntityIDsAreCodableAndEquatable() throws {
+    let id = FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000001")!)
+    let data = try JSONEncoder().encode(id)
+    let decoded = try JSONDecoder().decode(FactionID.self, from: data)
+
+    requireEqual(decoded, id, "FactionID should round-trip through JSON")
+}
+
+func testResourceBundleClampsToStorageLimits() {
+    let resources = ResourceBundle(metal: 120, crystal: 80, deuterium: 40)
+    let storage = ResourceStorage(metal: 100, crystal: 100, deuterium: 20)
+
+    requireEqual(
+        resources.clamped(to: storage),
+        ResourceBundle(metal: 100, crystal: 80, deuterium: 20),
+        "ResourceBundle should clamp to storage limits"
+    )
+}
+
+try testEntityIDsAreCodableAndEquatable()
+testResourceBundleClampsToStorageLimits()
+print("OGameCoreTests passed")
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -178,7 +277,7 @@ final class SimulationFoundationTests: XCTestCase {
 Run:
 
 ```bash
-swift test --filter SimulationFoundationTests
+swift run OGameCoreTests
 ```
 
 Expected: build fails with errors mentioning missing `FactionID`, `ResourceBundle`, or `ResourceStorage`.
@@ -292,13 +391,13 @@ public struct EnergyState: Codable, Equatable, Sendable {
 Run:
 
 ```bash
-swift test --filter SimulationFoundationTests
+swift run OGameCoreTests
 ```
 
 Expected: output includes:
 
 ```text
-Test Suite 'SimulationFoundationTests' passed
+OGameCoreTests passed
 ```
 
 - [ ] **Step 6: Commit**
@@ -306,7 +405,7 @@ Test Suite 'SimulationFoundationTests' passed
 Run:
 
 ```bash
-git add Sources/OGameCore/Identifiers.swift Sources/OGameCore/Resources.swift Tests/OGameCoreTests/SimulationFoundationTests.swift
+git add Sources/OGameCore/Identifiers.swift Sources/OGameCore/Resources.swift Tests/OGameCoreTests/main.swift
 git commit -m "feat: add core identifiers and resources"
 ```
 
@@ -316,11 +415,11 @@ Expected: commit succeeds.
 
 **Files:**
 - Create: `Sources/OGameCore/DomainModels.swift`
-- Modify: `Tests/OGameCoreTests/SimulationFoundationTests.swift`
+- Modify: `Tests/OGameCoreTests/main.swift`
 
 - [ ] **Step 1: Add failing starter universe model test**
 
-Append this test method inside `SimulationFoundationTests`:
+Append this test function above the runner calls in `Tests/OGameCoreTests/main.swift`, then add `try testUniverseModelRoundTripsThroughJSON()` before the final `print("OGameCoreTests passed")`:
 
 ```swift
 func testUniverseModelRoundTripsThroughJSON() throws {
@@ -354,9 +453,9 @@ func testUniverseModelRoundTripsThroughJSON() throws {
     let data = try JSONEncoder().encode(universe)
     let decoded = try JSONDecoder().decode(Universe.self, from: data)
 
-    XCTAssertEqual(decoded.name, "Test Universe")
-    XCTAssertEqual(decoded.planets.first?.coordinate, Coordinate(galaxy: 1, system: 1, position: 4))
-    XCTAssertEqual(decoded.ruleSet.id, "fast-skirmish-v1")
+    requireEqual(decoded.name, "Test Universe", "Universe name should round-trip")
+    requireEqual(decoded.planets.first?.coordinate, Coordinate(galaxy: 1, system: 1, position: 4), "Homeworld coordinate should round-trip")
+    requireEqual(decoded.ruleSet.id, "fast-skirmish-v1", "Rule set should round-trip")
 }
 ```
 
@@ -365,7 +464,7 @@ func testUniverseModelRoundTripsThroughJSON() throws {
 Run:
 
 ```bash
-swift test --filter SimulationFoundationTests/testUniverseModelRoundTripsThroughJSON
+swift run OGameCoreTests
 ```
 
 Expected: build fails with errors mentioning missing `Universe`, `Faction`, `Planet`, `Coordinate`, or `RuleSet`.
@@ -665,13 +764,13 @@ public enum DefenseKind: String, Codable, CaseIterable, Sendable {
 Run:
 
 ```bash
-swift test --filter SimulationFoundationTests/testUniverseModelRoundTripsThroughJSON
+swift run OGameCoreTests
 ```
 
 Expected: output includes:
 
 ```text
-Test Suite 'SimulationFoundationTests' passed
+OGameCoreTests passed
 ```
 
 - [ ] **Step 5: Commit**
@@ -679,7 +778,7 @@ Test Suite 'SimulationFoundationTests' passed
 Run:
 
 ```bash
-git add Sources/OGameCore/DomainModels.swift Tests/OGameCoreTests/SimulationFoundationTests.swift
+git add Sources/OGameCore/DomainModels.swift Tests/OGameCoreTests/main.swift
 git commit -m "feat: add serializable universe model"
 ```
 
@@ -690,22 +789,22 @@ Expected: commit succeeds.
 **Files:**
 - Create: `Sources/OGameCore/SeededGenerator.swift`
 - Create: `Sources/OGameCore/StarterUniverseFactory.swift`
-- Modify: `Tests/OGameCoreTests/SimulationFoundationTests.swift`
+- Modify: `Tests/OGameCoreTests/main.swift`
 
 - [ ] **Step 1: Add failing deterministic starter universe test**
 
-Append this test method inside `SimulationFoundationTests`:
+Append this test function above the runner calls in `Tests/OGameCoreTests/main.swift`, then add `testStarterUniverseIsDeterministicForSeed()` before the final `print("OGameCoreTests passed")`:
 
 ```swift
 func testStarterUniverseIsDeterministicForSeed() {
     let first = StarterUniverseFactory.makeNewGame(seed: 7, playerName: "Commander")
     let second = StarterUniverseFactory.makeNewGame(seed: 7, playerName: "Commander")
 
-    XCTAssertEqual(first.seed, 7)
-    XCTAssertEqual(first, second)
-    XCTAssertEqual(first.factions.count, 6)
-    XCTAssertEqual(first.planets.count, 6)
-    XCTAssertEqual(first.events.first?.title, "Command Link Established")
+    requireEqual(first.seed, 7, "Starter universe seed should be preserved")
+    requireEqual(first, second, "Starter universe should be deterministic")
+    requireEqual(first.factions.count, 6, "Starter universe should create six factions")
+    requireEqual(first.planets.count, 6, "Starter universe should create six planets")
+    requireEqual(first.events.first?.title, "Command Link Established", "Starter universe should record initial event")
 }
 ```
 
@@ -714,7 +813,7 @@ func testStarterUniverseIsDeterministicForSeed() {
 Run:
 
 ```bash
-swift test --filter SimulationFoundationTests/testStarterUniverseIsDeterministicForSeed
+swift run OGameCoreTests
 ```
 
 Expected: build fails with missing `StarterUniverseFactory`.
@@ -855,13 +954,13 @@ public enum StarterUniverseFactory {
 Run:
 
 ```bash
-swift test --filter SimulationFoundationTests/testStarterUniverseIsDeterministicForSeed
+swift run OGameCoreTests
 ```
 
 Expected: output includes:
 
 ```text
-Test Suite 'SimulationFoundationTests' passed
+OGameCoreTests passed
 ```
 
 - [ ] **Step 6: Commit**
@@ -869,7 +968,7 @@ Test Suite 'SimulationFoundationTests' passed
 Run:
 
 ```bash
-git add Sources/OGameCore/SeededGenerator.swift Sources/OGameCore/StarterUniverseFactory.swift Tests/OGameCoreTests/SimulationFoundationTests.swift
+git add Sources/OGameCore/SeededGenerator.swift Sources/OGameCore/StarterUniverseFactory.swift Tests/OGameCoreTests/main.swift
 git commit -m "feat: add deterministic starter universe"
 ```
 
@@ -879,11 +978,11 @@ Expected: commit succeeds.
 
 **Files:**
 - Create: `Sources/OGameCore/SimulationEngine.swift`
-- Modify: `Tests/OGameCoreTests/SimulationFoundationTests.swift`
+- Modify: `Tests/OGameCoreTests/main.swift`
 
 - [ ] **Step 1: Add failing tick test**
 
-Append this test method inside `SimulationFoundationTests`:
+Append this test function above the runner calls in `Tests/OGameCoreTests/main.swift`, then add `testSimulationTickAdvancesGameTimeAndRecordsEvent()` before the final `print("OGameCoreTests passed")`:
 
 ```swift
 func testSimulationTickAdvancesGameTimeAndRecordsEvent() {
@@ -891,9 +990,9 @@ func testSimulationTickAdvancesGameTimeAndRecordsEvent() {
 
     SimulationEngine.tick(universe: &universe, delta: 60)
 
-    XCTAssertEqual(universe.gameTime, 60)
-    XCTAssertEqual(universe.events.last?.title, "Simulation Advanced")
-    XCTAssertEqual(universe.events.last?.time, 60)
+    requireEqual(universe.gameTime, 60, "Simulation tick should advance game time")
+    requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation tick should record an event")
+    requireEqual(universe.events.last?.time, 60, "Simulation tick event should use advanced time")
 }
 ```
 
@@ -902,7 +1001,7 @@ func testSimulationTickAdvancesGameTimeAndRecordsEvent() {
 Run:
 
 ```bash
-swift test --filter SimulationFoundationTests/testSimulationTickAdvancesGameTimeAndRecordsEvent
+swift run OGameCoreTests
 ```
 
 Expected: build fails with missing `SimulationEngine`.
@@ -938,13 +1037,13 @@ public enum SimulationEngine {
 Run:
 
 ```bash
-swift test --filter SimulationFoundationTests
+swift run OGameCoreTests
 ```
 
 Expected: output includes:
 
 ```text
-Test Suite 'SimulationFoundationTests' passed
+OGameCoreTests passed
 ```
 
 - [ ] **Step 5: Commit**
@@ -952,7 +1051,7 @@ Test Suite 'SimulationFoundationTests' passed
 Run:
 
 ```bash
-git add Sources/OGameCore/SimulationEngine.swift Tests/OGameCoreTests/SimulationFoundationTests.swift
+git add Sources/OGameCore/SimulationEngine.swift Tests/OGameCoreTests/main.swift
 git commit -m "feat: add simulation engine entry point"
 ```
 
@@ -963,33 +1062,45 @@ Expected: commit succeeds.
 **Files:**
 - Create: `Sources/OGamePersistence/SaveEnvelope.swift`
 - Create: `Sources/OGamePersistence/JSONSaveRepository.swift`
-- Create: `Tests/OGamePersistenceTests/PersistenceTests.swift`
+- Modify: `Tests/OGamePersistenceTests/main.swift`
 
 - [ ] **Step 1: Write failing persistence round-trip test**
 
-Create `Tests/OGamePersistenceTests/PersistenceTests.swift` with:
+Replace `Tests/OGamePersistenceTests/main.swift` with:
 
 ```swift
 import Foundation
-import XCTest
-@testable import OGameCore
-@testable import OGamePersistence
+import OGameCore
+import OGamePersistence
 
-final class PersistenceTests: XCTestCase {
-    func testRepositorySavesAndLoadsUniverse() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("NativeOGamePersistenceTests-\(UUID().uuidString)", isDirectory: true)
-        let repository = JSONSaveRepository(saveDirectory: directory)
-        let universe = StarterUniverseFactory.makeNewGame(seed: 11, playerName: "Commander")
-
-        try repository.save(universe, wallClockDate: Date(timeIntervalSince1970: 1_000))
-        let loaded = try repository.load()
-
-        XCTAssertEqual(loaded.universe, universe)
-        XCTAssertEqual(loaded.lastSavedAt, Date(timeIntervalSince1970: 1_000))
-        XCTAssertEqual(loaded.schemaVersion, SaveEnvelope.currentSchemaVersion)
+func require(_ condition: @autoclosure () -> Bool, _ message: String) {
+    if !condition() {
+        fatalError(message)
     }
 }
+
+func requireEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String) {
+    if actual != expected {
+        fatalError("\(message): \(actual) != \(expected)")
+    }
+}
+
+func testRepositorySavesAndLoadsUniverse() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("NativeOGamePersistenceTests-\(UUID().uuidString)", isDirectory: true)
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    let universe = StarterUniverseFactory.makeNewGame(seed: 11, playerName: "Commander")
+
+    try repository.save(universe, wallClockDate: Date(timeIntervalSince1970: 1_000))
+    let loaded = try repository.load()
+
+    requireEqual(loaded.universe, universe, "Repository should load the saved universe")
+    requireEqual(loaded.lastSavedAt, Date(timeIntervalSince1970: 1_000), "Repository should preserve save date")
+    requireEqual(loaded.schemaVersion, SaveEnvelope.currentSchemaVersion, "Repository should preserve schema version")
+}
+
+try testRepositorySavesAndLoadsUniverse()
+print("OGamePersistenceTests passed")
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -997,7 +1108,7 @@ final class PersistenceTests: XCTestCase {
 Run:
 
 ```bash
-swift test --filter PersistenceTests/testRepositorySavesAndLoadsUniverse
+swift run OGamePersistenceTests
 ```
 
 Expected: build fails with missing `JSONSaveRepository` or `SaveEnvelope`.
@@ -1101,13 +1212,13 @@ public struct JSONSaveRepository: Sendable {
 Run:
 
 ```bash
-swift test --filter PersistenceTests
+swift run OGamePersistenceTests
 ```
 
 Expected: output includes:
 
 ```text
-Test Suite 'PersistenceTests' passed
+OGamePersistenceTests passed
 ```
 
 - [ ] **Step 6: Commit**
@@ -1372,13 +1483,15 @@ Build complete!
 Run:
 
 ```bash
-swift test
+swift run OGameCoreTests
+swift run OGamePersistenceTests
 ```
 
 Expected: output includes:
 
 ```text
-Test Suite 'All tests' passed
+OGameCoreTests passed
+OGamePersistenceTests passed
 ```
 
 - [ ] **Step 6: Commit**
@@ -1419,11 +1532,12 @@ Milestone 1 creates the native macOS Swift foundation for the OGame sandbox.
 ## Expected Commands
 
 ```bash
-swift test
+swift run OGameCoreTests
+swift run OGamePersistenceTests
 swift build
 ```
 
-Both commands should complete successfully.
+All commands should complete successfully.
 
 ## Implemented Capabilities
 
@@ -1451,13 +1565,15 @@ Both commands should complete successfully.
 Run:
 
 ```bash
-swift test
+swift run OGameCoreTests
+swift run OGamePersistenceTests
 ```
 
 Expected: output includes:
 
 ```text
-Test Suite 'All tests' passed
+OGameCoreTests passed
+OGamePersistenceTests passed
 ```
 
 Run:
