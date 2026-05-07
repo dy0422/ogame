@@ -1641,7 +1641,8 @@ func makeAIEconomyFaction(
     kind: Faction.Kind = .ai,
     strategy: Faction.Strategy,
     researchLevels: [TechnologyKind: Int] = [:],
-    researchQueue: [ResearchQueueItem] = []
+    researchQueue: [ResearchQueueItem] = [],
+    relations: [FactionRelation] = []
 ) -> Faction {
     let factionID = kind == .player ? aiTestPlayerID() : aiTestFactionID(index)
     let planetID = kind == .player ? aiTestPlanetID(0) : aiTestPlanetID(index)
@@ -1653,7 +1654,8 @@ func makeAIEconomyFaction(
         strategy: strategy,
         technology: ResearchState(levels: researchLevels),
         ownedPlanetIDs: [planetID],
-        researchQueue: researchQueue
+        researchQueue: researchQueue,
+        relations: relations
     )
 }
 
@@ -1666,7 +1668,12 @@ func makeAIEconomyPlanet(
         .crystalMine: 1,
         .solarPlant: 1
     ],
-    buildQueue: [BuildQueueItem] = []
+    buildQueue: [BuildQueueItem] = [],
+    shipBuildQueue: [UnitBuildQueueItem] = [],
+    defenseBuildQueue: [UnitBuildQueueItem] = [],
+    shipInventory: [ShipKind: Int] = [:],
+    defenseInventory: [DefenseKind: Int] = [:],
+    debrisField: ResourceBundle = .zero
 ) -> Planet {
     Planet(
         id: index == 0 ? aiTestPlanetID(0) : aiTestPlanetID(index),
@@ -1676,7 +1683,12 @@ func makeAIEconomyPlanet(
         resources: resources,
         storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
         buildingLevels: buildingLevels,
-        buildQueue: buildQueue
+        buildQueue: buildQueue,
+        shipBuildQueue: shipBuildQueue,
+        defenseBuildQueue: defenseBuildQueue,
+        shipInventory: shipInventory,
+        defenseInventory: defenseInventory,
+        debrisField: debrisField
     )
 }
 
@@ -2984,6 +2996,99 @@ func testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState() throws {
     requireEqual(first, second, "AI decisions should be deterministic for the same seed, game time, and state")
 }
 
+func testAIStrategyBuildsShipsForRaiderFactions() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let raider = makeAIEconomyFaction(index: 1, strategy: .raider)
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let raiderPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: raider.id,
+        resources: ResourceBundle(metal: 20_000, crystal: 20_000, deuterium: 4_000),
+        buildingLevels: [.shipyard: 1, .roboticsFactory: 1, .solarPlant: 2]
+    )
+    var universe = makeAIEconomyUniverse(factions: [player, raider], planets: [playerPlanet, raiderPlanet])
+
+    AIStrategyEngine.makeStrategicDecisions(in: &universe)
+
+    let updatedRaiderPlanet = requirePlanet(raiderPlanet.id, in: universe, "Raider planet should remain")
+    requireEqual(updatedRaiderPlanet.shipBuildQueue.count, 1, "Raider should queue one ship production order")
+    guard case .ship(let queuedShip)? = updatedRaiderPlanet.shipBuildQueue.first?.unitKind else {
+        fatalError("Raider queue item should build ships")
+    }
+    require(
+        [.lightFighter, .smallCargo, .espionageProbe].contains(queuedShip),
+        "Raider should prefer combat, cargo, or probe production"
+    )
+}
+
+func testAIStrategyBuildsDefensesForThreatenedFactions() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let miner = makeAIEconomyFaction(
+        index: 1,
+        strategy: .miner,
+        relations: [
+            FactionRelation(
+                factionID: player.id,
+                posture: .hostile,
+                threatScore: 4,
+                lastInteractionTime: 120,
+                attackCount: 2
+            )
+        ]
+    )
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let minerPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: miner.id,
+        resources: ResourceBundle(metal: 12_000, crystal: 4_000, deuterium: 1_000),
+        buildingLevels: [.shipyard: 1, .metalMine: 2, .solarPlant: 2]
+    )
+    var universe = makeAIEconomyUniverse(factions: [player, miner], planets: [playerPlanet, minerPlanet])
+
+    AIStrategyEngine.makeStrategicDecisions(in: &universe)
+
+    let updatedMinerPlanet = requirePlanet(minerPlanet.id, in: universe, "Miner planet should remain")
+    requireEqual(updatedMinerPlanet.defenseBuildQueue.count, 1, "Threatened miner should queue one defense order")
+    guard case .defense(let queuedDefense)? = updatedMinerPlanet.defenseBuildQueue.first?.unitKind else {
+        fatalError("Miner queue item should build defenses")
+    }
+    require(
+        [.rocketLauncher, .lightLaser].contains(queuedDefense),
+        "Threatened miner should prefer early defensive units"
+    )
+}
+
+func testAIStrategyDoesNotReadHiddenPlayerFleetState() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let raider = makeAIEconomyFaction(index: 1, strategy: .raider)
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let hiddenClonePlayerPlanet = makeAIEconomyPlanet(
+        index: 0,
+        ownerID: player.id,
+        shipInventory: [.battleship: 500, .cruiser: 500],
+        defenseInventory: [.plasmaTurret: 100]
+    )
+    let raiderPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: raider.id,
+        resources: ResourceBundle(metal: 20_000, crystal: 20_000, deuterium: 4_000),
+        buildingLevels: [.shipyard: 1, .roboticsFactory: 1, .solarPlant: 2]
+    )
+    let original = makeAIEconomyUniverse(factions: [player, raider], planets: [playerPlanet, raiderPlanet])
+    let hiddenFleetChanged = makeAIEconomyUniverse(factions: [player, raider], planets: [hiddenClonePlayerPlanet, raiderPlanet])
+    var first = original
+    var second = hiddenFleetChanged
+
+    AIStrategyEngine.makeStrategicDecisions(in: &first)
+    AIStrategyEngine.makeStrategicDecisions(in: &second)
+
+    requireEqual(
+        requirePlanet(raiderPlanet.id, in: first, "First raider planet should remain").shipBuildQueue,
+        requirePlanet(raiderPlanet.id, in: second, "Second raider planet should remain").shipBuildQueue,
+        "AI strategic production should not change after hidden player fleet or defense inventory changes"
+    )
+}
+
 func testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals() {
     let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
     let ai = makeAIEconomyFaction(index: 1, strategy: .miner)
@@ -4219,6 +4324,9 @@ testAIEconomyStrategyPrioritiesChooseDistinctEarlyGrowthPaths()
 testAIEconomyResearchPreviewUsesQueueEnginePaymentPlanetOrder()
 testAIEconomyDoesNotMutatePlayerState()
 try testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState()
+testAIStrategyBuildsShipsForRaiderFactions()
+testAIStrategyBuildsDefensesForThreatenedFactions()
+testAIStrategyDoesNotReadHiddenPlayerFleetState()
 testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals()
 testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent()
 testSimulationTickCompletesAlreadyDueConstructionBeforeProduction()

@@ -2,6 +2,7 @@ import Foundation
 
 public enum SimulationEngine {
     private static let minimumAIDecisionInterval: TimeInterval = 60
+    private static let minimumAIStrategyInterval: TimeInterval = 120
 
     public static func tick(universe: inout Universe, delta: TimeInterval) {
         guard delta.isFinite, delta > 0 else {
@@ -16,7 +17,8 @@ public enum SimulationEngine {
         universe.gameTime += delta
         QueueEngine.completeDueItems(in: &universe)
         FleetEngine.resolveDueFleets(in: &universe)
-        runAIDecisionsIfNeeded(in: &universe, from: initialGameTime)
+        runAIEconomyDecisionsIfNeeded(in: &universe, from: initialGameTime)
+        runAIStrategyDecisionsIfNeeded(in: &universe, from: initialGameTime)
         StrategicEngine.updateStrategicState(in: &universe)
 
         universe.events.append(
@@ -30,36 +32,75 @@ public enum SimulationEngine {
         )
     }
 
-    private static func runAIDecisionsIfNeeded(in universe: inout Universe, from initialGameTime: TimeInterval) {
-        guard shouldRunAIDecisions(from: initialGameTime, to: universe.gameTime, ruleSet: universe.ruleSet) else {
+    private static func runAIEconomyDecisionsIfNeeded(in universe: inout Universe, from initialGameTime: TimeInterval) {
+        guard shouldRunAIEconomyDecisions(from: initialGameTime, to: universe.gameTime, ruleSet: universe.ruleSet) else {
             return
         }
 
         AIEconomyEngine.makeDecisions(in: &universe)
     }
 
-    private static func shouldRunAIDecisions(
+    private static func runAIStrategyDecisionsIfNeeded(in universe: inout Universe, from initialGameTime: TimeInterval) {
+        guard shouldRunAIStrategyDecisions(from: initialGameTime, to: universe.gameTime, ruleSet: universe.ruleSet) else {
+            return
+        }
+
+        AIStrategyEngine.makeStrategicDecisions(in: &universe)
+    }
+
+    private static func shouldRunAIEconomyDecisions(
         from initialGameTime: TimeInterval,
         to currentGameTime: TimeInterval,
         ruleSet: RuleSet
+    ) -> Bool {
+        shouldRunAIDecisions(
+            from: initialGameTime,
+            to: currentGameTime,
+            interval: aiEconomyDecisionInterval(from: ruleSet)
+        )
+    }
+
+    private static func shouldRunAIStrategyDecisions(
+        from initialGameTime: TimeInterval,
+        to currentGameTime: TimeInterval,
+        ruleSet: RuleSet
+    ) -> Bool {
+        shouldRunAIDecisions(
+            from: initialGameTime,
+            to: currentGameTime,
+            interval: aiStrategyDecisionInterval(from: ruleSet)
+        )
+    }
+
+    private static func shouldRunAIDecisions(
+        from initialGameTime: TimeInterval,
+        to currentGameTime: TimeInterval,
+        interval: TimeInterval
     ) -> Bool {
         guard initialGameTime.isFinite, currentGameTime.isFinite else {
             return false
         }
 
-        let interval = aiDecisionInterval(from: ruleSet)
         let initialWindow = floor(max(initialGameTime, 0) / interval)
         let currentWindow = floor(max(currentGameTime, 0) / interval)
 
         return currentWindow > initialWindow
     }
 
-    private static func aiDecisionInterval(from ruleSet: RuleSet) -> TimeInterval {
+    private static func aiEconomyDecisionInterval(from ruleSet: RuleSet) -> TimeInterval {
         guard ruleSet.offlineChunkInterval.isFinite, ruleSet.offlineChunkInterval > 0 else {
             return minimumAIDecisionInterval
         }
 
         return max(ruleSet.offlineChunkInterval, minimumAIDecisionInterval)
+    }
+
+    private static func aiStrategyDecisionInterval(from ruleSet: RuleSet) -> TimeInterval {
+        guard ruleSet.offlineChunkInterval.isFinite, ruleSet.offlineChunkInterval > 0 else {
+            return minimumAIStrategyInterval
+        }
+
+        return max(ruleSet.offlineChunkInterval / 2, minimumAIStrategyInterval)
     }
 
     private static func simulationEventID(index: Int) -> EventID {
