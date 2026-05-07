@@ -727,6 +727,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
     public var storage: ResourceStorage
     public var energy: EnergyState
     public var buildingLevels: [BuildingKind: Int]
+    public var productionSettings: [BuildingKind: Double]
     public var buildQueue: [BuildQueueItem]
     public var shipBuildQueue: [UnitBuildQueueItem]
     public var defenseBuildQueue: [UnitBuildQueueItem]
@@ -743,6 +744,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         storage: ResourceStorage = ResourceStorage(metal: 10_000, crystal: 10_000, deuterium: 10_000),
         energy: EnergyState = EnergyState(),
         buildingLevels: [BuildingKind: Int] = [:],
+        productionSettings: [BuildingKind: Double] = [:],
         buildQueue: [BuildQueueItem] = [],
         shipBuildQueue: [UnitBuildQueueItem] = [],
         defenseBuildQueue: [UnitBuildQueueItem] = [],
@@ -758,6 +760,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         self.storage = storage
         self.energy = energy
         self.buildingLevels = buildingLevels
+        self.productionSettings = Self.normalizedProductionSettings(productionSettings)
         self.buildQueue = buildQueue
         self.shipBuildQueue = shipBuildQueue
         self.defenseBuildQueue = defenseBuildQueue
@@ -775,6 +778,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         case storage
         case energy
         case buildingLevels
+        case productionSettings
         case buildQueue
         case shipBuildQueue
         case defenseBuildQueue
@@ -794,6 +798,9 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         self.storage = try container.decode(ResourceStorage.self, forKey: .storage)
         self.energy = try container.decode(EnergyState.self, forKey: .energy)
         self.buildingLevels = try container.decodeRawValueDictionary(BuildingKind.self, forKey: .buildingLevels)
+        self.productionSettings = Self.normalizedProductionSettings(
+            try container.decodeRawValueDictionaryIfPresent(BuildingKind.self, forKey: .productionSettings) ?? [:]
+        )
         self.buildQueue = try container.decodeIfPresentStrict([BuildQueueItem].self, forKey: .buildQueue) ?? []
         self.shipBuildQueue = try container.decodeIfPresentStrict([UnitBuildQueueItem].self, forKey: .shipBuildQueue) ?? []
         self.defenseBuildQueue = try container.decodeIfPresentStrict([UnitBuildQueueItem].self, forKey: .defenseBuildQueue) ?? []
@@ -813,12 +820,23 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         try container.encode(storage, forKey: .storage)
         try container.encode(energy, forKey: .energy)
         try container.encodeRawValueDictionary(buildingLevels, forKey: .buildingLevels)
+        try container.encodeRawValueDictionary(productionSettings, forKey: .productionSettings)
         try container.encode(buildQueue, forKey: .buildQueue)
         try container.encode(shipBuildQueue, forKey: .shipBuildQueue)
         try container.encode(defenseBuildQueue, forKey: .defenseBuildQueue)
         try container.encodeRawValueDictionary(shipInventory, forKey: .shipInventory)
         try container.encodeRawValueDictionary(defenseInventory, forKey: .defenseInventory)
         try container.encode(debrisField, forKey: .debrisField)
+    }
+
+    private static func normalizedProductionSettings(_ settings: [BuildingKind: Double]) -> [BuildingKind: Double] {
+        Dictionary(uniqueKeysWithValues: settings.map { kind, value in
+            guard value.isFinite else {
+                return (kind, 1)
+            }
+
+            return (kind, min(max(value, 0), 1))
+        })
     }
 }
 
@@ -1268,6 +1286,10 @@ public enum BuildingKind: String, Codable, CaseIterable, Sendable {
     case roboticsFactory
     case shipyard
     case researchLab
+    case metalStorage
+    case crystalStorage
+    case deuteriumTank
+    case naniteFactory
 }
 
 public enum TechnologyKind: String, Codable, CaseIterable, Sendable {

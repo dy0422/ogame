@@ -936,14 +936,53 @@ private struct PlanetEconomyView: View {
                     }
 
                     EconomyColumn(title: "Storage") {
-                        ResourceGrid(resources: planet.storage.resourceBundle)
+                        ResourceGrid(resources: model.storageCapacity(for: planet).resourceBundle)
                     }
                 }
 
+                ProductionControlsView(planet: planet, model: model)
                 EnergyMeterView(planet: planet, model: model)
             }
         }
         .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private struct ProductionControlsView: View {
+    let planet: Planet
+    @ObservedObject var model: AppModel
+
+    private let mineKinds: [BuildingKind] = [.metalMine, .crystalMine, .deuteriumSynthesizer]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(mineKinds, id: \.self) { kind in
+                HStack(spacing: 10) {
+                    Image(systemName: kind.systemImage)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18)
+
+                    Text(kind.rawValue.displayName)
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 128, alignment: .leading)
+
+                    Slider(
+                        value: Binding(
+                            get: { model.productionSetting(for: kind, on: planet) },
+                            set: { model.updateProductionSetting(planetID: planet.id, kind: kind, value: $0) }
+                        ),
+                        in: 0...1,
+                        step: 0.05
+                    )
+                    .disabled(!model.canSave)
+
+                    Text(Formatters.percent(model.productionSetting(for: kind, on: planet)))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
+        }
     }
 }
 
@@ -1331,7 +1370,7 @@ private struct ShipBuildRow: View {
 
                 ResourceCostLine(
                     cost: cost,
-                    durationText: model.durationText(model.shipBuildDuration(for: kind, quantity: quantity)),
+                    durationText: model.durationText(model.shipBuildDuration(for: kind, quantity: quantity, on: planet)),
                     canAfford: canAfford
                 )
 
@@ -1393,7 +1432,7 @@ private struct DefenseBuildRow: View {
 
                 ResourceCostLine(
                     cost: cost,
-                    durationText: model.durationText(model.defenseBuildDuration(for: kind, quantity: quantity)),
+                    durationText: model.durationText(model.defenseBuildDuration(for: kind, quantity: quantity, on: planet)),
                     canAfford: canAfford
                 )
 
@@ -3385,6 +3424,14 @@ private extension BuildingKind {
             return "wrench.and.screwdriver"
         case .researchLab:
             return "testtube.2"
+        case .metalStorage:
+            return "shippingbox"
+        case .crystalStorage:
+            return "shippingbox.fill"
+        case .deuteriumTank:
+            return "cylinder"
+        case .naniteFactory:
+            return "cpu"
         }
     }
 }

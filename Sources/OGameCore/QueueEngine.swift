@@ -68,7 +68,12 @@ public enum QueueEngine {
         }
 
         let targetLevel = currentLevel + 1
-        guard let terms = buildingTerms(rule: rule, targetLevel: targetLevel) else {
+        guard let terms = buildingTerms(
+            rule: rule,
+            targetLevel: targetLevel,
+            planet: universe.planets[planetIndex],
+            ruleSet: universe.ruleSet
+        ) else {
             return .missingRule
         }
 
@@ -206,7 +211,12 @@ public enum QueueEngine {
         }
 
         guard let rule = universe.ruleSet.shipRules[kind],
-              let terms = shipTerms(rule: rule, quantity: quantity)
+              let terms = shipTerms(
+                rule: rule,
+                quantity: quantity,
+                planet: universe.planets[planetIndex],
+                ruleSet: universe.ruleSet
+              )
         else {
             return .missingRule
         }
@@ -278,7 +288,12 @@ public enum QueueEngine {
         }
 
         guard let rule = universe.ruleSet.defenseRules[kind],
-              let terms = defenseTerms(rule: rule, quantity: quantity)
+              let terms = defenseTerms(
+                rule: rule,
+                quantity: quantity,
+                planet: universe.planets[planetIndex],
+                ruleSet: universe.ruleSet
+              )
         else {
             return .missingRule
         }
@@ -482,7 +497,12 @@ public enum QueueEngine {
         return universe.factions.first { $0.id == factionID }
     }
 
-    private static func buildingTerms(rule: BuildingRule, targetLevel: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+    private static func buildingTerms(
+        rule: BuildingRule,
+        targetLevel: Int,
+        planet: Planet,
+        ruleSet: RuleSet
+    ) -> (cost: ResourceBundle, duration: TimeInterval)? {
         guard
             isValidCost(rule.baseCost),
             rule.costMultiplier.isFinite,
@@ -503,7 +523,10 @@ public enum QueueEngine {
         }
 
         let cost = rule.baseCost.scaled(by: costMultiplier)
-        let duration = rule.baseDuration * durationMultiplier
+        let duration = acceleratedDuration(
+            rule.baseDuration * durationMultiplier,
+            speedFactor: constructionSpeedFactor(for: planet, ruleSet: ruleSet)
+        )
         guard isValidCost(cost), duration.isFinite, duration > 0 else {
             return nil
         }
@@ -540,7 +563,12 @@ public enum QueueEngine {
         return (cost, duration)
     }
 
-    private static func shipTerms(rule: ShipRule, quantity: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+    private static func shipTerms(
+        rule: ShipRule,
+        quantity: Int,
+        planet: Planet,
+        ruleSet: RuleSet
+    ) -> (cost: ResourceBundle, duration: TimeInterval)? {
         guard
             quantity > 0,
             isValidCost(rule.baseCost),
@@ -552,7 +580,10 @@ public enum QueueEngine {
 
         let multiplier = Double(quantity)
         let cost = rule.baseCost.scaled(by: multiplier)
-        let duration = rule.baseDuration * multiplier
+        let duration = acceleratedDuration(
+            rule.baseDuration * multiplier,
+            speedFactor: shipyardSpeedFactor(for: planet, ruleSet: ruleSet)
+        )
         guard isValidCost(cost), duration.isFinite, duration > 0 else {
             return nil
         }
@@ -560,7 +591,12 @@ public enum QueueEngine {
         return (cost, duration)
     }
 
-    private static func defenseTerms(rule: DefenseRule, quantity: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+    private static func defenseTerms(
+        rule: DefenseRule,
+        quantity: Int,
+        planet: Planet,
+        ruleSet: RuleSet
+    ) -> (cost: ResourceBundle, duration: TimeInterval)? {
         guard
             quantity > 0,
             isValidCost(rule.baseCost),
@@ -572,7 +608,10 @@ public enum QueueEngine {
 
         let multiplier = Double(quantity)
         let cost = rule.baseCost.scaled(by: multiplier)
-        let duration = rule.baseDuration * multiplier
+        let duration = acceleratedDuration(
+            rule.baseDuration * multiplier,
+            speedFactor: shipyardSpeedFactor(for: planet, ruleSet: ruleSet)
+        )
         guard isValidCost(cost), duration.isFinite, duration > 0 else {
             return nil
         }
@@ -591,6 +630,48 @@ public enum QueueEngine {
 
     private static func normalizedLevel(_ level: Int) -> Int {
         max(level, 0)
+    }
+
+    private static func acceleratedDuration(_ duration: TimeInterval, speedFactor: Double) -> TimeInterval {
+        guard duration.isFinite, duration > 0, speedFactor.isFinite, speedFactor > 0 else {
+            return duration
+        }
+
+        return max(1, ceil(duration / speedFactor))
+    }
+
+    private static func constructionSpeedFactor(for planet: Planet, ruleSet: RuleSet) -> Double {
+        speedFactor(for: planet, ruleSet: ruleSet, keyPath: \.constructionSpeedBonus)
+    }
+
+    private static func shipyardSpeedFactor(for planet: Planet, ruleSet: RuleSet) -> Double {
+        speedFactor(for: planet, ruleSet: ruleSet, keyPath: \.shipyardSpeedBonus)
+    }
+
+    private static func speedFactor(
+        for planet: Planet,
+        ruleSet: RuleSet,
+        keyPath: KeyPath<BuildingRule, Double>
+    ) -> Double {
+        var factor = 1.0
+
+        for (building, level) in planet.buildingLevels {
+            let normalizedLevel = normalizedLevel(level)
+            guard normalizedLevel > 0,
+                  let rule = ruleSet.buildingRules[building]
+            else {
+                continue
+            }
+
+            let bonus = rule[keyPath: keyPath]
+            guard bonus.isFinite, bonus > 0 else {
+                continue
+            }
+
+            factor += bonus * Double(normalizedLevel)
+        }
+
+        return max(factor, 1)
     }
 
     private static func requirementLevel(_ level: Int) -> Int {

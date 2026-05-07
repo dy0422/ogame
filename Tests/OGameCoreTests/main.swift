@@ -1441,7 +1441,9 @@ func queuePlanetID() -> PlanetID {
 func makeQueueUniverse(
     gameTime: TimeInterval = 0,
     resources: ResourceBundle = ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 10_000),
+    storage: ResourceStorage = ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
     buildingLevels: [BuildingKind: Int] = [:],
+    productionSettings: [BuildingKind: Double] = [:],
     researchLevels: [TechnologyKind: Int] = [:],
     buildQueue: [BuildQueueItem] = [],
     researchQueue: [ResearchQueueItem] = [],
@@ -1478,8 +1480,9 @@ func makeQueueUniverse(
                 coordinate: Coordinate(galaxy: 1, system: 1, position: 4),
                 ownerID: playerID,
                 resources: resources,
-                storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+                storage: storage,
                 buildingLevels: buildingLevels,
+                productionSettings: productionSettings,
                 buildQueue: buildQueue,
                 shipBuildQueue: shipBuildQueue,
                 defenseBuildQueue: defenseBuildQueue,
@@ -4335,6 +4338,108 @@ func testEconomyEnergyShortageReducesMineOutput() {
     )
 }
 
+func testPlanetProductionSettingsScaleMineOutputAndEnergyUse() {
+    var planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000ba")!),
+        name: "Throttled Mines",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 11),
+        ownerID: queuePlayerID(),
+        resources: .zero,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [
+            .metalMine: 2,
+            .crystalMine: 1,
+            .deuteriumSynthesizer: 1,
+            .solarPlant: 4
+        ],
+        productionSettings: [
+            .metalMine: 0.5,
+            .crystalMine: 0,
+            .deuteriumSynthesizer: 0.25
+        ]
+    )
+
+    EconomyEngine.recomputeEnergy(for: &planet, ruleSet: .fastSkirmish)
+    let production = EconomyEngine.productionPerHour(for: planet, ruleSet: .fastSkirmish)
+
+    requireEqual(planet.energy, EnergyState(produced: 128, used: 14), "Production settings should scale mine energy usage")
+    requireApproxEqual(
+        production,
+        ResourceBundle(metal: 201.6, crystal: 0, deuterium: 18),
+        "Production settings should scale each mine output independently"
+    )
+}
+
+func testStorageBuildingsIncreaseStorageCaps() {
+    let planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000bb")!),
+        name: "Expanded Vaults",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 12),
+        ownerID: queuePlayerID(),
+        resources: .zero,
+        storage: ResourceStorage(metal: 500, crystal: 600, deuterium: 700),
+        buildingLevels: [
+            .metalStorage: 2,
+            .crystalStorage: 1,
+            .deuteriumTank: 1
+        ]
+    )
+
+    let storage = EconomyEngine.storageCapacity(for: planet, ruleSet: .fastSkirmish)
+
+    requireEqual(
+        storage,
+        ResourceStorage(metal: 20_500, crystal: 10_600, deuterium: 10_700),
+        "Storage buildings should add lane-specific storage caps"
+    )
+}
+
+func testRoboticsAndNaniteStyleAccelerationShortensBuildDurations() {
+    var unaccelerated = makeQueueUniverse(
+        resources: ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.shipyard: 1],
+        researchLevels: [.espionage: 1]
+    )
+    var accelerated = makeQueueUniverse(
+        resources: ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.roboticsFactory: 2, .naniteFactory: 1, .shipyard: 1],
+        researchLevels: [.espionage: 1]
+    )
+
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &unaccelerated, kind: .solarPlant),
+        .queued,
+        "Unaccelerated building should queue"
+    )
+    requireEqual(
+        QueueEngine.startShipBuild(on: queuePlanetID(), in: &unaccelerated, kind: .espionageProbe, quantity: 4),
+        .queued,
+        "Unaccelerated ship build should queue"
+    )
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &accelerated, kind: .solarPlant),
+        .queued,
+        "Accelerated building should queue"
+    )
+    requireEqual(
+        QueueEngine.startShipBuild(on: queuePlanetID(), in: &accelerated, kind: .espionageProbe, quantity: 4),
+        .queued,
+        "Accelerated ship build should queue"
+    )
+
+    let baseBuildingDuration = unaccelerated.planets[0].buildQueue[0].finishTime -
+        unaccelerated.planets[0].buildQueue[0].startTime
+    let acceleratedBuildingDuration = accelerated.planets[0].buildQueue[0].finishTime -
+        accelerated.planets[0].buildQueue[0].startTime
+    let baseShipDuration = unaccelerated.planets[0].shipBuildQueue[0].finishTime -
+        unaccelerated.planets[0].shipBuildQueue[0].startTime
+    let acceleratedShipDuration = accelerated.planets[0].shipBuildQueue[0].finishTime -
+        accelerated.planets[0].shipBuildQueue[0].startTime
+
+    require(acceleratedBuildingDuration < baseBuildingDuration, "Robotics and nanite should shorten building durations")
+    require(acceleratedShipDuration < baseShipDuration, "Robotics and nanite should shorten shipyard durations")
+}
+
 func testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed() {
     let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
     var planet = Planet(
@@ -4770,6 +4875,9 @@ testEconomyProductionPerHourUsesMineLevelsAndEnergyRatio()
 testEconomyOneHourTickIncreasesOwnedPlanetResources()
 testEconomyProductionClampsToStorageCaps()
 testEconomyEnergyShortageReducesMineOutput()
+testPlanetProductionSettingsScaleMineOutputAndEnergyUse()
+testStorageBuildingsIncreaseStorageCaps()
+testRoboticsAndNaniteStyleAccelerationShortensBuildDurations()
 testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed()
 testEconomyUniverseTickDoesNotProduceOnNonOwnedPlanets()
 testQueueEngineStartsBuildingUpgradeAndPaysCost()
