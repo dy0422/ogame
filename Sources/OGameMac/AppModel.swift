@@ -8,13 +8,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var universe: Universe
     @Published var statusMessage: String
     @Published private(set) var canSave: Bool
-    @Published private(set) var offlineSummary: OfflineCatchUpSummary?
+    @Published private(set) var offlineSummary: OfflineCatchUpSummary? = nil
+    @Published private(set) var hasPendingOfflineCatchUpSave = false
 
     private let repository: JSONSaveRepository
+    private let currentDate: () -> Date
 
     init(
         repository: JSONSaveRepository? = nil,
-        currentDate: () -> Date = Date.init
+        currentDate: @escaping () -> Date = Date.init
     ) {
         let resolvedRepository: JSONSaveRepository
         if let repository {
@@ -30,39 +32,32 @@ final class AppModel: ObservableObject {
         }
 
         self.repository = resolvedRepository
+        self.currentDate = currentDate
 
         do {
             let envelope = try resolvedRepository.load()
             let loadedAt = currentDate()
-            var loadedUniverse = envelope.universe
-            let catchUpSummary = OfflineSimulationEngine.catchUp(
-                universe: &loadedUniverse,
-                elapsed: envelope.elapsedSinceLastSave(until: loadedAt),
-                now: loadedAt
-            )
-
-            universe = loadedUniverse
-            offlineSummary = catchUpSummary.didMutate ? catchUpSummary : nil
+            let catchUpResult = envelope.offlineCatchUp(until: loadedAt)
+            universe = catchUpResult.universe
+            offlineSummary = catchUpResult.summary.didMutate ? catchUpResult.summary : nil
+            hasPendingOfflineCatchUpSave = catchUpResult.summary.didMutate
             canSave = true
 
-            if catchUpSummary.didMutate {
-                do {
-                    try resolvedRepository.save(loadedUniverse, wallClockDate: loadedAt)
-                    statusMessage = Self.offlineCatchUpStatus(for: catchUpSummary, autosaveError: nil)
-                } catch {
-                    statusMessage = Self.offlineCatchUpStatus(for: catchUpSummary, autosaveError: error)
-                }
+            if catchUpResult.summary.didMutate {
+                statusMessage = Self.offlineCatchUpPendingStatus(for: catchUpResult.summary)
             } else {
                 statusMessage = "Loaded save from \(envelope.lastSavedAt.formatted(date: .abbreviated, time: .shortened))."
             }
         } catch JSONSaveRepository.RepositoryError.missingSave {
             universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
             offlineSummary = nil
+            hasPendingOfflineCatchUpSave = false
             statusMessage = "New fast skirmish initialized."
             canSave = true
         } catch {
             universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
             offlineSummary = nil
+            hasPendingOfflineCatchUpSave = false
             statusMessage = Self.loadFailureStatus(for: error)
             canSave = false
         }
@@ -101,7 +96,10 @@ final class AppModel: ObservableObject {
             return nil
         }
 
-        return Self.offlineSummaryDetail(for: offlineSummary)
+        return Self.offlineSummaryDetail(
+            for: offlineSummary,
+            hasPendingSave: hasPendingOfflineCatchUpSave
+        )
     }
 
     func startBuildingUpgrade(planetID: PlanetID, kind: BuildingKind) {
@@ -311,8 +309,12 @@ final class AppModel: ObservableObject {
         }
 
         do {
-            try repository.save(universe)
-            statusMessage = "Saved universe."
+            let savedPendingOfflineCatchUp = hasPendingOfflineCatchUpSave
+            try repository.save(universe, wallClockDate: currentDate())
+            hasPendingOfflineCatchUpSave = false
+            statusMessage = savedPendingOfflineCatchUp
+                ? "Saved universe. Offline progress is now saved."
+                : "Saved universe."
         } catch {
             statusMessage = "Save failed: \(error.localizedDescription)"
         }
@@ -321,6 +323,7 @@ final class AppModel: ObservableObject {
     func startNewGame() {
         universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
         offlineSummary = nil
+        hasPendingOfflineCatchUpSave = false
         canSave = true
         statusMessage = "New game started. Saving will replace the current autosave."
     }
@@ -349,24 +352,18 @@ final class AppModel: ObservableObject {
         return seconds.formatted(.number.precision(.fractionLength(0))) + " seconds"
     }
 
-    private static func offlineCatchUpStatus(
-        for summary: OfflineCatchUpSummary,
-        autosaveError: Error?
-    ) -> String {
-        let saveText: String
-        if let autosaveError {
-            saveText = "Autosave failed: \(autosaveError.localizedDescription)"
-        } else {
-            saveText = "Autosaved."
-        }
-
-        return "Caught up \(formattedDuration(summary.elapsedSeconds)) offline. \(saveText)"
+    private static func offlineCatchUpPendingStatus(for summary: OfflineCatchUpSummary) -> String {
+        "Caught up \(formattedDuration(summary.elapsedSeconds)) offline. Progress is applied but not saved yet."
     }
 
-    private static func offlineSummaryDetail(for summary: OfflineCatchUpSummary) -> String {
+    private static func offlineSummaryDetail(
+        for summary: OfflineCatchUpSummary,
+        hasPendingSave: Bool
+    ) -> String {
         let constructionText = itemCountText(summary.completedConstructionCount, singular: "construction")
         let researchText = itemCountText(summary.completedResearchCount, singular: "research")
-        return "Processed \(summary.processedChunks) chunks; completed \(constructionText) and \(researchText)."
+        let saveText = hasPendingSave ? "Pending save." : "Saved."
+        return "Processed \(summary.processedChunks) chunks; completed \(constructionText) and \(researchText). \(saveText)"
     }
 
     private static func itemCountText(_ count: Int, singular: String) -> String {
@@ -388,8 +385,13 @@ final class AppModel: ObservableObject {
     }
 
     private func autosaveAfterQueueing(successStatus: String) {
+        if hasPendingOfflineCatchUpSave {
+            statusMessage = "\(successStatus) Offline progress and this action are pending save."
+            return
+        }
+
         do {
-            try repository.save(universe)
+            try repository.save(universe, wallClockDate: currentDate())
             statusMessage = "\(successStatus) Autosaved."
         } catch {
             statusMessage = "\(successStatus) Autosave failed: \(error.localizedDescription)"

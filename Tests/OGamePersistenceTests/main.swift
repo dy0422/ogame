@@ -90,7 +90,7 @@ func testRepositorySavesAndLoadsQueueMetadata() throws {
     )
 }
 
-func testLoadedEnvelopeFeedsOfflineCatchUpWithoutSchemaDrift() throws {
+func testLoadedEnvelopePreparesOfflineCatchUpWithoutSavingUntilExplicitWrite() throws {
     let directory = uniqueTemporaryDirectory()
     let repository = JSONSaveRepository(saveDirectory: directory)
     let universe = StarterUniverseFactory.makeNewGame(seed: 15, playerName: "Commander")
@@ -99,25 +99,23 @@ func testLoadedEnvelopeFeedsOfflineCatchUpWithoutSchemaDrift() throws {
 
     try repository.save(universe, wallClockDate: savedAt)
     let loaded = try repository.load()
-    var caughtUpUniverse = loaded.universe
     let elapsed = loaded.elapsedSinceLastSave(until: currentDate)
-    let summary = OfflineSimulationEngine.catchUp(
-        universe: &caughtUpUniverse,
-        elapsed: elapsed,
-        now: currentDate
-    )
+    let catchUpResult = loaded.offlineCatchUp(until: currentDate)
+    let unchangedAfterCatchUp = try repository.load()
 
-    try repository.save(caughtUpUniverse, wallClockDate: currentDate)
+    try repository.save(catchUpResult.universe, wallClockDate: currentDate)
     let reloaded = try repository.load()
 
     requireEqual(elapsed, 600, "Loaded envelope should compute elapsed seconds from its wall-clock save date")
-    requireEqual(summary.elapsedSeconds, 600, "Offline catch-up should use the loaded wall-clock elapsed time")
-    requireEqual(summary.didMutate, true, "Positive loaded elapsed time should mutate during offline catch-up")
-    requireEqual(caughtUpUniverse.lastSimulatedWallClockTime, currentDate, "Catch-up should store the current wall-clock date")
-    requireEqual(caughtUpUniverse.events.last?.title, "Offline Catch-Up Complete", "Catch-up should record a summary event")
+    requireEqual(catchUpResult.summary.elapsedSeconds, 600, "Offline catch-up should use the loaded wall-clock elapsed time")
+    requireEqual(catchUpResult.summary.didMutate, true, "Positive loaded elapsed time should mutate during offline catch-up")
+    requireEqual(unchangedAfterCatchUp.lastSavedAt, savedAt, "Prepared catch-up should not rewrite the save date before explicit save")
+    requireEqual(unchangedAfterCatchUp.universe, universe, "Prepared catch-up should not rewrite the saved universe before explicit save")
+    requireEqual(catchUpResult.universe.lastSimulatedWallClockTime, currentDate, "Catch-up should store the current wall-clock date")
+    requireEqual(catchUpResult.universe.events.last?.title, "Offline Catch-Up Complete", "Catch-up should record a summary event")
     requireEqual(reloaded.schemaVersion, SaveEnvelope.currentSchemaVersion, "Resaved catch-up should preserve schema version")
     requireEqual(reloaded.lastSavedAt, currentDate, "Resaved catch-up should preserve the current wall-clock date")
-    requireEqual(reloaded.universe, caughtUpUniverse, "Resaved catch-up universe should round-trip without schema drift")
+    requireEqual(reloaded.universe, catchUpResult.universe, "Resaved catch-up universe should round-trip without schema drift")
 }
 
 func testRepositoryReportsMissingSave() {
@@ -205,7 +203,7 @@ func testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode() throws {
 
 try testRepositorySavesAndLoadsUniverse()
 try testRepositorySavesAndLoadsQueueMetadata()
-try testLoadedEnvelopeFeedsOfflineCatchUpWithoutSchemaDrift()
+try testLoadedEnvelopePreparesOfflineCatchUpWithoutSavingUntilExplicitWrite()
 testRepositoryReportsMissingSave()
 try testRepositoryRejectsUnsupportedSchema()
 try testRepositoryRejectsInvalidFileNamesBeforeSaving()
