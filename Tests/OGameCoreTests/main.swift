@@ -3089,6 +3089,227 @@ func testAIStrategyDoesNotReadHiddenPlayerFleetState() {
     )
 }
 
+func testAIRaiderLaunchesEspionageBeforeAttack() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let raider = makeAIEconomyFaction(index: 1, strategy: .raider)
+    let playerPlanet = makeAIEconomyPlanet(
+        index: 0,
+        ownerID: player.id,
+        resources: ResourceBundle(metal: 8_000, crystal: 4_000, deuterium: 1_000)
+    )
+    let raiderPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: raider.id,
+        resources: ResourceBundle(metal: 20_000, crystal: 20_000, deuterium: 8_000),
+        buildingLevels: [.shipyard: 1, .roboticsFactory: 1, .solarPlant: 2],
+        shipInventory: [.espionageProbe: 2, .lightFighter: 5, .smallCargo: 1]
+    )
+    var universe = makeAIEconomyUniverse(factions: [player, raider], planets: [playerPlanet, raiderPlanet])
+
+    AIStrategyEngine.makeStrategicDecisions(in: &universe)
+
+    requireEqual(universe.fleets.count, 1, "Raider should launch one strategic fleet")
+    requireEqual(universe.fleets[0].mission, .espionage, "Raider should scout before attacking without a report")
+    requireEqual(universe.fleets[0].targetPlanetID, playerPlanet.id, "Raider should scout the visible rival planet")
+}
+
+func testAIExpansionistColonizesKnownNeutralWorld() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let expansionist = makeAIEconomyFaction(index: 1, strategy: .expansionist)
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let expansionistPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: expansionist.id,
+        resources: ResourceBundle(metal: 30_000, crystal: 30_000, deuterium: 20_000),
+        buildingLevels: [.shipyard: 1, .roboticsFactory: 1, .solarPlant: 2],
+        shipInventory: [.colonyShip: 1, .smallCargo: 1]
+    )
+    let neutralPlanet = makeAIEconomyPlanet(index: 2, ownerID: expansionist.id)
+    var unclaimed = neutralPlanet
+    unclaimed.ownerID = nil
+    unclaimed.name = "Known Empty"
+    var universe = makeAIEconomyUniverse(
+        factions: [player, expansionist],
+        planets: [playerPlanet, expansionistPlanet, unclaimed]
+    )
+    universe.explorationRecords = [
+        ExplorationRecord(
+            factionID: expansionist.id,
+            targetPlanetID: unclaimed.id,
+            exploredAt: 60,
+            discoveredNeutral: true
+        )
+    ]
+
+    AIStrategyEngine.makeStrategicDecisions(in: &universe)
+
+    requireEqual(universe.fleets.count, 1, "Expansionist should launch one strategic fleet")
+    requireEqual(universe.fleets[0].mission, .colonize, "Expansionist should colonize known neutral worlds")
+    requireEqual(universe.fleets[0].targetPlanetID, unclaimed.id, "Expansionist should target the known neutral world")
+}
+
+func testAIRecyclerCollectsKnownDebris() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let miner = makeAIEconomyFaction(index: 1, strategy: .miner)
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let minerPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: miner.id,
+        resources: ResourceBundle(metal: 20_000, crystal: 20_000, deuterium: 8_000),
+        buildingLevels: [.shipyard: 1, .roboticsFactory: 1, .solarPlant: 2],
+        shipInventory: [.recycler: 1]
+    )
+    let debrisPlanet = makeAIEconomyPlanet(
+        index: 2,
+        ownerID: player.id,
+        debrisField: ResourceBundle(metal: 4_000, crystal: 2_000)
+    )
+    var universe = makeAIEconomyUniverse(factions: [player, miner], planets: [playerPlanet, minerPlanet, debrisPlanet])
+    universe.explorationRecords = [
+        ExplorationRecord(
+            factionID: miner.id,
+            targetPlanetID: debrisPlanet.id,
+            exploredAt: 80,
+            discoveredDebris: ResourceBundle(metal: 4_000, crystal: 2_000),
+            discoveredOwnerID: player.id
+        )
+    ]
+
+    AIStrategyEngine.makeStrategicDecisions(in: &universe)
+
+    requireEqual(universe.fleets.count, 1, "Recycler should launch one strategic fleet")
+    requireEqual(universe.fleets[0].mission, .recycle, "AI should recycle known debris")
+    requireEqual(universe.fleets[0].targetPlanetID, debrisPlanet.id, "AI should target the known debris field")
+}
+
+func testAIAttackUsesKnownWeakTargetOnly() {
+    let player = Faction(
+        id: aiTestPlayerID(),
+        name: "Player",
+        kind: .player,
+        strategy: .balanced,
+        ownedPlanetIDs: [aiTestPlanetID(0), aiTestPlanetID(2)]
+    )
+    let raider = makeAIEconomyFaction(index: 1, strategy: .raider)
+    let knownWeak = makeAIEconomyPlanet(
+        index: 0,
+        ownerID: player.id,
+        resources: ResourceBundle(metal: 6_000, crystal: 2_000, deuterium: 500)
+    )
+    let raiderPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: raider.id,
+        resources: ResourceBundle(metal: 30_000, crystal: 20_000, deuterium: 10_000),
+        buildingLevels: [.shipyard: 1, .roboticsFactory: 1, .solarPlant: 2],
+        shipInventory: [.lightFighter: 6, .smallCargo: 1, .espionageProbe: 1]
+    )
+    let unknownRich = makeAIEconomyPlanet(
+        index: 2,
+        ownerID: player.id,
+        resources: ResourceBundle(metal: 90_000, crystal: 50_000, deuterium: 20_000),
+        shipInventory: [.battleship: 20],
+        defenseInventory: [.plasmaTurret: 20]
+    )
+    var universe = makeAIEconomyUniverse(factions: [player, raider], planets: [knownWeak, raiderPlanet, unknownRich])
+    universe.explorationRecords = [
+        ExplorationRecord(
+            factionID: raider.id,
+            targetPlanetID: knownWeak.id,
+            exploredAt: 90,
+            discoveredResources: knownWeak.resources,
+            discoveredOwnerID: player.id
+        )
+    ]
+    universe.reports = [
+        Report(
+            id: UUID(uuidString: "00000000-0000-0000-0000-00000000aa01")!,
+            time: 95,
+            kind: .espionage,
+            title: "Known weak scan",
+            summary: "Known weak target.",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: raider.id, planetID: raiderPlanet.id, name: "Scout"),
+                ReportParticipant(
+                    role: .defender,
+                    factionID: player.id,
+                    planetID: knownWeak.id,
+                    name: "Known Weak",
+                    beforeShips: [:],
+                    afterShips: [:],
+                    beforeDefenses: [:],
+                    afterDefenses: [:]
+                )
+            ]
+        )
+    ]
+
+    AIStrategyEngine.makeStrategicDecisions(in: &universe)
+
+    requireEqual(universe.fleets.count, 1, "Raider should launch one strategic fleet")
+    requireEqual(universe.fleets[0].mission, .attack, "Raider should attack after a weak target report")
+    requireEqual(universe.fleets[0].targetPlanetID, knownWeak.id, "Raider should attack the known weak target only")
+}
+
+func testOfflineCatchUpCapsAIAggressiveFleetLaunchesByChunkPressure() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let raider = makeAIEconomyFaction(index: 1, strategy: .raider)
+    let knownWeak = Planet(
+        id: aiTestPlanetID(0),
+        name: "Close Weak",
+        coordinate: Coordinate(galaxy: 1, system: 10, position: 4),
+        ownerID: player.id,
+        resources: ResourceBundle(metal: 90_000, crystal: 30_000, deuterium: 10_000),
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000)
+    )
+    let raiderPlanet = Planet(
+        id: aiTestPlanetID(1),
+        name: "Close Raider",
+        coordinate: Coordinate(galaxy: 1, system: 10, position: 5),
+        ownerID: raider.id,
+        resources: ResourceBundle(metal: 90_000, crystal: 90_000, deuterium: 90_000),
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.shipyard: 1, .roboticsFactory: 1, .solarPlant: 2],
+        shipInventory: [.lightFighter: 80, .smallCargo: 10]
+    )
+    var universe = makeAIEconomyUniverse(
+        factions: [player, raider],
+        planets: [knownWeak, raiderPlanet],
+        ruleSet: fastSkirmishRules(offlineChunkInterval: 120)
+    )
+    universe.explorationRecords = [
+        ExplorationRecord(
+            factionID: raider.id,
+            targetPlanetID: knownWeak.id,
+            exploredAt: 90,
+            discoveredResources: knownWeak.resources,
+            discoveredOwnerID: player.id
+        )
+    ]
+    universe.reports = [
+        Report(
+            id: UUID(uuidString: "00000000-0000-0000-0000-00000000aa02")!,
+            time: 95,
+            kind: .espionage,
+            title: "Close weak scan",
+            summary: "Known weak target.",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: raider.id, planetID: raiderPlanet.id, name: "Scout"),
+                ReportParticipant(role: .defender, factionID: player.id, planetID: knownWeak.id, name: "Close Weak")
+            ]
+        )
+    ]
+
+    let summary = OfflineSimulationEngine.catchUp(universe: &universe, elapsed: 7_200, now: Date(timeIntervalSince1970: 7_200))
+    let battleReports = universe.reports.filter { $0.kind == .battle }
+
+    requireEqual(summary.processedChunks, 60, "Offline catch-up should still process the requested chunk window")
+    require(
+        battleReports.count <= 1,
+        "Offline catch-up should cap aggressive AI battle chains under chunk pressure"
+    )
+    requireEqual(universe.events.last?.title, "Offline Catch-Up Complete", "Offline catch-up should keep the summary event")
+}
+
 func testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals() {
     let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
     let ai = makeAIEconomyFaction(index: 1, strategy: .miner)
@@ -4327,6 +4548,11 @@ try testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState()
 testAIStrategyBuildsShipsForRaiderFactions()
 testAIStrategyBuildsDefensesForThreatenedFactions()
 testAIStrategyDoesNotReadHiddenPlayerFleetState()
+testAIRaiderLaunchesEspionageBeforeAttack()
+testAIExpansionistColonizesKnownNeutralWorld()
+testAIRecyclerCollectsKnownDebris()
+testAIAttackUsesKnownWeakTargetOnly()
+testOfflineCatchUpCapsAIAggressiveFleetLaunchesByChunkPressure()
 testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals()
 testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent()
 testSimulationTickCompletesAlreadyDueConstructionBeforeProduction()

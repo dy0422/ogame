@@ -31,6 +31,8 @@ public struct OfflineCatchUpSummary: Codable, Equatable, Sendable {
 public enum OfflineSimulationEngine {
     private static let maximumElapsedSeconds: TimeInterval = 86_400
     private static let minimumChunkInterval: TimeInterval = 60
+    private static let aggressiveAIChunkBudget = 2
+    private static let aggressiveAIEventPressureBudget = 24
 
     public static func catchUp(
         universe: inout Universe,
@@ -59,8 +61,14 @@ public enum OfflineSimulationEngine {
         while remaining > 0 {
             let delta = min(chunkInterval, remaining)
             let eventStartCount = universe.events.count
+            let allowAggressiveAI = summary.processedChunks < aggressiveAIChunkBudget &&
+                summary.generatedEventCount < aggressiveAIEventPressureBudget
 
-            SimulationEngine.tick(universe: &universe, delta: delta)
+            SimulationEngine.tick(
+                universe: &universe,
+                delta: delta,
+                allowAggressiveAIStrategy: allowAggressiveAI
+            )
 
             let generatedEvents = Array(universe.events[eventStartCount..<universe.events.count])
             summary.completedConstructionCount += generatedEvents.filter(isConstructionCompletionEvent).count

@@ -4,7 +4,11 @@ public enum SimulationEngine {
     private static let minimumAIDecisionInterval: TimeInterval = 60
     private static let minimumAIStrategyInterval: TimeInterval = 120
 
-    public static func tick(universe: inout Universe, delta: TimeInterval) {
+    public static func tick(
+        universe: inout Universe,
+        delta: TimeInterval,
+        allowAggressiveAIStrategy: Bool = true
+    ) {
         guard delta.isFinite, delta > 0 else {
             return
         }
@@ -18,7 +22,11 @@ public enum SimulationEngine {
         QueueEngine.completeDueItems(in: &universe)
         FleetEngine.resolveDueFleets(in: &universe)
         runAIEconomyDecisionsIfNeeded(in: &universe, from: initialGameTime)
-        runAIStrategyDecisionsIfNeeded(in: &universe, from: initialGameTime)
+        runAIStrategyDecisionsIfNeeded(
+            in: &universe,
+            from: initialGameTime,
+            allowAggressiveMissions: allowAggressiveAIStrategy
+        )
         StrategicEngine.updateStrategicState(in: &universe)
 
         universe.events.append(
@@ -40,12 +48,19 @@ public enum SimulationEngine {
         AIEconomyEngine.makeDecisions(in: &universe)
     }
 
-    private static func runAIStrategyDecisionsIfNeeded(in universe: inout Universe, from initialGameTime: TimeInterval) {
+    private static func runAIStrategyDecisionsIfNeeded(
+        in universe: inout Universe,
+        from initialGameTime: TimeInterval,
+        allowAggressiveMissions: Bool
+    ) {
         guard shouldRunAIStrategyDecisions(from: initialGameTime, to: universe.gameTime, ruleSet: universe.ruleSet) else {
             return
         }
 
-        AIStrategyEngine.makeStrategicDecisions(in: &universe)
+        AIStrategyEngine.makeStrategicDecisions(
+            in: &universe,
+            allowAggressiveMissions: allowAggressiveMissions
+        )
     }
 
     private static func shouldRunAIEconomyDecisions(
