@@ -15,6 +15,7 @@ public enum SimulationEngine {
 
         universe.gameTime += delta
         QueueEngine.completeDueItems(in: &universe)
+        FleetEngine.resolveDueFleets(in: &universe)
         runAIDecisionsIfNeeded(in: &universe, from: initialGameTime)
 
         universe.events.append(

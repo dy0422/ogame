@@ -333,6 +333,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
     public var defenseBuildQueue: [UnitBuildQueueItem]
     public var shipInventory: [ShipKind: Int]
     public var defenseInventory: [DefenseKind: Int]
+    public var debrisField: ResourceBundle
 
     public init(
         id: PlanetID = PlanetID(),
@@ -347,7 +348,8 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         shipBuildQueue: [UnitBuildQueueItem] = [],
         defenseBuildQueue: [UnitBuildQueueItem] = [],
         shipInventory: [ShipKind: Int] = [:],
-        defenseInventory: [DefenseKind: Int] = [:]
+        defenseInventory: [DefenseKind: Int] = [:],
+        debrisField: ResourceBundle = .zero
     ) {
         self.id = id
         self.name = name
@@ -362,6 +364,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         self.defenseBuildQueue = defenseBuildQueue
         self.shipInventory = shipInventory
         self.defenseInventory = defenseInventory
+        self.debrisField = debrisField
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -378,6 +381,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         case defenseBuildQueue
         case shipInventory
         case defenseInventory
+        case debrisField
     }
 
     public init(from decoder: Decoder) throws {
@@ -396,6 +400,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         self.defenseBuildQueue = try container.decodeIfPresentStrict([UnitBuildQueueItem].self, forKey: .defenseBuildQueue) ?? []
         self.shipInventory = try container.decodeRawValueDictionary(ShipKind.self, forKey: .shipInventory)
         self.defenseInventory = try container.decodeRawValueDictionary(DefenseKind.self, forKey: .defenseInventory)
+        self.debrisField = try container.decodeIfPresentStrict(ResourceBundle.self, forKey: .debrisField) ?? .zero
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -414,6 +419,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         try container.encode(defenseBuildQueue, forKey: .defenseBuildQueue)
         try container.encodeRawValueDictionary(shipInventory, forKey: .shipInventory)
         try container.encodeRawValueDictionary(defenseInventory, forKey: .defenseInventory)
+        try container.encode(debrisField, forKey: .debrisField)
     }
 }
 
@@ -446,6 +452,8 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
     public var arrivalTime: TimeInterval
     public var returnTime: TimeInterval
     public var phase: Phase
+    public var originPlanetID: PlanetID?
+    public var targetPlanetID: PlanetID?
 
     public init(
         id: FleetID = FleetID(),
@@ -458,7 +466,9 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         launchTime: TimeInterval,
         arrivalTime: TimeInterval,
         returnTime: TimeInterval,
-        phase: Phase = .outbound
+        phase: Phase = .outbound,
+        originPlanetID: PlanetID? = nil,
+        targetPlanetID: PlanetID? = nil
     ) {
         self.id = id
         self.ownerID = ownerID
@@ -471,6 +481,8 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         self.arrivalTime = arrivalTime
         self.returnTime = returnTime
         self.phase = phase
+        self.originPlanetID = originPlanetID
+        self.targetPlanetID = targetPlanetID
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -485,6 +497,8 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         case arrivalTime
         case returnTime
         case phase
+        case originPlanetID
+        case targetPlanetID
     }
 
     public init(from decoder: Decoder) throws {
@@ -501,6 +515,8 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         self.arrivalTime = try container.decode(TimeInterval.self, forKey: .arrivalTime)
         self.returnTime = try container.decode(TimeInterval.self, forKey: .returnTime)
         self.phase = try container.decode(Phase.self, forKey: .phase)
+        self.originPlanetID = try container.decodeIfPresent(PlanetID.self, forKey: .originPlanetID)
+        self.targetPlanetID = try container.decodeIfPresent(PlanetID.self, forKey: .targetPlanetID)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -517,6 +533,8 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         try container.encode(arrivalTime, forKey: .arrivalTime)
         try container.encode(returnTime, forKey: .returnTime)
         try container.encode(phase, forKey: .phase)
+        try container.encodeIfPresent(originPlanetID, forKey: .originPlanetID)
+        try container.encodeIfPresent(targetPlanetID, forKey: .targetPlanetID)
     }
 }
 
@@ -628,8 +646,9 @@ public struct RuleSet: Codable, Equatable, Sendable {
             ?? RuleSet.fastSkirmish.buildingRules
         self.researchRules = try container.decodeRawValueDictionaryIfPresent(TechnologyKind.self, forKey: .researchRules)
             ?? RuleSet.fastSkirmish.researchRules
-        self.shipRules = try container.decodeRawValueDictionaryIfPresent(ShipKind.self, forKey: .shipRules)
+        let decodedShipRules = try container.decodeRawValueDictionaryIfPresent(ShipKind.self, forKey: .shipRules)
             ?? RuleSet.fastSkirmish.shipRules
+        self.shipRules = RuleSet.migrateShipRulesForFleetFields(decodedShipRules)
         self.defenseRules = try container.decodeRawValueDictionaryIfPresent(DefenseKind.self, forKey: .defenseRules)
             ?? RuleSet.fastSkirmish.defenseRules
     }
