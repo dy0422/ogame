@@ -10,7 +10,9 @@ let package = Package(
     products: [
         .library(name: "OGameCore", targets: ["OGameCore"]),
         .library(name: "OGamePersistence", targets: ["OGamePersistence"]),
-        .executable(name: "OGameMac", targets: ["OGameMac"])
+        .executable(name: "OGameMac", targets: ["OGameMac"]),
+        .executable(name: "OGameCoreTests", targets: ["OGameCoreTests"]),
+        .executable(name: "OGamePersistenceTests", targets: ["OGamePersistenceTests"])
     ],
     targets: [
         .target(
@@ -24,13 +26,15 @@ let package = Package(
             name: "OGameMac",
             dependencies: ["OGameCore", "OGamePersistence"]
         ),
-        .testTarget(
+        .executableTarget(
             name: "OGameCoreTests",
-            dependencies: ["OGameCore"]
+            dependencies: ["OGameCore"],
+            path: "Tests/OGameCoreTests"
         ),
-        .testTarget(
+        .executableTarget(
             name: "OGamePersistenceTests",
-            dependencies: ["OGameCore", "OGamePersistence"]
+            dependencies: ["OGameCore", "OGamePersistence"],
+            path: "Tests/OGamePersistenceTests"
         )
     ]
 )

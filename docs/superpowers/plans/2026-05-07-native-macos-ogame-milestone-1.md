@@ -8,6 +8,8 @@
 
 **Tech Stack:** Swift 5.9+, Swift Package Manager, SwiftUI, Foundation, XCTest, JSON `Codable` persistence.
 
+**Environment amendment:** The local Command Line Tools Swift toolchain lacks XCTest and Swift Testing modules, so this milestone uses executable test runners instead of SwiftPM `.testTarget` entries. Verify with `swift run OGameCoreTests`, `swift run OGamePersistenceTests`, and `swift build`.
+
 ---
 
 ## Scope Check
