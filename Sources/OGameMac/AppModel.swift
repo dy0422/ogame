@@ -38,7 +38,7 @@ final class AppModel: ObservableObject {
             let envelope = try resolvedRepository.load()
             let loadedAt = currentDate()
             let catchUpResult = envelope.offlineCatchUp(until: loadedAt)
-            universe = catchUpResult.universe
+            universe = Self.refreshedStrategicUniverse(catchUpResult.universe)
             offlineSummary = catchUpResult.summary.didMutate ? catchUpResult.summary : nil
             hasPendingOfflineCatchUpSave = catchUpResult.summary.didMutate
             canSave = true
@@ -49,13 +49,17 @@ final class AppModel: ObservableObject {
                 statusMessage = "Loaded save from \(envelope.lastSavedAt.formatted(date: .abbreviated, time: .shortened))."
             }
         } catch JSONSaveRepository.RepositoryError.missingSave {
-            universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+            universe = Self.refreshedStrategicUniverse(
+                StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+            )
             offlineSummary = nil
             hasPendingOfflineCatchUpSave = false
             statusMessage = "New fast skirmish initialized."
             canSave = true
         } catch {
-            universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+            universe = Self.refreshedStrategicUniverse(
+                StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+            )
             offlineSummary = nil
             hasPendingOfflineCatchUpSave = false
             statusMessage = Self.loadFailureStatus(for: error)
@@ -688,6 +692,7 @@ final class AppModel: ObservableObject {
         }
 
         SimulationEngine.tick(universe: &universe, delta: 60)
+        refreshStrategicState()
         statusMessage = "Advanced to T+\(Self.formattedWholeSeconds(universe.gameTime))."
     }
 
@@ -698,6 +703,7 @@ final class AppModel: ObservableObject {
         }
 
         do {
+            refreshStrategicState()
             let savedPendingOfflineCatchUp = hasPendingOfflineCatchUpSave
             try repository.save(universe, wallClockDate: currentDate())
             hasPendingOfflineCatchUpSave = false
@@ -711,6 +717,7 @@ final class AppModel: ObservableObject {
 
     func startNewGame() {
         universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+        refreshStrategicState()
         offlineSummary = nil
         hasPendingOfflineCatchUpSave = false
         canSave = true
@@ -774,6 +781,8 @@ final class AppModel: ObservableObject {
     }
 
     private func autosaveAfterQueueing(successStatus: String) {
+        refreshStrategicState()
+
         if hasPendingOfflineCatchUpSave {
             statusMessage = "\(successStatus) Offline progress and this action are pending save."
             return
@@ -785,6 +794,16 @@ final class AppModel: ObservableObject {
         } catch {
             statusMessage = "\(successStatus) Autosave failed: \(error.localizedDescription)"
         }
+    }
+
+    private func refreshStrategicState() {
+        StrategicEngine.updateStrategicState(in: &universe)
+    }
+
+    private static func refreshedStrategicUniverse(_ universe: Universe) -> Universe {
+        var refreshed = universe
+        StrategicEngine.updateStrategicState(in: &refreshed)
+        return refreshed
     }
 
     private func buildingUpgradeTerms(for planet: Planet, kind: BuildingKind) -> (cost: ResourceBundle, duration: TimeInterval)? {

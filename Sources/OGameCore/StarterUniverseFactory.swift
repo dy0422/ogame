@@ -63,6 +63,25 @@ public enum StarterUniverseFactory {
             )
         }
 
+        let neutralCoordinates = [
+            Coordinate(galaxy: 1, system: 8, position: 6),
+            Coordinate(galaxy: 1, system: 9, position: 9),
+            Coordinate(galaxy: 1, system: 10, position: 12)
+        ]
+        for (offset, coordinate) in neutralCoordinates.enumerated() {
+            planets.append(
+                Planet(
+                    id: stablePlanetID(index: 6 + offset),
+                    name: "Unclaimed \(offset + 1)",
+                    coordinate: coordinate,
+                    ownerID: nil,
+                    resources: ResourceBundle(metal: 100 + Double(offset * 50), crystal: 50, deuterium: 20),
+                    storage: startingStorage,
+                    debrisField: ResourceBundle(metal: 25 + Double(offset * 10), crystal: 10)
+                )
+            )
+        }
+
         let welcome = GameEvent(
             id: EventID(UUID(uuidString: "00000000-0000-0000-0000-000000000100")!),
             time: 0,

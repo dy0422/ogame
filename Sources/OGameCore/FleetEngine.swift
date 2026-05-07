@@ -279,6 +279,7 @@ public enum FleetEngine {
         case .explore:
             let reward = explorationReward(for: fleet, universe: universe)
             returningFleet.cargo = safeAdding(fleet.cargo, reward)
+            recordExploredTarget(for: fleet, in: &universe)
             universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .exploration, title: "Exploration Complete"))
         case .colonize:
             if let targetIndex = targetPlanetIndex(for: fleet, in: universe),
@@ -423,6 +424,21 @@ public enum FleetEngine {
         }
 
         return universe.planets.firstIndex(where: { $0.coordinate == fleet.target })
+    }
+
+    private static func recordExploredTarget(for fleet: Fleet, in universe: inout Universe) {
+        guard fleet.ownerID == universe.playerFactionID,
+              let targetIndex = targetPlanetIndex(for: fleet, in: universe)
+        else {
+            return
+        }
+
+        let planetID = universe.planets[targetIndex].id
+        guard !universe.victoryState.exploredPlanetIDs.contains(planetID) else {
+            return
+        }
+
+        universe.victoryState.exploredPlanetIDs.append(planetID)
     }
 
     private static func collectResources(from resources: ResourceBundle, limit: Double) -> ResourceBundle {

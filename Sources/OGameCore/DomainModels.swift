@@ -13,6 +13,8 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
     public var events: [GameEvent]
     public var reports: [Report]
     public var ruleSet: RuleSet
+    public var rankings: [FactionScore]
+    public var victoryState: VictoryState
 
     public init(
         id: UniverseID = UniverseID(),
@@ -26,7 +28,9 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         fleets: [Fleet],
         events: [GameEvent],
         reports: [Report] = [],
-        ruleSet: RuleSet
+        ruleSet: RuleSet,
+        rankings: [FactionScore] = [],
+        victoryState: VictoryState = VictoryState()
     ) {
         self.id = id
         self.name = name
@@ -40,6 +44,8 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         self.events = events
         self.reports = reports
         self.ruleSet = ruleSet
+        self.rankings = rankings
+        self.victoryState = victoryState
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -55,6 +61,8 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         case events
         case reports
         case ruleSet
+        case rankings
+        case victoryState
     }
 
     public init(from decoder: Decoder) throws {
@@ -72,6 +80,8 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         self.events = try container.decode([GameEvent].self, forKey: .events)
         self.reports = try container.decodeIfPresentStrict([Report].self, forKey: .reports) ?? []
         self.ruleSet = try container.decode(RuleSet.self, forKey: .ruleSet)
+        self.rankings = try container.decodeIfPresentStrict([FactionScore].self, forKey: .rankings) ?? []
+        self.victoryState = try container.decodeIfPresentStrict(VictoryState.self, forKey: .victoryState) ?? VictoryState()
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -89,6 +99,105 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         try container.encode(events, forKey: .events)
         try container.encode(reports, forKey: .reports)
         try container.encode(ruleSet, forKey: .ruleSet)
+        try container.encode(rankings, forKey: .rankings)
+        try container.encode(victoryState, forKey: .victoryState)
+    }
+}
+
+public struct FactionScore: Codable, Equatable, Sendable, Identifiable {
+    public var factionID: FactionID
+    public var factionName: String
+    public var rank: Int
+    public var economyScore: Double
+    public var fleetScore: Double
+    public var researchScore: Double
+    public var planetScore: Double
+    public var defenseScore: Double
+    public var victoryProgress: Double
+    public var totalScore: Double
+
+    public var id: FactionID { factionID }
+
+    public init(
+        factionID: FactionID,
+        factionName: String,
+        rank: Int = 0,
+        economyScore: Double = 0,
+        fleetScore: Double = 0,
+        researchScore: Double = 0,
+        planetScore: Double = 0,
+        defenseScore: Double = 0,
+        victoryProgress: Double = 0,
+        totalScore: Double = 0
+    ) {
+        self.factionID = factionID
+        self.factionName = factionName
+        self.rank = rank
+        self.economyScore = economyScore
+        self.fleetScore = fleetScore
+        self.researchScore = researchScore
+        self.planetScore = planetScore
+        self.defenseScore = defenseScore
+        self.victoryProgress = victoryProgress
+        self.totalScore = totalScore
+    }
+}
+
+public enum VictoryRoute: String, Codable, CaseIterable, Sendable {
+    case economy
+    case technology
+    case domination
+    case exploration
+}
+
+public struct VictoryProgress: Codable, Equatable, Sendable {
+    public var factionID: FactionID
+    public var route: VictoryRoute
+    public var currentValue: Double
+    public var targetValue: Double
+    public var progress: Double
+
+    public var isComplete: Bool {
+        progress >= 1
+    }
+
+    public init(
+        factionID: FactionID,
+        route: VictoryRoute,
+        currentValue: Double,
+        targetValue: Double,
+        progress: Double
+    ) {
+        self.factionID = factionID
+        self.route = route
+        self.currentValue = currentValue
+        self.targetValue = targetValue
+        self.progress = progress
+    }
+}
+
+public struct VictoryState: Codable, Equatable, Sendable {
+    public var progress: [VictoryProgress]
+    public var winningFactionID: FactionID?
+    public var winningRoute: VictoryRoute?
+    public var achievedAt: TimeInterval?
+    public var didAnnounceVictory: Bool
+    public var exploredPlanetIDs: [PlanetID]
+
+    public init(
+        progress: [VictoryProgress] = [],
+        winningFactionID: FactionID? = nil,
+        winningRoute: VictoryRoute? = nil,
+        achievedAt: TimeInterval? = nil,
+        didAnnounceVictory: Bool = false,
+        exploredPlanetIDs: [PlanetID] = []
+    ) {
+        self.progress = progress
+        self.winningFactionID = winningFactionID
+        self.winningRoute = winningRoute
+        self.achievedAt = achievedAt
+        self.didAnnounceVictory = didAnnounceVictory
+        self.exploredPlanetIDs = exploredPlanetIDs
     }
 }
 
