@@ -118,6 +118,12 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var availableMissileKinds: [MissileKind] {
+        MissileKind.allCases.filter { kind in
+            universe.ruleSet.missileRules[kind] != nil
+        }
+    }
+
     var fleetMissionKinds: [Fleet.Mission] {
         [.transport, .attack, .espionage, .recycle, .colonize, .explore]
     }
@@ -322,7 +328,10 @@ final class AppModel: ObservableObject {
     var recentReports: [Report] {
         universe.reports
             .filter { report in
-                report.kind == .battle || report.kind == .espionage || report.kind == .exploration
+                report.kind == .battle ||
+                    report.kind == .espionage ||
+                    report.kind == .exploration ||
+                    report.kind == .missile
             }
             .sorted { lhs, rhs in
                 lhs.time > rhs.time
@@ -439,6 +448,28 @@ final class AppModel: ObservableObject {
         let result = QueueEngine.startDefenseBuild(on: planetID, in: &universe, kind: kind, quantity: quantity)
         guard result == .queued else {
             statusMessage = Self.defenseQueueFailureStatus(result, kind: kind)
+            return
+        }
+
+        let planet = universe.planets.first { $0.id == planetID }
+        let status = "Queued \(quantity) \(kind.rawValue.displayName) on \(planet?.name ?? "colony")."
+        autosaveAfterQueueing(successStatus: status)
+    }
+
+    func startMissileBuild(planetID: PlanetID, kind: MissileKind, quantity: Int) {
+        guard canSave else {
+            statusMessage = "Loading autosave failed. Start a new game before queueing missiles."
+            return
+        }
+
+        guard quantity > 0 else {
+            statusMessage = "Could not queue \(kind.rawValue.displayName): quantity must be positive."
+            return
+        }
+
+        let result = QueueEngine.startMissileBuild(on: planetID, in: &universe, kind: kind, quantity: quantity)
+        guard result == .queued else {
+            statusMessage = Self.missileQueueFailureStatus(result, kind: kind)
             return
         }
 
@@ -693,6 +724,22 @@ final class AppModel: ObservableObject {
         return unitTerms(baseCost: rule.baseCost, baseDuration: rule.baseDuration, quantity: quantity, planet: planet)?.duration
     }
 
+    func missileBuildCost(for kind: MissileKind, quantity: Int) -> ResourceBundle? {
+        guard let rule = universe.ruleSet.missileRules[kind] else {
+            return nil
+        }
+
+        return unitTerms(baseCost: rule.baseCost, baseDuration: rule.baseDuration, quantity: quantity)?.cost
+    }
+
+    func missileBuildDuration(for kind: MissileKind, quantity: Int, on planet: Planet) -> TimeInterval? {
+        guard let rule = universe.ruleSet.missileRules[kind] else {
+            return nil
+        }
+
+        return unitTerms(baseCost: rule.baseCost, baseDuration: rule.baseDuration, quantity: quantity, planet: planet)?.duration
+    }
+
     func canStartShipBuild(planet: Planet, kind: ShipKind, quantity: Int) -> Bool {
         shipBuildLockedReason(planet: planet, kind: kind, quantity: quantity) == nil
     }
@@ -769,6 +816,44 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    func canStartMissileBuild(planet: Planet, kind: MissileKind, quantity: Int) -> Bool {
+        missileBuildLockedReason(planet: planet, kind: kind, quantity: quantity) == nil
+    }
+
+    func missileBuildLockedReason(planet: Planet, kind: MissileKind, quantity: Int) -> String? {
+        guard canSave else {
+            return "Start or load a valid save first"
+        }
+
+        guard quantity > 0 else {
+            return "Invalid quantity"
+        }
+
+        guard planet.defenseBuildQueue.isEmpty else {
+            return "Defense queue busy"
+        }
+
+        guard let rule = universe.ruleSet.missileRules[kind],
+              let cost = missileBuildCost(for: kind, quantity: quantity)
+        else {
+            return "Missing or invalid missile rule"
+        }
+
+        if let missingRequirement = QueueEngine.missingRequirement(
+            for: rule.requirements,
+            planet: planet,
+            faction: faction(with: planet.ownerID)
+        ) {
+            return missingRequirement.lockedReason
+        }
+
+        guard planet.resources.canAfford(cost) else {
+            return "Insufficient resources"
+        }
+
+        return nil
+    }
+
     func unitQueueStatus(_ item: UnitBuildQueueItem) -> String {
         "\(unitQueueTitle(item)) x\(item.quantity) - \(queueRemainingText(until: item.finishTime))"
     }
@@ -778,6 +863,8 @@ final class AppModel: ObservableObject {
         case .ship(let kind):
             return kind.rawValue.displayName
         case .defense(let kind):
+            return kind.rawValue.displayName
+        case .missile(let kind):
             return kind.rawValue.displayName
         }
     }
@@ -873,6 +960,46 @@ final class AppModel: ObservableObject {
             ships: ships,
             cargo: cargo
         ) == nil
+    }
+
+    func interplanetaryMissileCount(on planetID: PlanetID?) -> Int {
+        max(planet(for: planetID)?.missileInventory[.interplanetaryMissile] ?? 0, 0)
+    }
+
+    func canShowMissileStrikeControls(originID: PlanetID?) -> Bool {
+        interplanetaryMissileCount(on: originID) > 0
+    }
+
+    func canLaunchMissileStrike(originID: PlanetID?, targetID: PlanetID?, missileCount: Int) -> Bool {
+        missileStrikeValidationFailure(originID: originID, targetID: targetID, missileCount: missileCount) == nil
+    }
+
+    func launchMissileStrike(originID: PlanetID?, targetID: PlanetID?, missileCount: Int) {
+        if let validationFailure = missileStrikeValidationFailure(
+            originID: originID,
+            targetID: targetID,
+            missileCount: missileCount
+        ) {
+            statusMessage = "Could not launch missile strike: \(validationFailure.description)."
+            return
+        }
+
+        guard let originID, let targetID, let target = planet(for: targetID) else {
+            statusMessage = "Could not launch missile strike: select an origin and target."
+            return
+        }
+
+        switch CombatEngine.launchMissileStrike(
+            from: originID,
+            to: targetID,
+            in: &universe,
+            missileCount: missileCount
+        ) {
+        case .resolved:
+            autosaveAfterQueueing(successStatus: "Launched missile strike at \(target.coordinate.displayText).")
+        case .failed(let failure):
+            statusMessage = "Could not launch missile strike: \(Self.missileStrikeFailureDescription(failure))."
+        }
     }
 
     func fleetCargoCapacity(for ships: [ShipKind: Int]) -> Double {
@@ -1422,6 +1549,10 @@ final class AppModel: ObservableObject {
         "Could not queue \(kind.rawValue.displayName): \(queueFailureDescription(result))."
     }
 
+    private static func missileQueueFailureStatus(_ result: QueueResult, kind: MissileKind) -> String {
+        "Could not queue \(kind.rawValue.displayName): \(queueFailureDescription(result))."
+    }
+
     private static func queueFailureDescription(_ result: QueueResult) -> String {
         switch result {
         case .queued:
@@ -1457,6 +1588,27 @@ final class AppModel: ObservableObject {
             return "insufficient deuterium for fuel"
         case .invalidMission:
             return "invalid mission for selected ships or target"
+        }
+    }
+
+    private static func missileStrikeFailureDescription(_ failure: CombatEngine.MissileStrikeFailure) -> String {
+        switch failure {
+        case .invalidMissileCount:
+            return "select at least one missile"
+        case .missingOrigin:
+            return "missing origin"
+        case .missingTarget:
+            return "missing target"
+        case .missingOriginOwner:
+            return "origin has no owner"
+        case .samePlanet:
+            return "target must differ from origin"
+        case .invalidTarget:
+            return "target must be a hostile colony"
+        case .insufficientMissiles:
+            return "insufficient interplanetary missiles"
+        case .noTargetDefenses:
+            return "target has no defenses"
         }
     }
 
@@ -1497,6 +1649,38 @@ final class AppModel: ObservableObject {
                 return "insufficient cargo capacity"
             case .insufficientFuel:
                 return "insufficient deuterium for fuel"
+            }
+        }
+    }
+
+    private enum MissileStrikeValidationFailure {
+        case saveUnavailable
+        case missingOrigin
+        case missingTarget
+        case samePlanet
+        case invalidTarget
+        case invalidMissileCount
+        case insufficientMissiles
+        case noTargetDefenses
+
+        var description: String {
+            switch self {
+            case .saveUnavailable:
+                return "loading autosave failed. Start a new game before launching missiles"
+            case .missingOrigin:
+                return "select an origin colony"
+            case .missingTarget:
+                return "select a target"
+            case .samePlanet:
+                return "target must differ from origin"
+            case .invalidTarget:
+                return "target must be a visible hostile colony"
+            case .invalidMissileCount:
+                return "select at least one missile"
+            case .insufficientMissiles:
+                return "insufficient interplanetary missiles"
+            case .noTargetDefenses:
+                return "target has no defenses"
             }
         }
     }
@@ -1559,6 +1743,46 @@ final class AppModel: ObservableObject {
 
         guard canAffordFleetFuel(originID: originID, targetID: targetID, ships: normalizedShips, cargo: cargo) else {
             return .insufficientFuel
+        }
+
+        return nil
+    }
+
+    private func missileStrikeValidationFailure(
+        originID: PlanetID?,
+        targetID: PlanetID?,
+        missileCount: Int
+    ) -> MissileStrikeValidationFailure? {
+        guard canSave else {
+            return .saveUnavailable
+        }
+
+        guard let origin = planet(for: originID), isPlayerOwned(origin) else {
+            return .missingOrigin
+        }
+
+        guard let target = planet(for: targetID) else {
+            return .missingTarget
+        }
+
+        guard originID != targetID else {
+            return .samePlanet
+        }
+
+        guard isVisibleToPlayer(target), !isPlayerOwned(target), target.ownerID != nil else {
+            return .invalidTarget
+        }
+
+        guard missileCount > 0 else {
+            return .invalidMissileCount
+        }
+
+        guard interplanetaryMissileCount(on: origin.id) >= missileCount else {
+            return .insufficientMissiles
+        }
+
+        guard target.defenseInventory.values.contains(where: { $0 > 0 }) else {
+            return .noTargetDefenses
         }
 
         return nil

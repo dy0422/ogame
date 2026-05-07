@@ -391,6 +391,38 @@ public struct DefenseRule: Codable, Equatable, Sendable {
         hullCombatField
 }
 
+public struct MissileRule: Codable, Equatable, Sendable {
+    public var baseCost: ResourceBundle
+    public var baseDuration: TimeInterval
+    public var requirements: [RuleRequirement]
+
+    public init(
+        baseCost: ResourceBundle,
+        baseDuration: TimeInterval,
+        requirements: [RuleRequirement] = []
+    ) {
+        self.baseCost = baseCost
+        self.baseDuration = baseDuration
+        self.requirements = requirements
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case baseCost
+        case baseDuration
+        case requirements
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.init(
+            baseCost: try container.decode(ResourceBundle.self, forKey: .baseCost),
+            baseDuration: try container.decode(TimeInterval.self, forKey: .baseDuration),
+            requirements: try container.decodeIfPresent([RuleRequirement].self, forKey: .requirements) ?? []
+        )
+    }
+}
+
 extension RuleSet {
     static func migrateBuildingRulesForRequirements(
         _ buildingRules: [BuildingKind: BuildingRule],
@@ -482,6 +514,30 @@ extension RuleSet {
                 }
             } else {
                 migratedRules[defenseKind] = defaultRule
+            }
+        }
+
+        return migratedRules
+    }
+
+    static func migrateMissileRulesForRequirements(
+        _ missileRules: [MissileKind: MissileRule],
+        ruleSetID: String
+    ) -> [MissileKind: MissileRule] {
+        guard ruleSetID == RuleSet.fastSkirmish.id else {
+            return missileRules
+        }
+
+        var migratedRules = missileRules
+
+        for (missileKind, defaultRule) in RuleSet.fastSkirmishMissileRules {
+            if var decodedRule = migratedRules[missileKind] {
+                if decodedRule.requirements.isEmpty, !defaultRule.requirements.isEmpty {
+                    decodedRule.requirements = defaultRule.requirements
+                    migratedRules[missileKind] = decodedRule
+                }
+            } else {
+                migratedRules[missileKind] = defaultRule
             }
         }
 
@@ -851,6 +907,16 @@ public extension RuleSet {
                 shield: 300,
                 hull: 100_000,
                 requirements: [.building(.shipyard, level: 6), .technology(.energy, level: 4)]
+            )
+        ]
+    }
+
+    static var fastSkirmishMissileRules: [MissileKind: MissileRule] {
+        [
+            .interplanetaryMissile: MissileRule(
+                baseCost: ResourceBundle(metal: 2_500, crystal: 1_000, deuterium: 2_000),
+                baseDuration: 30,
+                requirements: [.building(.shipyard, level: 4), .technology(.impulseDrive, level: 2)]
             )
         ]
     }

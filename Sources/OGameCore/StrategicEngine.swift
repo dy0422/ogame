@@ -193,7 +193,8 @@ public enum StrategicEngine {
             let exploredNeutralCount = exploredPlanetIDs.filter { neutralPlanetIDs.contains($0) }.count
             let economyValue = sanitizedNonnegative(economyScore(for: ownedPlanets, ruleSet: universe.ruleSet))
             let technologyValue = sanitizedNonnegative(
-                faction.technology.levels.values.reduce(0) { $0 + sanitizedQuantity($1) }
+                faction.technology.levels.values.reduce(0) { $0 + sanitizedQuantity($1) } +
+                    lateGameObjectiveValue(for: ownedPlanets)
             )
             let dominationValue = rawInhabitedPlanetCount >= 3
                 ? Double(ownedPlanets.count) / Double(inhabitedPlanetCount)
@@ -249,6 +250,10 @@ public enum StrategicEngine {
                 return lhs.factionID.rawValue.uuidString < rhs.factionID.rawValue.uuidString
             }
             .first
+    }
+
+    private static func lateGameObjectiveValue(for planets: [Planet]) -> Double {
+        sanitizedQuantity(planets.filter { $0.moon != nil }.count)
     }
 
     private static func normalizedProgress(current: Double, target: Double) -> Double {

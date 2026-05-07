@@ -1,6 +1,24 @@
 import Foundation
 
 public enum CombatEngine {
+    public enum MissileStrikeFailure: Equatable, Sendable {
+        case invalidMissileCount
+        case missingOrigin
+        case missingTarget
+        case missingOriginOwner
+        case samePlanet
+        case invalidTarget
+        case insufficientMissiles
+        case noTargetDefenses
+    }
+
+    public enum MissileStrikeResult: Equatable, Sendable {
+        case resolved(Report)
+        case failed(MissileStrikeFailure)
+    }
+
+    private static let moonDebrisThreshold = 50_000.0
+
     public static func resolveAttack(_ fleet: Fleet, in universe: inout Universe) -> Fleet? {
         var returningFleet = fleet
         returningFleet.phase = .returning
@@ -103,39 +121,46 @@ public enum CombatEngine {
         returningFleet.ships = attackerAfterShips
         returningFleet.cargo = safeAdding(cappedExistingCargo, loot)
 
-        universe.reports.append(
-            Report(
-                id: stableReportID(kind: .battle, universe: universe, fleet: fleet),
-                time: fleet.arrivalTime,
-                kind: .battle,
-                title: "Battle at \(universe.planets[targetIndex].coordinate.displayText)",
-                summary: attackerWon ? "The attacker won and recovered loot." : "The defender held the field.",
-                participants: [
-                    ReportParticipant(
-                        role: .attacker,
-                        factionID: fleet.ownerID,
-                        planetID: fleet.originPlanetID,
-                        name: attackerFaction?.name ?? "Attacker",
-                        beforeShips: attackerBeforeShips,
-                        afterShips: attackerAfterShips,
-                        losses: attackerLosses
-                    ),
-                    ReportParticipant(
-                        role: .defender,
-                        factionID: universe.planets[targetIndex].ownerID,
-                        planetID: universe.planets[targetIndex].id,
-                        name: defenderFaction?.name ?? universe.planets[targetIndex].name,
-                        beforeShips: defenderBeforeShips,
-                        afterShips: defenderAfterShips,
-                        beforeDefenses: defenderBeforeDefenses,
-                        afterDefenses: defenderAfterDefenses,
-                        losses: defenderLosses
-                    )
-                ],
-                loot: loot,
-                debris: debris,
-                losses: safeAdding(attackerLosses, defenderLosses)
-            )
+        let reportID = stableReportID(kind: .battle, universe: universe, fleet: fleet)
+        let report = Report(
+            id: reportID,
+            time: fleet.arrivalTime,
+            kind: .battle,
+            title: "Battle at \(universe.planets[targetIndex].coordinate.displayText)",
+            summary: attackerWon ? "The attacker won and recovered loot." : "The defender held the field.",
+            participants: [
+                ReportParticipant(
+                    role: .attacker,
+                    factionID: fleet.ownerID,
+                    planetID: fleet.originPlanetID,
+                    name: attackerFaction?.name ?? "Attacker",
+                    beforeShips: attackerBeforeShips,
+                    afterShips: attackerAfterShips,
+                    losses: attackerLosses
+                ),
+                ReportParticipant(
+                    role: .defender,
+                    factionID: universe.planets[targetIndex].ownerID,
+                    planetID: universe.planets[targetIndex].id,
+                    name: defenderFaction?.name ?? universe.planets[targetIndex].name,
+                    beforeShips: defenderBeforeShips,
+                    afterShips: defenderAfterShips,
+                    beforeDefenses: defenderBeforeDefenses,
+                    afterDefenses: defenderAfterDefenses,
+                    losses: defenderLosses
+                )
+            ],
+            loot: loot,
+            debris: debris,
+            losses: safeAdding(attackerLosses, defenderLosses)
+        )
+        universe.reports.append(report)
+        createMoonIfEligible(
+            targetIndex: targetIndex,
+            reportID: reportID,
+            battleTime: fleet.arrivalTime,
+            debris: debris,
+            universe: &universe
         )
 
         return attackerAfterShips.isEmpty ? nil : returningFleet
@@ -186,6 +211,112 @@ public enum CombatEngine {
         )
 
         return returningFleet
+    }
+
+    public static func launchMissileStrike(
+        from originPlanetID: PlanetID,
+        to targetPlanetID: PlanetID,
+        in universe: inout Universe,
+        missileCount: Int
+    ) -> MissileStrikeResult {
+        guard missileCount > 0 else {
+            return .failed(.invalidMissileCount)
+        }
+        guard let originIndex = universe.planets.firstIndex(where: { $0.id == originPlanetID }) else {
+            return .failed(.missingOrigin)
+        }
+        guard let targetIndex = universe.planets.firstIndex(where: { $0.id == targetPlanetID }) else {
+            return .failed(.missingTarget)
+        }
+        guard originPlanetID != targetPlanetID else {
+            return .failed(.samePlanet)
+        }
+        guard let originOwnerID = universe.planets[originIndex].ownerID else {
+            return .failed(.missingOriginOwner)
+        }
+        guard let targetOwnerID = universe.planets[targetIndex].ownerID,
+              targetOwnerID != originOwnerID
+        else {
+            return .failed(.invalidTarget)
+        }
+
+        let availableMissiles = max(universe.planets[originIndex].missileInventory[.interplanetaryMissile] ?? 0, 0)
+        guard availableMissiles >= missileCount else {
+            return .failed(.insufficientMissiles)
+        }
+
+        let targetBeforeDefenses = normalizedDefenses(universe.planets[targetIndex].defenseInventory)
+        guard !targetBeforeDefenses.isEmpty else {
+            return .failed(.noTargetDefenses)
+        }
+
+        let originBefore = universe.planets[originIndex]
+        let targetBefore = universe.planets[targetIndex]
+        let destroyedDefenses = missileDestroyedDefenses(
+            from: targetBeforeDefenses,
+            missileCount: missileCount
+        )
+        let targetAfterDefenses = defenseInventory(
+            before: targetBeforeDefenses,
+            destroyed: destroyedDefenses,
+            recovered: [:]
+        )
+        let losses = defenseCost(destroyedDefenses, ruleSet: universe.ruleSet)
+        let reportID = stableMissileReportID(
+            originPlanetID: originPlanetID,
+            targetPlanetID: targetPlanetID,
+            missileCount: missileCount,
+            universe: universe
+        )
+        let attackerFaction = originBefore.ownerID.flatMap { faction(for: $0, in: universe) }
+        let defenderFaction = targetBefore.ownerID.flatMap { faction(for: $0, in: universe) }
+        let report = Report(
+            id: reportID,
+            time: universe.gameTime,
+            kind: .missile,
+            title: "Missile strike at \(targetBefore.coordinate.displayText)",
+            summary: "Interplanetary missiles damaged \(unitCount(destroyedDefenses)) defensive units.",
+            participants: [
+                ReportParticipant(
+                    role: .attacker,
+                    factionID: originBefore.ownerID,
+                    planetID: originBefore.id,
+                    name: attackerFaction?.name ?? originBefore.name
+                ),
+                ReportParticipant(
+                    role: .defender,
+                    factionID: targetBefore.ownerID,
+                    planetID: targetBefore.id,
+                    name: defenderFaction?.name ?? targetBefore.name,
+                    beforeDefenses: targetBeforeDefenses,
+                    afterDefenses: targetAfterDefenses,
+                    losses: losses
+                )
+            ],
+            loot: .zero,
+            debris: .zero,
+            losses: losses
+        )
+
+        let remainingMissiles = availableMissiles - missileCount
+        if remainingMissiles > 0 {
+            universe.planets[originIndex].missileInventory[.interplanetaryMissile] = remainingMissiles
+        } else {
+            universe.planets[originIndex].missileInventory[.interplanetaryMissile] = nil
+        }
+        universe.planets[targetIndex].defenseInventory = targetAfterDefenses
+        universe.reports.append(report)
+        universe.events.append(
+            GameEvent(
+                id: EventID(reportID),
+                time: universe.gameTime,
+                kind: .combat,
+                title: "Missile Strike",
+                message: "\(originBefore.name) launched \(missileCount) missiles at \(targetBefore.coordinate.displayText)."
+            )
+        )
+
+        return .resolved(report)
     }
 
     private struct CombatStats {
@@ -406,6 +537,78 @@ public enum CombatEngine {
         }
     }
 
+    private static func missileDestroyedDefenses(
+        from defenses: [DefenseKind: Int],
+        missileCount: Int
+    ) -> [DefenseKind: Int] {
+        let damageBudget = max(missileCount, 0) * 4
+        guard damageBudget > 0 else {
+            return [:]
+        }
+
+        var remainingDamage = damageBudget
+        var destroyed: [DefenseKind: Int] = [:]
+        for kind in missileTargetPriority {
+            guard remainingDamage > 0 else {
+                break
+            }
+            let available = max(defenses[kind] ?? 0, 0)
+            guard available > 0 else {
+                continue
+            }
+
+            let removed = min(available, remainingDamage)
+            destroyed[kind] = removed
+            remainingDamage -= removed
+        }
+
+        return destroyed
+    }
+
+    private static var missileTargetPriority: [DefenseKind] {
+        [
+            .plasmaTurret,
+            .gaussCannon,
+            .ionCannon,
+            .heavyLaser,
+            .lightLaser,
+            .rocketLauncher
+        ]
+    }
+
+    private static func createMoonIfEligible(
+        targetIndex: Int,
+        reportID: UUID,
+        battleTime: TimeInterval,
+        debris: ResourceBundle,
+        universe: inout Universe
+    ) {
+        guard universe.planets.indices.contains(targetIndex),
+              universe.planets[targetIndex].moon == nil,
+              debris.totalAmount >= moonDebrisThreshold
+        else {
+            return
+        }
+
+        let planet = universe.planets[targetIndex]
+        universe.planets[targetIndex].moon = Moon(
+            id: stableUUID(
+                namespace: "0011",
+                payload: [
+                    "moon",
+                    universe.id.rawValue.uuidString,
+                    planet.id.rawValue.uuidString,
+                    reportID.uuidString,
+                    String(battleTime)
+                ].joined(separator: "|")
+            ),
+            name: "\(planet.name) Moon",
+            createdAt: battleTime,
+            buildingLevels: [:],
+            debrisOriginReportID: reportID
+        )
+    }
+
     private static func destroyedQuantity(_ quantity: Int, by lossFraction: Double) -> Int {
         guard quantity > 0, lossFraction.isFinite, lossFraction > 0 else {
             return 0
@@ -533,6 +736,28 @@ public enum CombatEngine {
                 fleet.mission.rawValue,
                 fleet.target.displayText,
                 String(fleet.arrivalTime)
+            ].joined(separator: "|")
+        )
+    }
+
+    private static func stableMissileReportID(
+        originPlanetID: PlanetID,
+        targetPlanetID: PlanetID,
+        missileCount: Int,
+        universe: Universe
+    ) -> UUID {
+        stableUUID(
+            namespace: "0012",
+            payload: [
+                "missile-report",
+                universe.id.rawValue.uuidString,
+                String(universe.seed),
+                originPlanetID.rawValue.uuidString,
+                targetPlanetID.rawValue.uuidString,
+                String(max(missileCount, 0)),
+                String(universe.gameTime),
+                String(universe.reports.count),
+                String(universe.events.count)
             ].joined(separator: "|")
         )
     }
