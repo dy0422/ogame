@@ -72,9 +72,29 @@ func testRepositorySavesAndLoadsQueueMetadata() throws {
         finishTime: 180,
         paidCost: ResourceBundle(crystal: 400, deuterium: 600)
     )
+    let shipQueueItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000b2")!,
+        planetID: planetID,
+        unitKind: .ship(.smallCargo),
+        quantity: 2,
+        startTime: 185,
+        finishTime: 205,
+        paidCost: ResourceBundle(metal: 4_000, crystal: 4_000)
+    )
+    let defenseQueueItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000b3")!,
+        planetID: planetID,
+        unitKind: .defense(.rocketLauncher),
+        quantity: 3,
+        startTime: 210,
+        finishTime: 228,
+        paidCost: ResourceBundle(metal: 6_000)
+    )
 
     universe.lastSimulatedWallClockTime = Date(timeIntervalSince1970: 5_000)
     universe.planets[0].buildQueue = [buildQueueItem]
+    universe.planets[0].shipBuildQueue = [shipQueueItem]
+    universe.planets[0].defenseBuildQueue = [defenseQueueItem]
     universe.factions[0].researchQueue = [researchQueueItem]
 
     try repository.save(universe, wallClockDate: Date(timeIntervalSince1970: 6_000))
@@ -82,6 +102,8 @@ func testRepositorySavesAndLoadsQueueMetadata() throws {
 
     requireEqual(loaded.universe, universe, "Repository should preserve queue metadata through save/load")
     requireEqual(loaded.universe.planets[0].buildQueue, [buildQueueItem], "Repository should preserve planet build queue")
+    requireEqual(loaded.universe.planets[0].shipBuildQueue, [shipQueueItem], "Repository should preserve planet ship build queue")
+    requireEqual(loaded.universe.planets[0].defenseBuildQueue, [defenseQueueItem], "Repository should preserve planet defense build queue")
     requireEqual(loaded.universe.factions[0].researchQueue, [researchQueueItem], "Repository should preserve faction research queue")
     requireEqual(
         loaded.universe.lastSimulatedWallClockTime,

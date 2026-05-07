@@ -56,6 +56,38 @@ public struct ResearchRule: Codable, Equatable, Sendable {
     }
 }
 
+public struct ShipRule: Codable, Equatable, Sendable {
+    public var baseCost: ResourceBundle
+    public var baseDuration: TimeInterval
+    public var aiPriorityWeight: Double
+
+    public init(
+        baseCost: ResourceBundle,
+        baseDuration: TimeInterval,
+        aiPriorityWeight: Double
+    ) {
+        self.baseCost = baseCost
+        self.baseDuration = baseDuration
+        self.aiPriorityWeight = aiPriorityWeight
+    }
+}
+
+public struct DefenseRule: Codable, Equatable, Sendable {
+    public var baseCost: ResourceBundle
+    public var baseDuration: TimeInterval
+    public var aiPriorityWeight: Double
+
+    public init(
+        baseCost: ResourceBundle,
+        baseDuration: TimeInterval,
+        aiPriorityWeight: Double
+    ) {
+        self.baseCost = baseCost
+        self.baseDuration = baseDuration
+        self.aiPriorityWeight = aiPriorityWeight
+    }
+}
+
 public extension RuleSet {
     static var fastSkirmishBuildingRules: [BuildingKind: BuildingRule] {
         [
@@ -182,6 +214,91 @@ public extension RuleSet {
                 baseDuration: 120,
                 durationMultiplier: 1.65,
                 aiPriorityWeight: 0.10
+            )
+        ]
+    }
+
+    static var fastSkirmishShipRules: [ShipKind: ShipRule] {
+        [
+            .smallCargo: ShipRule(
+                baseCost: ResourceBundle(metal: 2_000, crystal: 2_000),
+                baseDuration: 10,
+                aiPriorityWeight: 0.40
+            ),
+            .largeCargo: ShipRule(
+                baseCost: ResourceBundle(metal: 6_000, crystal: 6_000),
+                baseDuration: 18,
+                aiPriorityWeight: 0.35
+            ),
+            .lightFighter: ShipRule(
+                baseCost: ResourceBundle(metal: 3_000, crystal: 1_000),
+                baseDuration: 20,
+                aiPriorityWeight: 0.65
+            ),
+            .heavyFighter: ShipRule(
+                baseCost: ResourceBundle(metal: 6_000, crystal: 4_000),
+                baseDuration: 30,
+                aiPriorityWeight: 0.55
+            ),
+            .cruiser: ShipRule(
+                baseCost: ResourceBundle(metal: 20_000, crystal: 7_000, deuterium: 2_000),
+                baseDuration: 45,
+                aiPriorityWeight: 0.45
+            ),
+            .battleship: ShipRule(
+                baseCost: ResourceBundle(metal: 45_000, crystal: 15_000),
+                baseDuration: 65,
+                aiPriorityWeight: 0.30
+            ),
+            .colonyShip: ShipRule(
+                baseCost: ResourceBundle(metal: 10_000, crystal: 20_000, deuterium: 10_000),
+                baseDuration: 75,
+                aiPriorityWeight: 0.25
+            ),
+            .recycler: ShipRule(
+                baseCost: ResourceBundle(metal: 10_000, crystal: 6_000, deuterium: 2_000),
+                baseDuration: 40,
+                aiPriorityWeight: 0.20
+            ),
+            .espionageProbe: ShipRule(
+                baseCost: ResourceBundle(crystal: 1_000),
+                baseDuration: 5,
+                aiPriorityWeight: 0.50
+            )
+        ]
+    }
+
+    static var fastSkirmishDefenseRules: [DefenseKind: DefenseRule] {
+        [
+            .rocketLauncher: DefenseRule(
+                baseCost: ResourceBundle(metal: 2_000),
+                baseDuration: 6,
+                aiPriorityWeight: 0.50
+            ),
+            .lightLaser: DefenseRule(
+                baseCost: ResourceBundle(metal: 1_500, crystal: 500),
+                baseDuration: 20,
+                aiPriorityWeight: 0.45
+            ),
+            .heavyLaser: DefenseRule(
+                baseCost: ResourceBundle(metal: 6_000, crystal: 2_000),
+                baseDuration: 35,
+                aiPriorityWeight: 0.35
+            ),
+            .gaussCannon: DefenseRule(
+                baseCost: ResourceBundle(metal: 20_000, crystal: 15_000, deuterium: 2_000),
+                baseDuration: 55,
+                aiPriorityWeight: 0.25
+            ),
+            .ionCannon: DefenseRule(
+                baseCost: ResourceBundle(metal: 2_000, crystal: 6_000),
+                baseDuration: 40,
+                aiPriorityWeight: 0.30
+            ),
+            .plasmaTurret: DefenseRule(
+                baseCost: ResourceBundle(metal: 50_000, crystal: 50_000, deuterium: 30_000),
+                baseDuration: 90,
+                aiPriorityWeight: 0.15
             )
         ]
     }

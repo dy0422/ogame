@@ -148,6 +148,126 @@ public enum QueueEngine {
         return .queued
     }
 
+    public static func startShipBuild(
+        on planetID: PlanetID,
+        in universe: inout Universe,
+        kind: ShipKind,
+        quantity: Int
+    ) -> QueueResult {
+        guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }) else {
+            return .missingPlanet
+        }
+
+        guard universe.planets[planetIndex].shipBuildQueue.isEmpty else {
+            return .queueBusy
+        }
+
+        guard let rule = universe.ruleSet.shipRules[kind],
+              let terms = shipTerms(rule: rule, quantity: quantity)
+        else {
+            return .missingRule
+        }
+
+        let paidCost = terms.cost
+
+        guard universe.planets[planetIndex].resources.canAfford(paidCost) else {
+            return .insufficientResources
+        }
+
+        let startTime = universe.gameTime
+        let finishTime = startTime + terms.duration
+        guard startTime.isFinite, finishTime.isFinite else {
+            return .missingRule
+        }
+
+        let item = UnitBuildQueueItem(
+            id: queueItemID(
+                namespace: "0008",
+                payload: [
+                    "ship",
+                    universe.id.rawValue.uuidString,
+                    planetID.rawValue.uuidString,
+                    kind.rawValue,
+                    String(quantity),
+                    String(startTime),
+                    String(finishTime),
+                    resourcePayload(paidCost)
+                ].joined(separator: "|")
+            ),
+            planetID: planetID,
+            unitKind: .ship(kind),
+            quantity: quantity,
+            startTime: startTime,
+            finishTime: finishTime,
+            paidCost: paidCost
+        )
+
+        universe.planets[planetIndex].resources = universe.planets[planetIndex].resources.subtracting(paidCost)
+        universe.planets[planetIndex].shipBuildQueue = [item]
+
+        return .queued
+    }
+
+    public static func startDefenseBuild(
+        on planetID: PlanetID,
+        in universe: inout Universe,
+        kind: DefenseKind,
+        quantity: Int
+    ) -> QueueResult {
+        guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }) else {
+            return .missingPlanet
+        }
+
+        guard universe.planets[planetIndex].defenseBuildQueue.isEmpty else {
+            return .queueBusy
+        }
+
+        guard let rule = universe.ruleSet.defenseRules[kind],
+              let terms = defenseTerms(rule: rule, quantity: quantity)
+        else {
+            return .missingRule
+        }
+
+        let paidCost = terms.cost
+
+        guard universe.planets[planetIndex].resources.canAfford(paidCost) else {
+            return .insufficientResources
+        }
+
+        let startTime = universe.gameTime
+        let finishTime = startTime + terms.duration
+        guard startTime.isFinite, finishTime.isFinite else {
+            return .missingRule
+        }
+
+        let item = UnitBuildQueueItem(
+            id: queueItemID(
+                namespace: "0009",
+                payload: [
+                    "defense",
+                    universe.id.rawValue.uuidString,
+                    planetID.rawValue.uuidString,
+                    kind.rawValue,
+                    String(quantity),
+                    String(startTime),
+                    String(finishTime),
+                    resourcePayload(paidCost)
+                ].joined(separator: "|")
+            ),
+            planetID: planetID,
+            unitKind: .defense(kind),
+            quantity: quantity,
+            startTime: startTime,
+            finishTime: finishTime,
+            paidCost: paidCost
+        )
+
+        universe.planets[planetIndex].resources = universe.planets[planetIndex].resources.subtracting(paidCost)
+        universe.planets[planetIndex].defenseBuildQueue = [item]
+
+        return .queued
+    }
+
     public static func completeDueItems(in universe: inout Universe) {
         guard universe.gameTime.isFinite else {
             return
@@ -173,6 +293,88 @@ public enum QueueEngine {
             let dueIDs = Set(dueItems.map(\.id))
             universe.planets[planetIndex].buildQueue.removeAll { dueIDs.contains($0.id) }
             EconomyEngine.recomputeEnergy(for: &universe.planets[planetIndex], ruleSet: universe.ruleSet)
+        }
+
+        for planetIndex in universe.planets.indices {
+            let dueItems = universe.planets[planetIndex].shipBuildQueue
+                .filter { $0.finishTime.isFinite && $0.finishTime <= completionTime }
+                .sorted(by: compareUnitBuildQueueItems)
+
+            guard !dueItems.isEmpty else {
+                continue
+            }
+
+            var completedIDs = Set<UUID>()
+
+            for item in dueItems {
+                guard case .ship(let shipKind) = item.unitKind else {
+                    continue
+                }
+
+                guard item.quantity > 0 else {
+                    continue
+                }
+
+                let currentQuantity = normalizedLevel(universe.planets[planetIndex].shipInventory[shipKind] ?? 0)
+                let additionResult = currentQuantity.addingReportingOverflow(item.quantity)
+                guard !additionResult.overflow else {
+                    continue
+                }
+
+                universe.planets[planetIndex].shipInventory[shipKind] = additionResult.partialValue
+                completedIDs.insert(item.id)
+                universe.events.append(
+                    shipConstructionCompletionEvent(
+                        for: item,
+                        shipKind: shipKind,
+                        planet: universe.planets[planetIndex],
+                        time: item.finishTime
+                    )
+                )
+            }
+
+            universe.planets[planetIndex].shipBuildQueue.removeAll { completedIDs.contains($0.id) }
+        }
+
+        for planetIndex in universe.planets.indices {
+            let dueItems = universe.planets[planetIndex].defenseBuildQueue
+                .filter { $0.finishTime.isFinite && $0.finishTime <= completionTime }
+                .sorted(by: compareUnitBuildQueueItems)
+
+            guard !dueItems.isEmpty else {
+                continue
+            }
+
+            var completedIDs = Set<UUID>()
+
+            for item in dueItems {
+                guard case .defense(let defenseKind) = item.unitKind else {
+                    continue
+                }
+
+                guard item.quantity > 0 else {
+                    continue
+                }
+
+                let currentQuantity = normalizedLevel(universe.planets[planetIndex].defenseInventory[defenseKind] ?? 0)
+                let additionResult = currentQuantity.addingReportingOverflow(item.quantity)
+                guard !additionResult.overflow else {
+                    continue
+                }
+
+                universe.planets[planetIndex].defenseInventory[defenseKind] = additionResult.partialValue
+                completedIDs.insert(item.id)
+                universe.events.append(
+                    defenseConstructionCompletionEvent(
+                        for: item,
+                        defenseKind: defenseKind,
+                        planet: universe.planets[planetIndex],
+                        time: item.finishTime
+                    )
+                )
+            }
+
+            universe.planets[planetIndex].defenseBuildQueue.removeAll { completedIDs.contains($0.id) }
         }
 
         for factionIndex in universe.factions.indices {
@@ -263,6 +465,46 @@ public enum QueueEngine {
         return (cost, duration)
     }
 
+    private static func shipTerms(rule: ShipRule, quantity: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+        guard
+            quantity > 0,
+            isValidCost(rule.baseCost),
+            rule.baseDuration.isFinite,
+            rule.baseDuration > 0
+        else {
+            return nil
+        }
+
+        let multiplier = Double(quantity)
+        let cost = rule.baseCost.scaled(by: multiplier)
+        let duration = rule.baseDuration * multiplier
+        guard isValidCost(cost), duration.isFinite, duration > 0 else {
+            return nil
+        }
+
+        return (cost, duration)
+    }
+
+    private static func defenseTerms(rule: DefenseRule, quantity: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+        guard
+            quantity > 0,
+            isValidCost(rule.baseCost),
+            rule.baseDuration.isFinite,
+            rule.baseDuration > 0
+        else {
+            return nil
+        }
+
+        let multiplier = Double(quantity)
+        let cost = rule.baseCost.scaled(by: multiplier)
+        let duration = rule.baseDuration * multiplier
+        guard isValidCost(cost), duration.isFinite, duration > 0 else {
+            return nil
+        }
+
+        return (cost, duration)
+    }
+
     private static func isValidCost(_ cost: ResourceBundle) -> Bool {
         cost.metal.isFinite &&
             cost.crystal.isFinite &&
@@ -320,6 +562,60 @@ public enum QueueEngine {
         )
     }
 
+    private static func shipConstructionCompletionEvent(
+        for item: UnitBuildQueueItem,
+        shipKind: ShipKind,
+        planet: Planet,
+        time: TimeInterval
+    ) -> GameEvent {
+        return GameEvent(
+            id: EventID(
+                queueItemID(
+                    namespace: "000a",
+                    payload: [
+                        "ship-construction-complete",
+                        item.id.uuidString,
+                        planet.id.rawValue.uuidString,
+                        shipKind.rawValue,
+                        String(item.quantity),
+                        String(time)
+                    ].joined(separator: "|")
+                )
+            ),
+            time: time,
+            kind: .economy,
+            title: "Ship Construction Complete",
+            message: "\(planet.name) completed \(item.quantity) \(shipKind.rawValue)."
+        )
+    }
+
+    private static func defenseConstructionCompletionEvent(
+        for item: UnitBuildQueueItem,
+        defenseKind: DefenseKind,
+        planet: Planet,
+        time: TimeInterval
+    ) -> GameEvent {
+        return GameEvent(
+            id: EventID(
+                queueItemID(
+                    namespace: "000b",
+                    payload: [
+                        "defense-construction-complete",
+                        item.id.uuidString,
+                        planet.id.rawValue.uuidString,
+                        defenseKind.rawValue,
+                        String(item.quantity),
+                        String(time)
+                    ].joined(separator: "|")
+                )
+            ),
+            time: time,
+            kind: .economy,
+            title: "Defense Construction Complete",
+            message: "\(planet.name) completed \(item.quantity) \(defenseKind.rawValue)."
+        )
+    }
+
     private static func compareBuildQueueItems(_ lhs: BuildQueueItem, _ rhs: BuildQueueItem) -> Bool {
         if lhs.finishTime != rhs.finishTime {
             return lhs.finishTime < rhs.finishTime
@@ -342,6 +638,31 @@ public enum QueueEngine {
         }
 
         return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func compareUnitBuildQueueItems(_ lhs: UnitBuildQueueItem, _ rhs: UnitBuildQueueItem) -> Bool {
+        if lhs.finishTime != rhs.finishTime {
+            return lhs.finishTime < rhs.finishTime
+        }
+
+        if unitKindSortKey(lhs.unitKind) != unitKindSortKey(rhs.unitKind) {
+            return unitKindSortKey(lhs.unitKind) < unitKindSortKey(rhs.unitKind)
+        }
+
+        if lhs.quantity != rhs.quantity {
+            return lhs.quantity < rhs.quantity
+        }
+
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private static func unitKindSortKey(_ unitKind: UnitBuildQueueItem.UnitKind) -> String {
+        switch unitKind {
+        case .ship(let kind):
+            return "ship:\(kind.rawValue)"
+        case .defense(let kind):
+            return "defense:\(kind.rawValue)"
+        }
     }
 
     private static func queueItemID(namespace: String, payload: String) -> UUID {

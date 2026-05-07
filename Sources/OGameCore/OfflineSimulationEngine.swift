@@ -62,7 +62,7 @@ public enum OfflineSimulationEngine {
             SimulationEngine.tick(universe: &universe, delta: delta)
 
             let generatedEvents = Array(universe.events[eventStartCount..<universe.events.count])
-            summary.completedConstructionCount += generatedEvents.filter { $0.title == "Construction Complete" }.count
+            summary.completedConstructionCount += generatedEvents.filter(isConstructionCompletionEvent).count
             summary.completedResearchCount += generatedEvents.filter { $0.title == "Research Complete" }.count
             summary.generatedEventCount += generatedEvents.count
             if universe.events.count > eventStartCount {
@@ -99,6 +99,12 @@ public enum OfflineSimulationEngine {
         }
 
         return max(ruleSet.offlineChunkInterval, minimumChunkInterval)
+    }
+
+    private static func isConstructionCompletionEvent(_ event: GameEvent) -> Bool {
+        event.title == "Construction Complete" ||
+            event.title == "Ship Construction Complete" ||
+            event.title == "Defense Construction Complete"
     }
 
     private static func summaryEvent(

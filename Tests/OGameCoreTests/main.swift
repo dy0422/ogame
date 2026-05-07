@@ -184,11 +184,38 @@ func testFastSkirmishResearchRulesCoverEarlyTechnologies() {
     }
 }
 
+func testFastSkirmishUnitRulesCoverShipsAndDefenses() {
+    let shipRules = RuleSet.fastSkirmish.shipRules
+    let defenseRules = RuleSet.fastSkirmish.defenseRules
+
+    for ship in ShipKind.allCases {
+        guard let rule = shipRules[ship] else {
+            fatalError("Fast skirmish should define a ship rule for \(ship.rawValue)")
+        }
+
+        require(rule.baseCost != .zero, "Ship \(ship.rawValue) should have a nonzero cost")
+        require(rule.baseDuration > 0, "Ship \(ship.rawValue) should have a positive duration")
+        require(rule.aiPriorityWeight > 0, "Ship \(ship.rawValue) should have a positive AI weight")
+    }
+
+    for defense in DefenseKind.allCases {
+        guard let rule = defenseRules[defense] else {
+            fatalError("Fast skirmish should define a defense rule for \(defense.rawValue)")
+        }
+
+        require(rule.baseCost != .zero, "Defense \(defense.rawValue) should have a nonzero cost")
+        require(rule.baseDuration > 0, "Defense \(defense.rawValue) should have a positive duration")
+        require(rule.aiPriorityWeight > 0, "Defense \(defense.rawValue) should have a positive AI weight")
+    }
+}
+
 func testRuleSetBalanceRulesUseRawValueKeyedJSONObjects() throws {
     let data = try JSONEncoder().encode(RuleSet.fastSkirmish)
     let json = requireDictionary(try JSONSerialization.jsonObject(with: data), "RuleSet should encode as a JSON object")
     let buildingRulesJSON = requireDictionary(json["buildingRules"], "Building rules should encode as a JSON object")
     let researchRulesJSON = requireDictionary(json["researchRules"], "Research rules should encode as a JSON object")
+    let shipRulesJSON = requireDictionary(json["shipRules"], "Ship rules should encode as a JSON object")
+    let defenseRulesJSON = requireDictionary(json["defenseRules"], "Defense rules should encode as a JSON object")
 
     require(
         buildingRulesJSON.keys.contains("metalMine") &&
@@ -203,12 +230,32 @@ func testRuleSetBalanceRulesUseRawValueKeyedJSONObjects() throws {
         "Research rule keys should be technology raw values"
     )
     require(
+        shipRulesJSON.keys.contains("smallCargo") &&
+            shipRulesJSON.keys.contains("lightFighter") &&
+            shipRulesJSON.keys.contains("espionageProbe"),
+        "Ship rule keys should be ship raw values"
+    )
+    require(
+        defenseRulesJSON.keys.contains("rocketLauncher") &&
+            defenseRulesJSON.keys.contains("lightLaser") &&
+            defenseRulesJSON.keys.contains("plasmaTurret"),
+        "Defense rule keys should be defense raw values"
+    )
+    require(
         buildingRulesJSON["metalMine"] is [String: Any],
         "Building rules should encode values under raw-value keys, not alternating arrays"
     )
     require(
         researchRulesJSON["energy"] is [String: Any],
         "Research rules should encode values under raw-value keys, not alternating arrays"
+    )
+    require(
+        shipRulesJSON["smallCargo"] is [String: Any],
+        "Ship rules should encode values under raw-value keys, not alternating arrays"
+    )
+    require(
+        defenseRulesJSON["rocketLauncher"] is [String: Any],
+        "Defense rules should encode values under raw-value keys, not alternating arrays"
     )
 }
 
@@ -233,6 +280,16 @@ func testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults() throws {
         decoded.researchRules,
         RuleSet.fastSkirmish.researchRules,
         "RuleSet should default missing research rules to fast skirmish rules"
+    )
+    requireEqual(
+        decoded.shipRules,
+        RuleSet.fastSkirmish.shipRules,
+        "RuleSet should default missing ship rules to fast skirmish rules"
+    )
+    requireEqual(
+        decoded.defenseRules,
+        RuleSet.fastSkirmish.defenseRules,
+        "RuleSet should default missing defense rules to fast skirmish rules"
     )
 }
 
@@ -282,6 +339,48 @@ func testResearchQueueItemRoundTripsThroughJSON() throws {
     requireEqual(json["technologyKind"] as? String, "computer", "Research queue technology kind should encode by raw value")
 }
 
+func testUnitBuildQueueItemRoundTripsThroughJSON() throws {
+    let shipItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000082")!,
+        planetID: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000083")!),
+        unitKind: .ship(.smallCargo),
+        quantity: 3,
+        startTime: 120,
+        finishTime: 150,
+        paidCost: ResourceBundle(metal: 6_000, crystal: 6_000)
+    )
+    let defenseItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000084")!,
+        planetID: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000083")!),
+        unitKind: .defense(.rocketLauncher),
+        quantity: 4,
+        startTime: 160,
+        finishTime: 184,
+        paidCost: ResourceBundle(metal: 8_000)
+    )
+
+    let shipData = try JSONEncoder().encode(shipItem)
+    let defenseData = try JSONEncoder().encode(defenseItem)
+
+    requireEqual(
+        try JSONDecoder().decode(UnitBuildQueueItem.self, from: shipData),
+        shipItem,
+        "Ship unit queue item should round-trip through JSON"
+    )
+    requireEqual(
+        try JSONDecoder().decode(UnitBuildQueueItem.self, from: defenseData),
+        defenseItem,
+        "Defense unit queue item should round-trip through JSON"
+    )
+
+    let shipJSON = requireDictionary(try JSONSerialization.jsonObject(with: shipData), "Ship unit queue item should encode as an object")
+    let defenseJSON = requireDictionary(try JSONSerialization.jsonObject(with: defenseData), "Defense unit queue item should encode as an object")
+    requireEqual(shipJSON["unitType"] as? String, "ship", "Ship queue unit type should encode by raw value")
+    requireEqual(shipJSON["unitKind"] as? String, "smallCargo", "Ship queue unit kind should encode by raw value")
+    requireEqual(defenseJSON["unitType"] as? String, "defense", "Defense queue unit type should encode by raw value")
+    requireEqual(defenseJSON["unitKind"] as? String, "rocketLauncher", "Defense queue unit kind should encode by raw value")
+}
+
 func testPlanetFactionAndUniverseQueuesRoundTripThroughJSON() throws {
     let player = FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000090")!)
     let homeworld = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000091")!)
@@ -302,6 +401,24 @@ func testPlanetFactionAndUniverseQueuesRoundTripThroughJSON() throws {
         startTime: 95,
         finishTime: 250,
         paidCost: ResourceBundle(crystal: 1_000, deuterium: 300)
+    )
+    let shipQueueItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000095")!,
+        planetID: homeworld,
+        unitKind: .ship(.lightFighter),
+        quantity: 2,
+        startTime: 100,
+        finishTime: 140,
+        paidCost: ResourceBundle(metal: 6_000, crystal: 2_000)
+    )
+    let defenseQueueItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000096")!,
+        planetID: homeworld,
+        unitKind: .defense(.lightLaser),
+        quantity: 1,
+        startTime: 105,
+        finishTime: 125,
+        paidCost: ResourceBundle(metal: 1_500, crystal: 500)
     )
     let simulatedAt = Date(timeIntervalSince1970: 4_000)
     let universe = Universe(
@@ -330,7 +447,9 @@ func testPlanetFactionAndUniverseQueuesRoundTripThroughJSON() throws {
                 ownerID: player,
                 resources: ResourceBundle(metal: 500, crystal: 500, deuterium: 100),
                 buildingLevels: [.solarPlant: 10],
-                buildQueue: [buildQueueItem]
+                buildQueue: [buildQueueItem],
+                shipBuildQueue: [shipQueueItem],
+                defenseBuildQueue: [defenseQueueItem]
             )
         ],
         fleets: [],
@@ -354,7 +473,11 @@ func testPlanetFactionAndUniverseQueuesRoundTripThroughJSON() throws {
     let planetsJSON = requireArray(json["planets"], "Planets should encode as a JSON array")
     let planetJSON = requireDictionary(planetsJSON.first, "Planet should encode as a JSON object")
     let buildQueueJSON = requireArray(planetJSON["buildQueue"], "Planet build queue should encode as a JSON array")
+    let shipBuildQueueJSON = requireArray(planetJSON["shipBuildQueue"], "Planet ship build queue should encode as a JSON array")
+    let defenseBuildQueueJSON = requireArray(planetJSON["defenseBuildQueue"], "Planet defense build queue should encode as a JSON array")
     requireEqual(buildQueueJSON.count, 1, "Planet build queue should preserve queued items")
+    requireEqual(shipBuildQueueJSON.count, 1, "Planet ship build queue should preserve queued items")
+    requireEqual(defenseBuildQueueJSON.count, 1, "Planet defense build queue should preserve queued items")
 }
 
 func testQueueFieldsDefaultWhenDecodingOlderUniverseJSON() throws {
@@ -407,6 +530,8 @@ func testQueueFieldsDefaultWhenDecodingOlderUniverseJSON() throws {
     requireEqual(decoded.lastSimulatedWallClockTime, nil, "Older universe JSON should default missing simulation metadata to nil")
     requireEqual(decoded.factions[0].researchQueue, [], "Older faction JSON should default missing research queue to empty")
     requireEqual(decoded.planets[0].buildQueue, [], "Older planet JSON should default missing build queue to empty")
+    requireEqual(decoded.planets[0].shipBuildQueue, [], "Older planet JSON should default missing ship build queue to empty")
+    requireEqual(decoded.planets[0].defenseBuildQueue, [], "Older planet JSON should default missing defense build queue to empty")
     requireEqual(decoded.planets[0].buildingLevels, [.metalMine: 2], "Older planet JSON should keep raw-value building map behavior")
     requireEqual(decoded.ruleSet.buildingRules, RuleSet.fastSkirmish.buildingRules, "Older universe JSON should keep RuleSet defaults")
 }
@@ -434,6 +559,8 @@ func testQueueFieldsRejectExplicitNullWhenDecodingJSON() {
       "energy": { "produced": 20, "used": 8 },
       "buildingLevels": { "metalMine": 2 },
       "buildQueue": null,
+      "shipBuildQueue": null,
+      "defenseBuildQueue": [],
       "shipInventory": { "smallCargo": 1 },
       "defenseInventory": { "rocketLauncher": 3 }
     }
@@ -444,6 +571,12 @@ func testQueueFieldsRejectExplicitNullWhenDecodingJSON() {
     }
     requireThrowsDecodingError("Explicit null buildQueue should fail decoding") {
         _ = try JSONDecoder().decode(Planet.self, from: Data(planetWithNullBuildQueueJSON.utf8))
+    }
+
+    let planetWithNullShipQueueJSON = planetWithNullBuildQueueJSON
+        .replacingOccurrences(of: "\"buildQueue\": null,", with: "\"buildQueue\": [],")
+    requireThrowsDecodingError("Explicit null shipBuildQueue should fail decoding") {
+        _ = try JSONDecoder().decode(Planet.self, from: Data(planetWithNullShipQueueJSON.utf8))
     }
 }
 
@@ -727,6 +860,10 @@ func makeQueueUniverse(
     researchLevels: [TechnologyKind: Int] = [:],
     buildQueue: [BuildQueueItem] = [],
     researchQueue: [ResearchQueueItem] = [],
+    shipBuildQueue: [UnitBuildQueueItem] = [],
+    defenseBuildQueue: [UnitBuildQueueItem] = [],
+    shipInventory: [ShipKind: Int] = [:],
+    defenseInventory: [DefenseKind: Int] = [:],
     ruleSet: RuleSet = .fastSkirmish
 ) -> Universe {
     let playerID = queuePlayerID()
@@ -758,7 +895,11 @@ func makeQueueUniverse(
                 resources: resources,
                 storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
                 buildingLevels: buildingLevels,
-                buildQueue: buildQueue
+                buildQueue: buildQueue,
+                shipBuildQueue: shipBuildQueue,
+                defenseBuildQueue: defenseBuildQueue,
+                shipInventory: shipInventory,
+                defenseInventory: defenseInventory
             )
         ],
         fleets: [],
@@ -1447,6 +1588,262 @@ func testQueueEngineStartsResearchAndPaysFromOwnedPlanet() {
     )
 }
 
+func testQueueEngineStartsShipBuildAndCompletesIntoInventory() {
+    var universe = makeQueueUniverse(
+        resources: ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 1_000),
+        shipInventory: [.smallCargo: 1]
+    )
+
+    let result = QueueEngine.startShipBuild(on: queuePlanetID(), in: &universe, kind: .smallCargo, quantity: 3)
+
+    requireEqual(result, QueueResult.queued, "Affordable ship build should be queued")
+    requireEqual(universe.planets[0].shipBuildQueue.count, 1, "Ship build queue should contain the started order")
+
+    let item = universe.planets[0].shipBuildQueue[0]
+    let expectedCost = ResourceBundle(metal: 6_000, crystal: 6_000)
+    requireEqual(item.planetID, queuePlanetID(), "Ship queue item should target the requested planet")
+    requireEqual(item.unitKind, .ship(.smallCargo), "Ship queue item should store the ship kind")
+    requireEqual(item.quantity, 3, "Ship queue item should store the requested quantity")
+    requireEqual(item.startTime, 0, "Ship queue item should start at current game time")
+    requireEqual(item.finishTime, 30, "Ship queue item should finish after quantity-scaled duration")
+    requireEqual(item.paidCost, expectedCost, "Ship queue item should store the paid cost")
+    requireEqual(
+        universe.planets[0].resources,
+        ResourceBundle(metal: 4_000, crystal: 4_000, deuterium: 1_000),
+        "Starting a ship build should deduct the paid cost immediately"
+    )
+
+    SimulationEngine.tick(universe: &universe, delta: 30)
+
+    requireEqual(universe.planets[0].shipBuildQueue, [], "Completed ship build queue item should be removed")
+    requireEqual(universe.planets[0].shipInventory[.smallCargo], 4, "Completed ship build should increment ship inventory")
+
+    guard let completionEvent = universe.events.first(where: { $0.title == "Ship Construction Complete" }) else {
+        fatalError("Completing a ship build should record a ship construction event")
+    }
+
+    requireEqual(completionEvent.kind, .economy, "Ship construction completion event should be an economy event")
+    requireEqual(completionEvent.time, 30, "Ship construction completion event should use the queue finish time")
+    requireEqual(
+        completionEvent.message,
+        "Queue World completed 3 smallCargo.",
+        "Ship construction completion event should describe the completed order deterministically"
+    )
+}
+
+func testQueueEngineStartsDefenseBuildAndCompletesIntoInventory() {
+    var universe = makeQueueUniverse(
+        resources: ResourceBundle(metal: 10_000, crystal: 2_000, deuterium: 500),
+        defenseInventory: [.rocketLauncher: 1]
+    )
+
+    let result = QueueEngine.startDefenseBuild(on: queuePlanetID(), in: &universe, kind: .rocketLauncher, quantity: 4)
+
+    requireEqual(result, QueueResult.queued, "Affordable defense build should be queued")
+    requireEqual(universe.planets[0].defenseBuildQueue.count, 1, "Defense build queue should contain the started order")
+
+    let item = universe.planets[0].defenseBuildQueue[0]
+    let expectedCost = ResourceBundle(metal: 8_000)
+    requireEqual(item.planetID, queuePlanetID(), "Defense queue item should target the requested planet")
+    requireEqual(item.unitKind, .defense(.rocketLauncher), "Defense queue item should store the defense kind")
+    requireEqual(item.quantity, 4, "Defense queue item should store the requested quantity")
+    requireEqual(item.startTime, 0, "Defense queue item should start at current game time")
+    requireEqual(item.finishTime, 24, "Defense queue item should finish after quantity-scaled duration")
+    requireEqual(item.paidCost, expectedCost, "Defense queue item should store the paid cost")
+    requireEqual(
+        universe.planets[0].resources,
+        ResourceBundle(metal: 2_000, crystal: 2_000, deuterium: 500),
+        "Starting a defense build should deduct the paid cost immediately"
+    )
+
+    SimulationEngine.tick(universe: &universe, delta: 24)
+
+    requireEqual(universe.planets[0].defenseBuildQueue, [], "Completed defense build queue item should be removed")
+    requireEqual(universe.planets[0].defenseInventory[.rocketLauncher], 5, "Completed defense build should increment defense inventory")
+
+    guard let completionEvent = universe.events.first(where: { $0.title == "Defense Construction Complete" }) else {
+        fatalError("Completing a defense build should record a defense construction event")
+    }
+
+    requireEqual(completionEvent.kind, .economy, "Defense construction completion event should be an economy event")
+    requireEqual(completionEvent.time, 24, "Defense construction completion event should use the queue finish time")
+    requireEqual(
+        completionEvent.message,
+        "Queue World completed 4 rocketLauncher.",
+        "Defense construction completion event should describe the completed order deterministically"
+    )
+}
+
+func testQueueEngineRejectsBusyUnitQueuesWithoutMutation() {
+    let shipItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d3")!,
+        planetID: queuePlanetID(),
+        unitKind: .ship(.smallCargo),
+        quantity: 1,
+        startTime: 0,
+        finishTime: 10,
+        paidCost: ResourceBundle(metal: 2_000, crystal: 2_000)
+    )
+    var shipUniverse = makeQueueUniverse(shipBuildQueue: [shipItem])
+    let originalShipUniverse = shipUniverse
+
+    let shipResult = QueueEngine.startShipBuild(on: queuePlanetID(), in: &shipUniverse, kind: .lightFighter, quantity: 1)
+
+    requireEqual(shipResult, QueueResult.queueBusy, "Planet with an active ship queue should reject another ship build")
+    requireEqual(shipUniverse, originalShipUniverse, "Busy ship queue rejection should not mutate the universe")
+
+    let defenseItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d4")!,
+        planetID: queuePlanetID(),
+        unitKind: .defense(.rocketLauncher),
+        quantity: 1,
+        startTime: 0,
+        finishTime: 6,
+        paidCost: ResourceBundle(metal: 2_000)
+    )
+    var defenseUniverse = makeQueueUniverse(defenseBuildQueue: [defenseItem])
+    let originalDefenseUniverse = defenseUniverse
+
+    let defenseResult = QueueEngine.startDefenseBuild(
+        on: queuePlanetID(),
+        in: &defenseUniverse,
+        kind: .lightLaser,
+        quantity: 1
+    )
+
+    requireEqual(defenseResult, QueueResult.queueBusy, "Planet with an active defense queue should reject another defense build")
+    requireEqual(defenseUniverse, originalDefenseUniverse, "Busy defense queue rejection should not mutate the universe")
+}
+
+func testQueueEngineRejectsInvalidUnitRulesWithoutMutation() {
+    var invalidShipRuleSet = RuleSet.fastSkirmish
+    invalidShipRuleSet.shipRules[.smallCargo] = ShipRule(
+        baseCost: ResourceBundle(metal: -2_000, crystal: 2_000),
+        baseDuration: 10,
+        aiPriorityWeight: 0.40
+    )
+    var invalidShipUniverse = makeQueueUniverse(ruleSet: invalidShipRuleSet)
+    let originalInvalidShipUniverse = invalidShipUniverse
+
+    let shipResult = QueueEngine.startShipBuild(on: queuePlanetID(), in: &invalidShipUniverse, kind: .smallCargo, quantity: 1)
+
+    requireEqual(shipResult, QueueResult.missingRule, "Negative ship costs should be rejected as invalid rules")
+    requireEqual(invalidShipUniverse, originalInvalidShipUniverse, "Invalid ship costs should not mutate the universe")
+
+    var invalidDefenseRuleSet = RuleSet.fastSkirmish
+    invalidDefenseRuleSet.defenseRules[.rocketLauncher] = DefenseRule(
+        baseCost: ResourceBundle(metal: 2_000),
+        baseDuration: .nan,
+        aiPriorityWeight: 0.50
+    )
+    var invalidDefenseUniverse = makeQueueUniverse(ruleSet: invalidDefenseRuleSet)
+    let originalInvalidDefenseUniverse = invalidDefenseUniverse
+
+    let defenseResult = QueueEngine.startDefenseBuild(
+        on: queuePlanetID(),
+        in: &invalidDefenseUniverse,
+        kind: .rocketLauncher,
+        quantity: 1
+    )
+
+    requireEqual(defenseResult, QueueResult.missingRule, "Non-finite defense durations should be rejected as invalid rules")
+    requireEqual(invalidDefenseUniverse, originalInvalidDefenseUniverse, "Invalid defense durations should not mutate the universe")
+}
+
+func testQueueCompletionPreservesMismatchedUnitQueueItemsWithoutMutation() {
+    let mismatchedShipQueueItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d5")!,
+        planetID: queuePlanetID(),
+        unitKind: .defense(.rocketLauncher),
+        quantity: 1,
+        startTime: 0,
+        finishTime: 10,
+        paidCost: ResourceBundle(metal: 2_000)
+    )
+    let mismatchedDefenseQueueItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d6")!,
+        planetID: queuePlanetID(),
+        unitKind: .ship(.smallCargo),
+        quantity: 1,
+        startTime: 0,
+        finishTime: 10,
+        paidCost: ResourceBundle(metal: 2_000, crystal: 2_000)
+    )
+    var universe = makeQueueUniverse(
+        gameTime: 10,
+        shipBuildQueue: [mismatchedShipQueueItem],
+        defenseBuildQueue: [mismatchedDefenseQueueItem]
+    )
+
+    QueueEngine.completeDueItems(in: &universe)
+
+    requireEqual(
+        universe.planets[0].shipBuildQueue,
+        [mismatchedShipQueueItem],
+        "Mismatched ship queue items should remain queued for inspection"
+    )
+    requireEqual(
+        universe.planets[0].defenseBuildQueue,
+        [mismatchedDefenseQueueItem],
+        "Mismatched defense queue items should remain queued for inspection"
+    )
+    requireEqual(universe.planets[0].shipInventory, [:], "Mismatched unit items should not mutate ship inventory")
+    requireEqual(universe.planets[0].defenseInventory, [:], "Mismatched unit items should not mutate defense inventory")
+    requireEqual(universe.events, [], "Mismatched unit items should not emit completion events")
+}
+
+func testQueueCompletionPreservesInvalidUnitQuantitiesWithoutMutation() {
+    let negativeShipQueueItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d7")!,
+        planetID: queuePlanetID(),
+        unitKind: .ship(.smallCargo),
+        quantity: -2,
+        startTime: 0,
+        finishTime: 10,
+        paidCost: ResourceBundle(metal: 2_000, crystal: 2_000)
+    )
+    let overflowingDefenseQueueItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d8")!,
+        planetID: queuePlanetID(),
+        unitKind: .defense(.rocketLauncher),
+        quantity: 1,
+        startTime: 0,
+        finishTime: 10,
+        paidCost: ResourceBundle(metal: 2_000)
+    )
+    var universe = makeQueueUniverse(
+        gameTime: 10,
+        shipBuildQueue: [negativeShipQueueItem],
+        defenseBuildQueue: [overflowingDefenseQueueItem],
+        shipInventory: [.smallCargo: 3],
+        defenseInventory: [.rocketLauncher: Int.max]
+    )
+
+    QueueEngine.completeDueItems(in: &universe)
+
+    requireEqual(
+        universe.planets[0].shipBuildQueue,
+        [negativeShipQueueItem],
+        "Negative ship queue quantities should remain queued for inspection"
+    )
+    requireEqual(
+        universe.planets[0].defenseBuildQueue,
+        [overflowingDefenseQueueItem],
+        "Overflowing defense queue quantities should remain queued for inspection"
+    )
+    requireEqual(
+        universe.planets[0].shipInventory[.smallCargo],
+        3,
+        "Negative ship queue quantities should not reduce ship inventory"
+    )
+    requireEqual(
+        universe.planets[0].defenseInventory[.rocketLauncher],
+        Int.max,
+        "Overflowing defense queue quantities should not mutate defense inventory"
+    )
+    requireEqual(universe.events, [], "Invalid unit quantities should not emit completion events")
+}
+
 func testSimulationTickCompletesResearchQueueAndRecordsEvent() {
     var universe = makeQueueUniverse()
 
@@ -1839,6 +2236,36 @@ func testOfflineCatchUpCompletesQueuesAndSummarizesCompletionCounts() {
     require(universe.events[0].message.contains("1 research"), "Offline summary event should describe research completions")
 }
 
+func testOfflineCatchUpCompletesUnitQueuesAndSummarizesConstructionCounts() {
+    var universe = makeQueueUniverse(ruleSet: fastSkirmishRules(offlineChunkInterval: 300))
+    requireEqual(
+        QueueEngine.startShipBuild(on: queuePlanetID(), in: &universe, kind: .smallCargo, quantity: 1),
+        QueueResult.queued,
+        "Ship queue should start before offline unit completion test"
+    )
+    requireEqual(
+        QueueEngine.startDefenseBuild(on: queuePlanetID(), in: &universe, kind: .rocketLauncher, quantity: 1),
+        QueueResult.queued,
+        "Defense queue should start before offline unit completion test"
+    )
+
+    let summary = OfflineSimulationEngine.catchUp(
+        universe: &universe,
+        elapsed: 60,
+        now: Date(timeIntervalSince1970: 3_600)
+    )
+
+    requireEqual(universe.planets[0].shipBuildQueue, [], "Offline catch-up should remove completed ship queue items")
+    requireEqual(universe.planets[0].defenseBuildQueue, [], "Offline catch-up should remove completed defense queue items")
+    requireEqual(universe.planets[0].shipInventory[.smallCargo], 1, "Offline catch-up should apply completed ship inventory")
+    requireEqual(universe.planets[0].defenseInventory[.rocketLauncher], 1, "Offline catch-up should apply completed defense inventory")
+    requireEqual(summary.completedConstructionCount, 2, "Offline catch-up summary should count completed ship and defense construction")
+    requireEqual(summary.completedResearchCount, 0, "Offline unit completion should not report research completions")
+    requireEqual(summary.generatedEventCount, 4, "Offline unit catch-up should count unit completions, economy, and simulation events")
+    requireEqual(universe.events.map(\.title), ["Offline Catch-Up Complete"], "Offline unit catch-up should squash generated events")
+    require(universe.events[0].message.contains("2 construction"), "Offline summary event should describe unit construction completions")
+}
+
 func testOfflineCatchUpIgnoresInvalidElapsedValues() {
     let invalidElapsedValues: [TimeInterval] = [0, -1, .infinity, -.infinity, .nan]
 
@@ -1910,10 +2337,12 @@ testResourceBundleArithmeticAndAffordabilityHelpers()
 testResourceStorageConvertsToResourceDisplayBundle()
 testFastSkirmishBuildingRulesCoverEarlyEconomy()
 testFastSkirmishResearchRulesCoverEarlyTechnologies()
+testFastSkirmishUnitRulesCoverShipsAndDefenses()
 try testRuleSetBalanceRulesUseRawValueKeyedJSONObjects()
 try testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults()
 try testBuildQueueItemRoundTripsThroughJSON()
 try testResearchQueueItemRoundTripsThroughJSON()
+try testUnitBuildQueueItemRoundTripsThroughJSON()
 try testPlanetFactionAndUniverseQueuesRoundTripThroughJSON()
 try testQueueFieldsDefaultWhenDecodingOlderUniverseJSON()
 testQueueFieldsRejectExplicitNullWhenDecodingJSON()
@@ -1944,6 +2373,12 @@ testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals()
 testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent()
 testSimulationTickCompletesAlreadyDueConstructionBeforeProduction()
 testQueueEngineStartsResearchAndPaysFromOwnedPlanet()
+testQueueEngineStartsShipBuildAndCompletesIntoInventory()
+testQueueEngineStartsDefenseBuildAndCompletesIntoInventory()
+testQueueEngineRejectsBusyUnitQueuesWithoutMutation()
+testQueueEngineRejectsInvalidUnitRulesWithoutMutation()
+testQueueCompletionPreservesMismatchedUnitQueueItemsWithoutMutation()
+testQueueCompletionPreservesInvalidUnitQuantitiesWithoutMutation()
 testSimulationTickCompletesResearchQueueAndRecordsEvent()
 try testQueueCompletionIsDeterministicAcrossSaveLoadEquality()
 testSimulationTickEmitsAtMostOneEconomySummaryEventPerTick()
@@ -1954,6 +2389,7 @@ testSimulationTickAcceptsHugeFinitePositiveDeltas()
 testOfflineCatchUpUsesBoundedChunksAndMinimumChunkInterval()
 testOfflineCatchUpProducesResourcesWithoutFloodingEvents()
 testOfflineCatchUpCompletesQueuesAndSummarizesCompletionCounts()
+testOfflineCatchUpCompletesUnitQueuesAndSummarizesConstructionCounts()
 testOfflineCatchUpIgnoresInvalidElapsedValues()
 testOfflineCatchUpCapsHugeElapsedValuesToOneDay()
 try testOfflineCatchUpSummaryIsCodableEquatableAndDeterministic()
