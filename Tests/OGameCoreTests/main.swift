@@ -204,6 +204,29 @@ func testPlanetEnumDictionaryDecodesRawValueKeysAndRejectsUnknownKeys() throws {
     }
 }
 
+func testSeededGeneratorProducesDeterministicDistinctSequences() {
+    var first = SeededGenerator(seed: 0)
+    var second = SeededGenerator(seed: 0)
+    var different = SeededGenerator(seed: 0xA0761D6478BD642F)
+
+    let firstSequence = (0..<8).map { _ in first.next() }
+    let secondSequence = (0..<8).map { _ in second.next() }
+    let differentSequence = (0..<8).map { _ in different.next() }
+
+    requireEqual(firstSequence, secondSequence, "Same seed should produce the same generator sequence")
+    require(firstSequence != differentSequence, "Different seeds should produce different generator sequences")
+}
+
+func testSeededGeneratorNextIntRespectsClosedRanges() {
+    var generator = SeededGenerator(seed: 42)
+
+    requireEqual(generator.nextInt(in: 9...9), 9, "Single-value closed range should always return its only value")
+
+    let values = (0..<32).map { _ in generator.nextInt(in: 4...12) }
+    require(values.allSatisfy { (4...12).contains($0) }, "Generated integers should stay inside the requested closed range")
+    require(values.contains { $0 != 4 }, "Normal closed range should not collapse to the lower bound")
+}
+
 func testStarterUniverseIsDeterministicForSeed() throws {
     let first: Universe = StarterUniverseFactory.makeNewGame(seed: 7, playerName: "Commander")
     let second: Universe = StarterUniverseFactory.makeNewGame(seed: 7, playerName: "Commander")
@@ -221,6 +244,8 @@ func testStarterUniverseIsDeterministicForSeed() throws {
     requireEqual(first.factions.count, 6, "Starter universe should create six factions")
     requireEqual(first.planets.count, 6, "Starter universe should create six planets")
     requireEqual(first.playerFactionID, FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000001")!), "Player faction should use a stable id")
+    requireEqual(Set(first.factions.map(\.id)).count, first.factions.count, "Starter universe faction IDs should be unique")
+    requireEqual(Set(first.planets.map(\.id)).count, first.planets.count, "Starter universe planet IDs should be unique")
 
     let playerFaction = first.factions[0]
     let homeworld = first.planets[0]
@@ -236,9 +261,19 @@ func testStarterUniverseIsDeterministicForSeed() throws {
 
     let aiFactions = Array(first.factions.dropFirst())
     let aiPlanets = Array(first.planets.dropFirst())
+    let planetsByID = Dictionary(uniqueKeysWithValues: first.planets.map { ($0.id, $0) })
     require(aiFactions.allSatisfy { $0.kind == Faction.Kind.ai }, "Rival factions should all be AI-controlled")
     requireEqual(aiFactions.map(\.strategy), [Faction.Strategy.miner, .raider, .technologist, .expansionist, .balanced], "Rival factions should use the planned strategies")
     requireEqual(aiFactions.map(\.ownedPlanetIDs), aiPlanets.map { [$0.id] }, "Each rival should own its matching starter planet")
+    for faction in first.factions {
+        for planetID in faction.ownedPlanetIDs {
+            guard let planet = planetsByID[planetID] else {
+                fatalError("Faction \(faction.id) should only reference existing starter planets")
+            }
+
+            requireEqual(planet.ownerID, faction.id, "Owned starter planet should point back to its faction owner")
+        }
+    }
     require(aiPlanets.allSatisfy { (4...12).contains($0.coordinate.position) }, "Rival planet positions should be generated inside the starter range")
     requireEqual(
         aiPlanets.map(\.coordinate.galaxy),
@@ -270,5 +305,7 @@ testResourceBundleClampsToStorageLimits()
 testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
 try testUniverseModelRoundTripsThroughJSON()
 try testPlanetEnumDictionaryDecodesRawValueKeysAndRejectsUnknownKeys()
+testSeededGeneratorProducesDeterministicDistinctSequences()
+testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
 print("OGameCoreTests passed")

@@ -4,7 +4,7 @@ public struct SeededGenerator: RandomNumberGenerator, Codable, Equatable, Sendab
     private var state: UInt64
 
     public init(seed: UInt64) {
-        self.state = seed == 0 ? 0xA0761D6478BD642F : seed
+        self.state = seed &+ 0xA0761D6478BD642F
     }
 
     public mutating func next() -> UInt64 {
