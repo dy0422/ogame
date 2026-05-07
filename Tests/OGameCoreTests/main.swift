@@ -343,6 +343,26 @@ func testSimulationTickIgnoresNonPositiveDeltas() {
     requireEqual(universe.events, originalEvents, "Simulation tick should not record events for non-positive deltas")
 }
 
+func testSimulationTickIgnoresNonFiniteDeltas() {
+    var infiniteUniverse = StarterUniverseFactory.makeNewGame(seed: 11, playerName: "Commander")
+    let originalInfiniteGameTime = infiniteUniverse.gameTime
+    let originalInfiniteEvents = infiniteUniverse.events
+
+    SimulationEngine.tick(universe: &infiniteUniverse, delta: .infinity)
+
+    requireEqual(infiniteUniverse.gameTime, originalInfiniteGameTime, "Simulation tick should ignore infinite deltas")
+    requireEqual(infiniteUniverse.events, originalInfiniteEvents, "Simulation tick should not record events for infinite deltas")
+
+    var nanUniverse = StarterUniverseFactory.makeNewGame(seed: 12, playerName: "Commander")
+    let originalNaNGameTime = nanUniverse.gameTime
+    let originalNaNEvents = nanUniverse.events
+
+    SimulationEngine.tick(universe: &nanUniverse, delta: .nan)
+
+    requireEqual(nanUniverse.gameTime, originalNaNGameTime, "Simulation tick should ignore NaN deltas")
+    requireEqual(nanUniverse.events, originalNaNEvents, "Simulation tick should not record events for NaN deltas")
+}
+
 try testEntityIDsAreCodableAndEquatable()
 testResourceBundleClampsToStorageLimits()
 testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
@@ -354,4 +374,5 @@ testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
 testSimulationTickAdvancesGameTimeAndRecordsEvent()
 testSimulationTickIgnoresNonPositiveDeltas()
+testSimulationTickIgnoresNonFiniteDeltas()
 print("OGameCoreTests passed")

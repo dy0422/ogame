@@ -2,7 +2,7 @@ import Foundation
 
 public enum SimulationEngine {
     public static func tick(universe: inout Universe, delta: TimeInterval) {
-        guard delta > 0 else {
+        guard delta.isFinite, delta > 0 else {
             return
         }
 
