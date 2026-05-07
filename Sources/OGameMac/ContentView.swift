@@ -845,14 +845,7 @@ private struct ResearchUpgradeRow: View {
     }
 
     private var canAfford: Bool {
-        guard
-            let cost,
-            let paymentPlanet = model.playerPlanets.first(where: { $0.ownerID == model.universe.playerFactionID })
-        else {
-            return false
-        }
-
-        return paymentPlanet.resources.canAfford(cost)
+        model.canAffordResearch(technology)
     }
 
     var body: some View {

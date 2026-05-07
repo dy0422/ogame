@@ -191,10 +191,8 @@ final class AppModel: ObservableObject {
         researchTerms(for: technology)?.duration
     }
 
-    func canStartResearch(_ technology: TechnologyKind) -> Bool {
+    func canAffordResearch(_ technology: TechnologyKind) -> Bool {
         guard
-            canSave,
-            playerFaction?.researchQueue.isEmpty == true,
             let paymentPlanet = playerResearchPaymentPlanet,
             let cost = researchCost(for: technology)
         else {
@@ -202,6 +200,17 @@ final class AppModel: ObservableObject {
         }
 
         return paymentPlanet.resources.canAfford(cost)
+    }
+
+    func canStartResearch(_ technology: TechnologyKind) -> Bool {
+        guard
+            canSave,
+            playerFaction?.researchQueue.isEmpty == true
+        else {
+            return false
+        }
+
+        return canAffordResearch(technology)
     }
 
     func queueRemainingText(until finishTime: TimeInterval) -> String {
@@ -310,9 +319,13 @@ final class AppModel: ObservableObject {
             return nil
         }
 
-        return universe.planets.first { planet in
-            planet.ownerID == playerFaction.id && playerFaction.ownedPlanetIDs.contains(planet.id)
+        for planetID in playerFaction.ownedPlanetIDs {
+            if let planet = universe.planets.first(where: { $0.id == planetID && $0.ownerID == playerFaction.id }) {
+                return planet
+            }
         }
+
+        return nil
     }
 
     private func autosaveAfterQueueing(successStatus: String) {
