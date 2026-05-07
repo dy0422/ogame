@@ -7,9 +7,35 @@ public enum QueueResult: Equatable, Sendable {
     case missingFaction
     case queueBusy
     case missingRule
+    case missingRequirement(RuleRequirement)
 }
 
 public enum QueueEngine {
+    public static func missingRequirement(
+        for requirements: [RuleRequirement],
+        planet: Planet,
+        faction: Faction?
+    ) -> RuleRequirement? {
+        for requirement in requirements {
+            switch requirement {
+            case let .building(kind, level):
+                if normalizedLevel(planet.buildingLevels[kind] ?? 0) < requirementLevel(level) {
+                    return .building(kind, level: requirementLevel(level))
+                }
+            case let .technology(kind, level):
+                guard let faction else {
+                    return .technology(kind, level: requirementLevel(level))
+                }
+
+                if normalizedLevel(faction.technology.levels[kind] ?? 0) < requirementLevel(level) {
+                    return .technology(kind, level: requirementLevel(level))
+                }
+            }
+        }
+
+        return nil
+    }
+
     public static func startBuildingUpgrade(
         on planetID: PlanetID,
         in universe: inout Universe,
@@ -25,6 +51,15 @@ public enum QueueEngine {
 
         guard let rule = universe.ruleSet.buildingRules[kind] else {
             return .missingRule
+        }
+
+        let owningFaction = faction(for: universe.planets[planetIndex].ownerID, in: universe)
+        if let missingRequirement = missingRequirement(
+            for: rule.requirements,
+            planet: universe.planets[planetIndex],
+            faction: owningFaction
+        ) {
+            return .missingRequirement(missingRequirement)
         }
 
         let currentLevel = normalizedLevel(universe.planets[planetIndex].buildingLevels[kind] ?? 0)
@@ -98,6 +133,14 @@ public enum QueueEngine {
             return .missingPlanet
         }
 
+        if let missingRequirement = missingRequirement(
+            for: rule.requirements,
+            planet: universe.planets[planetIndex],
+            faction: universe.factions[factionIndex]
+        ) {
+            return .missingRequirement(missingRequirement)
+        }
+
         let currentLevel = normalizedLevel(universe.factions[factionIndex].technology.levels[technology] ?? 0)
         guard currentLevel < Int.max else {
             return .missingRule
@@ -168,6 +211,18 @@ public enum QueueEngine {
             return .missingRule
         }
 
+        guard let owningFaction = faction(for: universe.planets[planetIndex].ownerID, in: universe) else {
+            return .missingFaction
+        }
+
+        if let missingRequirement = missingRequirement(
+            for: rule.requirements,
+            planet: universe.planets[planetIndex],
+            faction: owningFaction
+        ) {
+            return .missingRequirement(missingRequirement)
+        }
+
         let paidCost = terms.cost
 
         guard universe.planets[planetIndex].resources.canAfford(paidCost) else {
@@ -226,6 +281,18 @@ public enum QueueEngine {
               let terms = defenseTerms(rule: rule, quantity: quantity)
         else {
             return .missingRule
+        }
+
+        guard let owningFaction = faction(for: universe.planets[planetIndex].ownerID, in: universe) else {
+            return .missingFaction
+        }
+
+        if let missingRequirement = missingRequirement(
+            for: rule.requirements,
+            planet: universe.planets[planetIndex],
+            faction: owningFaction
+        ) {
+            return .missingRequirement(missingRequirement)
         }
 
         let paidCost = terms.cost
@@ -407,6 +474,14 @@ public enum QueueEngine {
         return nil
     }
 
+    private static func faction(for factionID: FactionID?, in universe: Universe) -> Faction? {
+        guard let factionID else {
+            return nil
+        }
+
+        return universe.factions.first { $0.id == factionID }
+    }
+
     private static func buildingTerms(rule: BuildingRule, targetLevel: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
         guard
             isValidCost(rule.baseCost),
@@ -516,6 +591,10 @@ public enum QueueEngine {
 
     private static func normalizedLevel(_ level: Int) -> Int {
         max(level, 0)
+    }
+
+    private static func requirementLevel(_ level: Int) -> Int {
+        max(level, 1)
     }
 
     private static func constructionCompletionEvent(for item: BuildQueueItem, planet: Planet, time: TimeInterval) -> GameEvent {

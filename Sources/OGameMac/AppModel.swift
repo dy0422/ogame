@@ -537,15 +537,37 @@ final class AppModel: ObservableObject {
     }
 
     func canStartBuildingUpgrade(planet: Planet, kind: BuildingKind) -> Bool {
-        guard
-            canSave,
-            planet.buildQueue.isEmpty,
-            let cost = buildingUpgradeCost(for: planet, kind: kind)
-        else {
-            return false
+        buildingUpgradeLockedReason(planet: planet, kind: kind) == nil
+    }
+
+    func buildingUpgradeLockedReason(planet: Planet, kind: BuildingKind) -> String? {
+        guard canSave else {
+            return "Start or load a valid save first"
         }
 
-        return planet.resources.canAfford(cost)
+        guard planet.buildQueue.isEmpty else {
+            return "Construction queue busy"
+        }
+
+        guard let rule = universe.ruleSet.buildingRules[kind],
+              let cost = buildingUpgradeCost(for: planet, kind: kind)
+        else {
+            return "Missing or invalid economy rule"
+        }
+
+        if let missingRequirement = QueueEngine.missingRequirement(
+            for: rule.requirements,
+            planet: planet,
+            faction: faction(with: planet.ownerID)
+        ) {
+            return missingRequirement.lockedReason
+        }
+
+        guard planet.resources.canAfford(cost) else {
+            return "Insufficient resources"
+        }
+
+        return nil
     }
 
     func researchLevel(for technology: TechnologyKind) -> Int {
@@ -581,14 +603,38 @@ final class AppModel: ObservableObject {
     }
 
     func canStartResearch(_ technology: TechnologyKind) -> Bool {
-        guard
-            canSave,
-            playerFaction?.researchQueue.isEmpty == true
-        else {
-            return false
+        researchLockedReason(technology) == nil
+    }
+
+    func researchLockedReason(_ technology: TechnologyKind) -> String? {
+        guard canSave else {
+            return "Start or load a valid save first"
         }
 
-        return canAffordResearch(technology)
+        guard playerFaction?.researchQueue.isEmpty == true else {
+            return "Research queue busy"
+        }
+
+        guard let rule = universe.ruleSet.researchRules[technology],
+              let paymentPlanet = playerResearchPaymentPlanet,
+              let cost = researchCost(for: technology)
+        else {
+            return "Missing or invalid research rule"
+        }
+
+        if let missingRequirement = QueueEngine.missingRequirement(
+            for: rule.requirements,
+            planet: paymentPlanet,
+            faction: playerFaction
+        ) {
+            return missingRequirement.lockedReason
+        }
+
+        guard paymentPlanet.resources.canAfford(cost) else {
+            return "Insufficient resources"
+        }
+
+        return nil
     }
 
     func shipBuildCost(for kind: ShipKind, quantity: Int) -> ResourceBundle? {
@@ -624,29 +670,79 @@ final class AppModel: ObservableObject {
     }
 
     func canStartShipBuild(planet: Planet, kind: ShipKind, quantity: Int) -> Bool {
-        guard
-            canSave,
-            quantity > 0,
-            planet.shipBuildQueue.isEmpty,
-            let cost = shipBuildCost(for: kind, quantity: quantity)
-        else {
-            return false
+        shipBuildLockedReason(planet: planet, kind: kind, quantity: quantity) == nil
+    }
+
+    func shipBuildLockedReason(planet: Planet, kind: ShipKind, quantity: Int) -> String? {
+        guard canSave else {
+            return "Start or load a valid save first"
         }
 
-        return planet.resources.canAfford(cost)
+        guard quantity > 0 else {
+            return "Invalid quantity"
+        }
+
+        guard planet.shipBuildQueue.isEmpty else {
+            return "Shipyard queue busy"
+        }
+
+        guard let rule = universe.ruleSet.shipRules[kind],
+              let cost = shipBuildCost(for: kind, quantity: quantity)
+        else {
+            return "Missing or invalid ship rule"
+        }
+
+        if let missingRequirement = QueueEngine.missingRequirement(
+            for: rule.requirements,
+            planet: planet,
+            faction: faction(with: planet.ownerID)
+        ) {
+            return missingRequirement.lockedReason
+        }
+
+        guard planet.resources.canAfford(cost) else {
+            return "Insufficient resources"
+        }
+
+        return nil
     }
 
     func canStartDefenseBuild(planet: Planet, kind: DefenseKind, quantity: Int) -> Bool {
-        guard
-            canSave,
-            quantity > 0,
-            planet.defenseBuildQueue.isEmpty,
-            let cost = defenseBuildCost(for: kind, quantity: quantity)
-        else {
-            return false
+        defenseBuildLockedReason(planet: planet, kind: kind, quantity: quantity) == nil
+    }
+
+    func defenseBuildLockedReason(planet: Planet, kind: DefenseKind, quantity: Int) -> String? {
+        guard canSave else {
+            return "Start or load a valid save first"
         }
 
-        return planet.resources.canAfford(cost)
+        guard quantity > 0 else {
+            return "Invalid quantity"
+        }
+
+        guard planet.defenseBuildQueue.isEmpty else {
+            return "Defense queue busy"
+        }
+
+        guard let rule = universe.ruleSet.defenseRules[kind],
+              let cost = defenseBuildCost(for: kind, quantity: quantity)
+        else {
+            return "Missing or invalid defense rule"
+        }
+
+        if let missingRequirement = QueueEngine.missingRequirement(
+            for: rule.requirements,
+            planet: planet,
+            faction: faction(with: planet.ownerID)
+        ) {
+            return missingRequirement.lockedReason
+        }
+
+        guard planet.resources.canAfford(cost) else {
+            return "Insufficient resources"
+        }
+
+        return nil
     }
 
     func unitQueueStatus(_ item: UnitBuildQueueItem) -> String {
@@ -922,7 +1018,7 @@ final class AppModel: ObservableObject {
             return
         }
 
-        SimulationEngine.tick(universe: &universe, delta: advanceDelta)
+        SimulationEngine.tick(universe: &universe, delta: advanceDelta, aiDifficulty: settings.difficulty)
         refreshStrategicState()
         statusMessage = "Advanced \(Self.formattedDuration(advanceDelta)) at \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x speed to T+\(Self.formattedWholeSeconds(universe.gameTime))."
     }
@@ -981,7 +1077,7 @@ final class AppModel: ObservableObject {
 
     func updateDifficulty(_ difficulty: GameSettings.Difficulty) {
         settings.difficulty = difficulty
-        statusMessage = "Difficulty set to \(difficulty.displayName). Save to keep this setting."
+        statusMessage = "Difficulty set to \(difficulty.displayName). \(difficulty.behaviorDescription)"
     }
 
     func refreshSaveSlots() {
@@ -1107,6 +1203,14 @@ final class AppModel: ObservableObject {
         var refreshed = universe
         StrategicEngine.updateStrategicState(in: &refreshed)
         return refreshed
+    }
+
+    private func faction(with factionID: FactionID?) -> Faction? {
+        guard let factionID else {
+            return nil
+        }
+
+        return universe.factions.first { $0.id == factionID }
     }
 
     private func buildingUpgradeTerms(for planet: Planet, kind: BuildingKind) -> (cost: ResourceBundle, duration: TimeInterval)? {
@@ -1260,6 +1364,8 @@ final class AppModel: ObservableObject {
             return "queue busy"
         case .missingRule:
             return "missing or invalid economy rule"
+        case .missingRequirement(let requirement):
+            return requirement.lockedReason
         }
     }
 
@@ -1580,6 +1686,17 @@ extension GameSettings.Difficulty {
             return "Standard"
         case .hard:
             return "Hard"
+        }
+    }
+
+    var behaviorDescription: String {
+        switch self {
+        case .easy:
+            return "AI scouts before attacks and reacts to threats with heavier defenses."
+        case .standard:
+            return "AI balances scouting, expansion, attacks, and defensive reactions."
+        case .hard:
+            return "AI uses rankings and relation pressure more aggressively without reading hidden inventories."
         }
     }
 }

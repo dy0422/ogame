@@ -75,6 +75,42 @@ public struct GameSettings: Codable, Equatable, Sendable {
     }
 }
 
+public struct AIDifficultyPolicy: Equatable, Sendable {
+    public var difficulty: GameSettings.Difficulty
+    public var allowsRankingBasedAttacks: Bool
+    public var requiresReportBeforeAttack: Bool
+    public var defensiveQuantityBonus: Int
+
+    public init(difficulty: GameSettings.Difficulty = .standard) {
+        self.difficulty = difficulty
+
+        switch difficulty {
+        case .easy:
+            self.allowsRankingBasedAttacks = false
+            self.requiresReportBeforeAttack = true
+            self.defensiveQuantityBonus = 1
+        case .standard:
+            self.allowsRankingBasedAttacks = false
+            self.requiresReportBeforeAttack = true
+            self.defensiveQuantityBonus = 0
+        case .hard:
+            self.allowsRankingBasedAttacks = true
+            self.requiresReportBeforeAttack = false
+            self.defensiveQuantityBonus = 0
+        }
+    }
+
+    public static let standard = AIDifficultyPolicy(difficulty: .standard)
+
+    public func defenseBuildQuantity(forThreatScore threatScore: Int) -> Int {
+        guard threatScore > 0 else {
+            return 0
+        }
+
+        return max(1, min(3, 1 + defensiveQuantityBonus))
+    }
+}
+
 public struct Universe: Codable, Equatable, Sendable, Identifiable {
     public var id: UniverseID
     public var name: String
@@ -1125,16 +1161,24 @@ public struct RuleSet: Codable, Equatable, Sendable {
         self.displayName = try container.decode(String.self, forKey: .displayName)
         self.baseTickInterval = try container.decode(TimeInterval.self, forKey: .baseTickInterval)
         self.offlineChunkInterval = try container.decode(TimeInterval.self, forKey: .offlineChunkInterval)
-        self.buildingRules = try container.decodeRawValueDictionaryIfPresent(BuildingKind.self, forKey: .buildingRules)
+        let decodedBuildingRules = try container.decodeRawValueDictionaryIfPresent(BuildingKind.self, forKey: .buildingRules)
             ?? RuleSet.fastSkirmish.buildingRules
-        self.researchRules = try container.decodeRawValueDictionaryIfPresent(TechnologyKind.self, forKey: .researchRules)
+        self.buildingRules = RuleSet.migrateBuildingRulesForRequirements(decodedBuildingRules, ruleSetID: id)
+        let decodedResearchRules = try container.decodeRawValueDictionaryIfPresent(TechnologyKind.self, forKey: .researchRules)
             ?? RuleSet.fastSkirmish.researchRules
+        self.researchRules = RuleSet.migrateResearchRulesForRequirements(decodedResearchRules, ruleSetID: id)
         let decodedShipRules = try container.decodeRawValueDictionaryIfPresent(ShipKind.self, forKey: .shipRules)
             ?? RuleSet.fastSkirmish.shipRules
-        self.shipRules = RuleSet.migrateShipRulesForFleetFields(decodedShipRules)
+        self.shipRules = RuleSet.migrateShipRulesForRequirements(
+            RuleSet.migrateShipRulesForFleetFields(decodedShipRules),
+            ruleSetID: id
+        )
         let decodedDefenseRules = try container.decodeRawValueDictionaryIfPresent(DefenseKind.self, forKey: .defenseRules)
             ?? RuleSet.fastSkirmish.defenseRules
-        self.defenseRules = RuleSet.migrateDefenseRulesForCombatFields(decodedDefenseRules)
+        self.defenseRules = RuleSet.migrateDefenseRulesForRequirements(
+            RuleSet.migrateDefenseRulesForCombatFields(decodedDefenseRules),
+            ruleSetID: id
+        )
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1148,6 +1192,71 @@ public struct RuleSet: Codable, Equatable, Sendable {
         try container.encodeRawValueDictionary(researchRules, forKey: .researchRules)
         try container.encodeRawValueDictionary(shipRules, forKey: .shipRules)
         try container.encodeRawValueDictionary(defenseRules, forKey: .defenseRules)
+    }
+}
+
+public enum RuleRequirement: Codable, Equatable, Sendable {
+    private enum RequirementType: String, Codable {
+        case building
+        case technology
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case buildingKind
+        case technologyKind
+        case level
+    }
+
+    case building(BuildingKind, level: Int)
+    case technology(TechnologyKind, level: Int)
+
+    public var lockedReason: String {
+        switch self {
+        case let .building(kind, level):
+            return "Requires \(kind.rawValue) level \(Self.normalizedLevel(level))"
+        case let .technology(kind, level):
+            return "Requires \(kind.rawValue) level \(Self.normalizedLevel(level))"
+        }
+    }
+
+    public var requiredLevel: Int {
+        switch self {
+        case let .building(_, level), let .technology(_, level):
+            return Self.normalizedLevel(level)
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(RequirementType.self, forKey: .type)
+        let level = Self.normalizedLevel(try container.decodeIfPresent(Int.self, forKey: .level) ?? 1)
+
+        switch type {
+        case .building:
+            self = .building(try container.decode(BuildingKind.self, forKey: .buildingKind), level: level)
+        case .technology:
+            self = .technology(try container.decode(TechnologyKind.self, forKey: .technologyKind), level: level)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        switch self {
+        case let .building(kind, level):
+            try container.encode(RequirementType.building, forKey: .type)
+            try container.encode(kind, forKey: .buildingKind)
+            try container.encode(Self.normalizedLevel(level), forKey: .level)
+        case let .technology(kind, level):
+            try container.encode(RequirementType.technology, forKey: .type)
+            try container.encode(kind, forKey: .technologyKind)
+            try container.encode(Self.normalizedLevel(level), forKey: .level)
+        }
+    }
+
+    private static func normalizedLevel(_ level: Int) -> Int {
+        max(level, 1)
     }
 }
 

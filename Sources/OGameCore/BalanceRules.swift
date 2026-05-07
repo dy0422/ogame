@@ -10,6 +10,7 @@ public struct BuildingRule: Codable, Equatable, Sendable {
     public var energyUsed: Double
     public var storageBonus: ResourceStorage
     public var aiPriorityWeight: Double
+    public var requirements: [RuleRequirement]
 
     public init(
         baseCost: ResourceBundle,
@@ -20,7 +21,8 @@ public struct BuildingRule: Codable, Equatable, Sendable {
         energyProduced: Double = 0,
         energyUsed: Double = 0,
         storageBonus: ResourceStorage = ResourceStorage(),
-        aiPriorityWeight: Double
+        aiPriorityWeight: Double,
+        requirements: [RuleRequirement] = []
     ) {
         self.baseCost = baseCost
         self.costMultiplier = costMultiplier
@@ -31,6 +33,37 @@ public struct BuildingRule: Codable, Equatable, Sendable {
         self.energyUsed = energyUsed
         self.storageBonus = storageBonus
         self.aiPriorityWeight = aiPriorityWeight
+        self.requirements = requirements
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case baseCost
+        case costMultiplier
+        case baseDuration
+        case durationMultiplier
+        case productionPerHour
+        case energyProduced
+        case energyUsed
+        case storageBonus
+        case aiPriorityWeight
+        case requirements
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.init(
+            baseCost: try container.decode(ResourceBundle.self, forKey: .baseCost),
+            costMultiplier: try container.decode(Double.self, forKey: .costMultiplier),
+            baseDuration: try container.decode(TimeInterval.self, forKey: .baseDuration),
+            durationMultiplier: try container.decode(Double.self, forKey: .durationMultiplier),
+            productionPerHour: try container.decodeIfPresent(ResourceBundle.self, forKey: .productionPerHour) ?? .zero,
+            energyProduced: try container.decodeIfPresent(Double.self, forKey: .energyProduced) ?? 0,
+            energyUsed: try container.decodeIfPresent(Double.self, forKey: .energyUsed) ?? 0,
+            storageBonus: try container.decodeIfPresent(ResourceStorage.self, forKey: .storageBonus) ?? ResourceStorage(),
+            aiPriorityWeight: try container.decode(Double.self, forKey: .aiPriorityWeight),
+            requirements: try container.decodeIfPresent([RuleRequirement].self, forKey: .requirements) ?? []
+        )
     }
 }
 
@@ -40,19 +73,44 @@ public struct ResearchRule: Codable, Equatable, Sendable {
     public var baseDuration: TimeInterval
     public var durationMultiplier: Double
     public var aiPriorityWeight: Double
+    public var requirements: [RuleRequirement]
 
     public init(
         baseCost: ResourceBundle,
         costMultiplier: Double,
         baseDuration: TimeInterval,
         durationMultiplier: Double,
-        aiPriorityWeight: Double
+        aiPriorityWeight: Double,
+        requirements: [RuleRequirement] = []
     ) {
         self.baseCost = baseCost
         self.costMultiplier = costMultiplier
         self.baseDuration = baseDuration
         self.durationMultiplier = durationMultiplier
         self.aiPriorityWeight = aiPriorityWeight
+        self.requirements = requirements
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case baseCost
+        case costMultiplier
+        case baseDuration
+        case durationMultiplier
+        case aiPriorityWeight
+        case requirements
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.init(
+            baseCost: try container.decode(ResourceBundle.self, forKey: .baseCost),
+            costMultiplier: try container.decode(Double.self, forKey: .costMultiplier),
+            baseDuration: try container.decode(TimeInterval.self, forKey: .baseDuration),
+            durationMultiplier: try container.decode(Double.self, forKey: .durationMultiplier),
+            aiPriorityWeight: try container.decode(Double.self, forKey: .aiPriorityWeight),
+            requirements: try container.decodeIfPresent([RuleRequirement].self, forKey: .requirements) ?? []
+        )
     }
 }
 
@@ -66,6 +124,7 @@ public struct ShipRule: Codable, Equatable, Sendable {
     public var attack: Double
     public var shield: Double
     public var hull: Double
+    public var requirements: [RuleRequirement]
     var decodedFleetFieldMask: UInt8
 
     public init(
@@ -77,7 +136,8 @@ public struct ShipRule: Codable, Equatable, Sendable {
         fuelCost: Double = 0,
         attack: Double = 0,
         shield: Double = 0,
-        hull: Double = 0
+        hull: Double = 0,
+        requirements: [RuleRequirement] = []
     ) {
         self.baseCost = baseCost
         self.baseDuration = baseDuration
@@ -88,6 +148,7 @@ public struct ShipRule: Codable, Equatable, Sendable {
         self.attack = attack
         self.shield = shield
         self.hull = hull
+        self.requirements = requirements
         self.decodedFleetFieldMask = Self.allFleetFieldMask
     }
 
@@ -101,6 +162,7 @@ public struct ShipRule: Codable, Equatable, Sendable {
         case attack
         case shield
         case hull
+        case requirements
     }
 
     public init(from decoder: Decoder) throws {
@@ -115,6 +177,7 @@ public struct ShipRule: Codable, Equatable, Sendable {
         self.attack = try container.decodeIfPresent(Double.self, forKey: .attack) ?? 0
         self.shield = try container.decodeIfPresent(Double.self, forKey: .shield) ?? 0
         self.hull = try container.decodeIfPresent(Double.self, forKey: .hull) ?? 0
+        self.requirements = try container.decodeIfPresent([RuleRequirement].self, forKey: .requirements) ?? []
 
         var fleetFieldMask: UInt8 = 0
         if container.contains(.speed) {
@@ -150,6 +213,7 @@ public struct ShipRule: Codable, Equatable, Sendable {
         try container.encode(attack, forKey: .attack)
         try container.encode(shield, forKey: .shield)
         try container.encode(hull, forKey: .hull)
+        try container.encode(requirements, forKey: .requirements)
     }
 
     public static func == (lhs: ShipRule, rhs: ShipRule) -> Bool {
@@ -161,7 +225,8 @@ public struct ShipRule: Codable, Equatable, Sendable {
             lhs.fuelCost == rhs.fuelCost &&
             lhs.attack == rhs.attack &&
             lhs.shield == rhs.shield &&
-            lhs.hull == rhs.hull
+            lhs.hull == rhs.hull &&
+            lhs.requirements == rhs.requirements
     }
 
     func mergingMissingFleetFields(from defaultRule: ShipRule) -> ShipRule {
@@ -212,6 +277,7 @@ public struct DefenseRule: Codable, Equatable, Sendable {
     public var attack: Double
     public var shield: Double
     public var hull: Double
+    public var requirements: [RuleRequirement]
     var decodedCombatFieldMask: UInt8
 
     public init(
@@ -220,7 +286,8 @@ public struct DefenseRule: Codable, Equatable, Sendable {
         aiPriorityWeight: Double,
         attack: Double = 0,
         shield: Double = 0,
-        hull: Double = 0
+        hull: Double = 0,
+        requirements: [RuleRequirement] = []
     ) {
         self.baseCost = baseCost
         self.baseDuration = baseDuration
@@ -228,6 +295,7 @@ public struct DefenseRule: Codable, Equatable, Sendable {
         self.attack = attack
         self.shield = shield
         self.hull = hull
+        self.requirements = requirements
         self.decodedCombatFieldMask = Self.allCombatFieldMask
     }
 
@@ -238,6 +306,7 @@ public struct DefenseRule: Codable, Equatable, Sendable {
         case attack
         case shield
         case hull
+        case requirements
     }
 
     public init(from decoder: Decoder) throws {
@@ -249,6 +318,7 @@ public struct DefenseRule: Codable, Equatable, Sendable {
         self.attack = try container.decodeIfPresent(Double.self, forKey: .attack) ?? 0
         self.shield = try container.decodeIfPresent(Double.self, forKey: .shield) ?? 0
         self.hull = try container.decodeIfPresent(Double.self, forKey: .hull) ?? 0
+        self.requirements = try container.decodeIfPresent([RuleRequirement].self, forKey: .requirements) ?? []
 
         var combatFieldMask: UInt8 = 0
         if container.contains(.attack) {
@@ -272,6 +342,7 @@ public struct DefenseRule: Codable, Equatable, Sendable {
         try container.encode(attack, forKey: .attack)
         try container.encode(shield, forKey: .shield)
         try container.encode(hull, forKey: .hull)
+        try container.encode(requirements, forKey: .requirements)
     }
 
     public static func == (lhs: DefenseRule, rhs: DefenseRule) -> Bool {
@@ -280,7 +351,8 @@ public struct DefenseRule: Codable, Equatable, Sendable {
             lhs.aiPriorityWeight == rhs.aiPriorityWeight &&
             lhs.attack == rhs.attack &&
             lhs.shield == rhs.shield &&
-            lhs.hull == rhs.hull
+            lhs.hull == rhs.hull &&
+            lhs.requirements == rhs.requirements
     }
 
     func mergingMissingCombatFields(from defaultRule: DefenseRule) -> DefenseRule {
@@ -310,6 +382,102 @@ public struct DefenseRule: Codable, Equatable, Sendable {
 }
 
 extension RuleSet {
+    static func migrateBuildingRulesForRequirements(
+        _ buildingRules: [BuildingKind: BuildingRule],
+        ruleSetID: String
+    ) -> [BuildingKind: BuildingRule] {
+        guard ruleSetID == RuleSet.fastSkirmish.id else {
+            return buildingRules
+        }
+
+        var migratedRules = buildingRules
+
+        for (buildingKind, defaultRule) in RuleSet.fastSkirmishBuildingRules {
+            if var decodedRule = migratedRules[buildingKind] {
+                if decodedRule.requirements.isEmpty, !defaultRule.requirements.isEmpty {
+                    decodedRule.requirements = defaultRule.requirements
+                    migratedRules[buildingKind] = decodedRule
+                }
+            } else {
+                migratedRules[buildingKind] = defaultRule
+            }
+        }
+
+        return migratedRules
+    }
+
+    static func migrateResearchRulesForRequirements(
+        _ researchRules: [TechnologyKind: ResearchRule],
+        ruleSetID: String
+    ) -> [TechnologyKind: ResearchRule] {
+        guard ruleSetID == RuleSet.fastSkirmish.id else {
+            return researchRules
+        }
+
+        var migratedRules = researchRules
+
+        for (technologyKind, defaultRule) in RuleSet.fastSkirmishResearchRules {
+            if var decodedRule = migratedRules[technologyKind] {
+                if decodedRule.requirements.isEmpty, !defaultRule.requirements.isEmpty {
+                    decodedRule.requirements = defaultRule.requirements
+                    migratedRules[technologyKind] = decodedRule
+                }
+            } else {
+                migratedRules[technologyKind] = defaultRule
+            }
+        }
+
+        return migratedRules
+    }
+
+    static func migrateShipRulesForRequirements(
+        _ shipRules: [ShipKind: ShipRule],
+        ruleSetID: String
+    ) -> [ShipKind: ShipRule] {
+        guard ruleSetID == RuleSet.fastSkirmish.id else {
+            return shipRules
+        }
+
+        var migratedRules = shipRules
+
+        for (shipKind, defaultRule) in RuleSet.fastSkirmishShipRules {
+            if var decodedRule = migratedRules[shipKind] {
+                if decodedRule.requirements.isEmpty, !defaultRule.requirements.isEmpty {
+                    decodedRule.requirements = defaultRule.requirements
+                    migratedRules[shipKind] = decodedRule
+                }
+            } else {
+                migratedRules[shipKind] = defaultRule
+            }
+        }
+
+        return migratedRules
+    }
+
+    static func migrateDefenseRulesForRequirements(
+        _ defenseRules: [DefenseKind: DefenseRule],
+        ruleSetID: String
+    ) -> [DefenseKind: DefenseRule] {
+        guard ruleSetID == RuleSet.fastSkirmish.id else {
+            return defenseRules
+        }
+
+        var migratedRules = defenseRules
+
+        for (defenseKind, defaultRule) in RuleSet.fastSkirmishDefenseRules {
+            if var decodedRule = migratedRules[defenseKind] {
+                if decodedRule.requirements.isEmpty, !defaultRule.requirements.isEmpty {
+                    decodedRule.requirements = defaultRule.requirements
+                    migratedRules[defenseKind] = decodedRule
+                }
+            } else {
+                migratedRules[defenseKind] = defaultRule
+            }
+        }
+
+        return migratedRules
+    }
+
     static func migrateShipRulesForFleetFields(_ shipRules: [ShipKind: ShipRule]) -> [ShipKind: ShipRule] {
         var migratedRules = shipRules
 
@@ -389,7 +557,8 @@ public extension RuleSet {
                 costMultiplier: 1.70,
                 baseDuration: 75,
                 durationMultiplier: 1.40,
-                aiPriorityWeight: 0.45
+                aiPriorityWeight: 0.45,
+                requirements: [.building(.roboticsFactory, level: 1)]
             ),
             .researchLab: BuildingRule(
                 baseCost: ResourceBundle(metal: 200, crystal: 400, deuterium: 200),
@@ -457,14 +626,16 @@ public extension RuleSet {
                 costMultiplier: 2.00,
                 baseDuration: 90,
                 durationMultiplier: 1.60,
-                aiPriorityWeight: 0.20
+                aiPriorityWeight: 0.20,
+                requirements: [.technology(.energy, level: 1)]
             ),
             .hyperspaceDrive: ResearchRule(
                 baseCost: ResourceBundle(metal: 10_000, crystal: 20_000, deuterium: 6_000),
                 costMultiplier: 2.00,
                 baseDuration: 120,
                 durationMultiplier: 1.65,
-                aiPriorityWeight: 0.10
+                aiPriorityWeight: 0.10,
+                requirements: [.technology(.energy, level: 3), .technology(.impulseDrive, level: 2)]
             )
         ]
     }
@@ -491,7 +662,8 @@ public extension RuleSet {
                 fuelCost: 50,
                 attack: 5,
                 shield: 25,
-                hull: 12_000
+                hull: 12_000,
+                requirements: [.technology(.combustionDrive, level: 2)]
             ),
             .lightFighter: ShipRule(
                 baseCost: ResourceBundle(metal: 3_000, crystal: 1_000),
@@ -513,7 +685,8 @@ public extension RuleSet {
                 fuelCost: 75,
                 attack: 150,
                 shield: 25,
-                hull: 10_000
+                hull: 10_000,
+                requirements: [.technology(.weapons, level: 1)]
             ),
             .cruiser: ShipRule(
                 baseCost: ResourceBundle(metal: 20_000, crystal: 7_000, deuterium: 2_000),
@@ -524,7 +697,8 @@ public extension RuleSet {
                 fuelCost: 300,
                 attack: 400,
                 shield: 50,
-                hull: 27_000
+                hull: 27_000,
+                requirements: [.technology(.impulseDrive, level: 2)]
             ),
             .battleship: ShipRule(
                 baseCost: ResourceBundle(metal: 45_000, crystal: 15_000),
@@ -535,7 +709,8 @@ public extension RuleSet {
                 fuelCost: 500,
                 attack: 1_000,
                 shield: 200,
-                hull: 60_000
+                hull: 60_000,
+                requirements: [.technology(.hyperspaceDrive, level: 1)]
             ),
             .colonyShip: ShipRule(
                 baseCost: ResourceBundle(metal: 10_000, crystal: 20_000, deuterium: 10_000),
@@ -546,7 +721,8 @@ public extension RuleSet {
                 fuelCost: 1_000,
                 attack: 50,
                 shield: 100,
-                hull: 30_000
+                hull: 30_000,
+                requirements: [.building(.shipyard, level: 2), .technology(.impulseDrive, level: 1)]
             ),
             .recycler: ShipRule(
                 baseCost: ResourceBundle(metal: 10_000, crystal: 6_000, deuterium: 2_000),
@@ -557,7 +733,8 @@ public extension RuleSet {
                 fuelCost: 300,
                 attack: 1,
                 shield: 10,
-                hull: 16_000
+                hull: 16_000,
+                requirements: [.building(.shipyard, level: 2), .technology(.combustionDrive, level: 2)]
             ),
             .espionageProbe: ShipRule(
                 baseCost: ResourceBundle(crystal: 1_000),
@@ -568,7 +745,8 @@ public extension RuleSet {
                 fuelCost: 1,
                 attack: 0,
                 shield: 0,
-                hull: 1_000
+                hull: 1_000,
+                requirements: [.technology(.espionage, level: 1)]
             )
         ]
     }
@@ -589,7 +767,8 @@ public extension RuleSet {
                 aiPriorityWeight: 0.45,
                 attack: 100,
                 shield: 25,
-                hull: 2_000
+                hull: 2_000,
+                requirements: [.building(.shipyard, level: 1)]
             ),
             .heavyLaser: DefenseRule(
                 baseCost: ResourceBundle(metal: 6_000, crystal: 2_000),
@@ -597,7 +776,8 @@ public extension RuleSet {
                 aiPriorityWeight: 0.35,
                 attack: 250,
                 shield: 100,
-                hull: 8_000
+                hull: 8_000,
+                requirements: [.building(.shipyard, level: 2), .technology(.energy, level: 1)]
             ),
             .gaussCannon: DefenseRule(
                 baseCost: ResourceBundle(metal: 20_000, crystal: 15_000, deuterium: 2_000),
@@ -605,7 +785,8 @@ public extension RuleSet {
                 aiPriorityWeight: 0.25,
                 attack: 1_100,
                 shield: 200,
-                hull: 35_000
+                hull: 35_000,
+                requirements: [.building(.shipyard, level: 4), .technology(.weapons, level: 3)]
             ),
             .ionCannon: DefenseRule(
                 baseCost: ResourceBundle(metal: 2_000, crystal: 6_000),
@@ -613,7 +794,8 @@ public extension RuleSet {
                 aiPriorityWeight: 0.30,
                 attack: 150,
                 shield: 500,
-                hull: 8_000
+                hull: 8_000,
+                requirements: [.building(.shipyard, level: 3), .technology(.shielding, level: 2)]
             ),
             .plasmaTurret: DefenseRule(
                 baseCost: ResourceBundle(metal: 50_000, crystal: 50_000, deuterium: 30_000),
@@ -621,7 +803,8 @@ public extension RuleSet {
                 aiPriorityWeight: 0.15,
                 attack: 3_000,
                 shield: 300,
-                hull: 100_000
+                hull: 100_000,
+                requirements: [.building(.shipyard, level: 6), .technology(.energy, level: 4)]
             )
         ]
     }
