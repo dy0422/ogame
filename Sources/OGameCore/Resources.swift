@@ -13,6 +13,44 @@ public struct ResourceBundle: Codable, Equatable, Sendable {
 
     public static let zero = ResourceBundle()
 
+    public func adding(_ other: ResourceBundle) -> ResourceBundle {
+        ResourceBundle(
+            metal: metal + other.metal,
+            crystal: crystal + other.crystal,
+            deuterium: deuterium + other.deuterium
+        )
+    }
+
+    public func subtracting(_ other: ResourceBundle) -> ResourceBundle {
+        ResourceBundle(
+            metal: metal - other.metal,
+            crystal: crystal - other.crystal,
+            deuterium: deuterium - other.deuterium
+        )
+    }
+
+    public func scaled(by multiplier: Double) -> ResourceBundle {
+        ResourceBundle(
+            metal: metal * multiplier,
+            crystal: crystal * multiplier,
+            deuterium: deuterium * multiplier
+        )
+    }
+
+    public var nonnegative: ResourceBundle {
+        ResourceBundle(
+            metal: max(metal, 0),
+            crystal: max(crystal, 0),
+            deuterium: max(deuterium, 0)
+        )
+    }
+
+    public func canAfford(_ cost: ResourceBundle) -> Bool {
+        metal >= cost.metal &&
+            crystal >= cost.crystal &&
+            deuterium >= cost.deuterium
+    }
+
     public func clamped(to storage: ResourceStorage) -> ResourceBundle {
         let metalLimit = max(storage.metal, 0)
         let crystalLimit = max(storage.crystal, 0)
@@ -35,6 +73,10 @@ public struct ResourceStorage: Codable, Equatable, Sendable {
         self.metal = metal
         self.crystal = crystal
         self.deuterium = deuterium
+    }
+
+    public var asResourceBundle: ResourceBundle {
+        ResourceBundle(metal: metal, crystal: crystal, deuterium: deuterium)
     }
 }
 

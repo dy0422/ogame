@@ -79,6 +79,151 @@ func testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid() {
     )
 }
 
+func testResourceBundleArithmeticAndAffordabilityHelpers() {
+    let stockpile = ResourceBundle(metal: 120, crystal: 80, deuterium: 40)
+    let cost = ResourceBundle(metal: 100, crystal: 25, deuterium: 50)
+
+    requireEqual(
+        stockpile.adding(cost),
+        ResourceBundle(metal: 220, crystal: 105, deuterium: 90),
+        "ResourceBundle addition should add each resource lane"
+    )
+    requireEqual(
+        stockpile.subtracting(cost),
+        ResourceBundle(metal: 20, crystal: 55, deuterium: -10),
+        "ResourceBundle subtraction should preserve finite negative resource lanes"
+    )
+    requireEqual(
+        cost.scaled(by: 1.5),
+        ResourceBundle(metal: 150, crystal: 37.5, deuterium: 75),
+        "ResourceBundle scalar multiplication should scale each resource lane"
+    )
+    requireEqual(
+        stockpile.subtracting(cost).nonnegative,
+        ResourceBundle(metal: 20, crystal: 55, deuterium: 0),
+        "ResourceBundle nonnegative should clamp only negative lanes"
+    )
+    require(!stockpile.canAfford(cost), "ResourceBundle affordability should fail when any lane is short")
+    require(
+        stockpile.canAfford(ResourceBundle(metal: 100, crystal: 25, deuterium: 30)),
+        "ResourceBundle affordability should pass when every lane covers the cost"
+    )
+}
+
+func testResourceStorageConvertsToResourceDisplayBundle() {
+    let storage = ResourceStorage(metal: 10_000, crystal: 8_000, deuterium: 6_000)
+
+    requireEqual(
+        storage.asResourceBundle,
+        ResourceBundle(metal: 10_000, crystal: 8_000, deuterium: 6_000),
+        "ResourceStorage display conversion should preserve storage lanes as resources"
+    )
+}
+
+func testFastSkirmishBuildingRulesCoverEarlyEconomy() {
+    let rules = RuleSet.fastSkirmish.buildingRules
+
+    for building in BuildingKind.allCases {
+        require(rules[building] != nil, "Fast skirmish should define a rule for \(building.rawValue)")
+    }
+
+    require(
+        rules[.metalMine]?.productionPerHour.metal ?? 0 > 0,
+        "Fast skirmish metal mine should produce metal"
+    )
+    require(
+        rules[.crystalMine]?.productionPerHour.crystal ?? 0 > 0,
+        "Fast skirmish crystal mine should produce crystal"
+    )
+    require(
+        rules[.deuteriumSynthesizer]?.productionPerHour.deuterium ?? 0 > 0,
+        "Fast skirmish deuterium synthesizer should produce deuterium"
+    )
+    require(
+        rules[.solarPlant]?.energyProduced ?? 0 > 0,
+        "Fast skirmish solar plant should produce energy"
+    )
+    require(
+        (rules[.metalMine]?.energyUsed ?? 0) > 0 &&
+            (rules[.crystalMine]?.energyUsed ?? 0) > 0 &&
+            (rules[.deuteriumSynthesizer]?.energyUsed ?? 0) > 0,
+        "Fast skirmish mines should consume energy"
+    )
+    require(
+        (rules[.roboticsFactory]?.baseCost.metal ?? 0) > 0 &&
+            (rules[.shipyard]?.baseDuration ?? 0) > 0 &&
+            (rules[.researchLab]?.aiPriorityWeight ?? 0) > 0,
+        "Fast skirmish should include useful support building costs, durations, and AI weights"
+    )
+}
+
+func testFastSkirmishResearchRulesCoverEarlyTechnologies() {
+    let rules = RuleSet.fastSkirmish.researchRules
+    let earlyTechnologies: [TechnologyKind] = [.energy, .computer, .espionage, .weapons, .shielding, .armor]
+
+    for technology in earlyTechnologies {
+        guard let rule = rules[technology] else {
+            fatalError("Fast skirmish should define a research rule for \(technology.rawValue)")
+        }
+
+        require(rule.baseCost != .zero, "Research \(technology.rawValue) should have a nonzero cost")
+        require(rule.baseDuration > 0, "Research \(technology.rawValue) should have a positive duration")
+        require(rule.aiPriorityWeight > 0, "Research \(technology.rawValue) should have a positive AI weight")
+    }
+}
+
+func testRuleSetBalanceRulesUseRawValueKeyedJSONObjects() throws {
+    let data = try JSONEncoder().encode(RuleSet.fastSkirmish)
+    let json = requireDictionary(try JSONSerialization.jsonObject(with: data), "RuleSet should encode as a JSON object")
+    let buildingRulesJSON = requireDictionary(json["buildingRules"], "Building rules should encode as a JSON object")
+    let researchRulesJSON = requireDictionary(json["researchRules"], "Research rules should encode as a JSON object")
+
+    require(
+        buildingRulesJSON.keys.contains("metalMine") &&
+            buildingRulesJSON.keys.contains("solarPlant") &&
+            buildingRulesJSON.keys.contains("researchLab"),
+        "Building rule keys should be building raw values"
+    )
+    require(
+        researchRulesJSON.keys.contains("energy") &&
+            researchRulesJSON.keys.contains("computer") &&
+            researchRulesJSON.keys.contains("armor"),
+        "Research rule keys should be technology raw values"
+    )
+    require(
+        buildingRulesJSON["metalMine"] is [String: Any],
+        "Building rules should encode values under raw-value keys, not alternating arrays"
+    )
+    require(
+        researchRulesJSON["energy"] is [String: Any],
+        "Research rules should encode values under raw-value keys, not alternating arrays"
+    )
+}
+
+func testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults() throws {
+    let olderRuleSetJSON = """
+    {
+      "id": "fast-skirmish-v1",
+      "displayName": "Fast Skirmish",
+      "baseTickInterval": 1,
+      "offlineChunkInterval": 300
+    }
+    """
+
+    let decoded = try JSONDecoder().decode(RuleSet.self, from: Data(olderRuleSetJSON.utf8))
+
+    requireEqual(
+        decoded.buildingRules,
+        RuleSet.fastSkirmish.buildingRules,
+        "RuleSet should default missing building rules to fast skirmish rules"
+    )
+    requireEqual(
+        decoded.researchRules,
+        RuleSet.fastSkirmish.researchRules,
+        "RuleSet should default missing research rules to fast skirmish rules"
+    )
+}
+
 func testUniverseModelRoundTripsThroughJSON() throws {
     let player = FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000010")!)
     let homeworld = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000020")!)
@@ -384,6 +529,12 @@ func testSimulationTickAcceptsHugeFinitePositiveDeltas() {
 try testEntityIDsAreCodableAndEquatable()
 testResourceBundleClampsToStorageLimits()
 testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
+testResourceBundleArithmeticAndAffordabilityHelpers()
+testResourceStorageConvertsToResourceDisplayBundle()
+testFastSkirmishBuildingRulesCoverEarlyEconomy()
+testFastSkirmishResearchRulesCoverEarlyTechnologies()
+try testRuleSetBalanceRulesUseRawValueKeyedJSONObjects()
+try testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults()
 try testUniverseModelRoundTripsThroughJSON()
 try testPlanetEnumDictionaryDecodesRawValueKeysAndRejectsUnknownKeys()
 testSeededGeneratorProducesDeterministicDistinctSequences()

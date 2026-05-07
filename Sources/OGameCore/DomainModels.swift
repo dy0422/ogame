@@ -328,12 +328,23 @@ public struct RuleSet: Codable, Equatable, Sendable {
     public var displayName: String
     public var baseTickInterval: TimeInterval
     public var offlineChunkInterval: TimeInterval
+    public var buildingRules: [BuildingKind: BuildingRule]
+    public var researchRules: [TechnologyKind: ResearchRule]
 
-    public init(id: String, displayName: String, baseTickInterval: TimeInterval, offlineChunkInterval: TimeInterval) {
+    public init(
+        id: String,
+        displayName: String,
+        baseTickInterval: TimeInterval,
+        offlineChunkInterval: TimeInterval,
+        buildingRules: [BuildingKind: BuildingRule] = RuleSet.fastSkirmishBuildingRules,
+        researchRules: [TechnologyKind: ResearchRule] = RuleSet.fastSkirmishResearchRules
+    ) {
         self.id = id
         self.displayName = displayName
         self.baseTickInterval = baseTickInterval
         self.offlineChunkInterval = offlineChunkInterval
+        self.buildingRules = buildingRules
+        self.researchRules = researchRules
     }
 
     public static let fastSkirmish = RuleSet(
@@ -342,6 +353,39 @@ public struct RuleSet: Codable, Equatable, Sendable {
         baseTickInterval: 1,
         offlineChunkInterval: 300
     )
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case displayName
+        case baseTickInterval
+        case offlineChunkInterval
+        case buildingRules
+        case researchRules
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.id = try container.decode(String.self, forKey: .id)
+        self.displayName = try container.decode(String.self, forKey: .displayName)
+        self.baseTickInterval = try container.decode(TimeInterval.self, forKey: .baseTickInterval)
+        self.offlineChunkInterval = try container.decode(TimeInterval.self, forKey: .offlineChunkInterval)
+        self.buildingRules = try container.decodeRawValueDictionaryIfPresent(BuildingKind.self, forKey: .buildingRules)
+            ?? RuleSet.fastSkirmish.buildingRules
+        self.researchRules = try container.decodeRawValueDictionaryIfPresent(TechnologyKind.self, forKey: .researchRules)
+            ?? RuleSet.fastSkirmish.researchRules
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        try container.encode(id, forKey: .id)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(baseTickInterval, forKey: .baseTickInterval)
+        try container.encode(offlineChunkInterval, forKey: .offlineChunkInterval)
+        try container.encodeRawValueDictionary(buildingRules, forKey: .buildingRules)
+        try container.encodeRawValueDictionary(researchRules, forKey: .researchRules)
+    }
 }
 
 public enum BuildingKind: String, Codable, CaseIterable, Sendable {
@@ -406,12 +450,12 @@ private struct RawValueCodingKey: CodingKey {
 }
 
 private extension KeyedDecodingContainer {
-    func decodeRawValueDictionary<EnumKey>(
+    func decodeRawValueDictionary<EnumKey, Value>(
         _ enumKeyType: EnumKey.Type,
         forKey key: Key
-    ) throws -> [EnumKey: Int] where EnumKey: Hashable & RawRepresentable, EnumKey.RawValue == String {
+    ) throws -> [EnumKey: Value] where EnumKey: Hashable & RawRepresentable, EnumKey.RawValue == String, Value: Decodable {
         let nestedContainer = try nestedContainer(keyedBy: RawValueCodingKey.self, forKey: key)
-        var decoded: [EnumKey: Int] = [:]
+        var decoded: [EnumKey: Value] = [:]
 
         for rawKey in nestedContainer.allKeys {
             guard let enumKey = EnumKey(rawValue: rawKey.stringValue) else {
@@ -422,18 +466,29 @@ private extension KeyedDecodingContainer {
                 )
             }
 
-            decoded[enumKey] = try nestedContainer.decode(Int.self, forKey: rawKey)
+            decoded[enumKey] = try nestedContainer.decode(Value.self, forKey: rawKey)
         }
 
         return decoded
     }
+
+    func decodeRawValueDictionaryIfPresent<EnumKey, Value>(
+        _ enumKeyType: EnumKey.Type,
+        forKey key: Key
+    ) throws -> [EnumKey: Value]? where EnumKey: Hashable & RawRepresentable, EnumKey.RawValue == String, Value: Decodable {
+        guard contains(key), try !decodeNil(forKey: key) else {
+            return nil
+        }
+
+        return try decodeRawValueDictionary(enumKeyType, forKey: key)
+    }
 }
 
 private extension KeyedEncodingContainer {
-    mutating func encodeRawValueDictionary<EnumKey>(
-        _ dictionary: [EnumKey: Int],
+    mutating func encodeRawValueDictionary<EnumKey, Value>(
+        _ dictionary: [EnumKey: Value],
         forKey key: Key
-    ) throws where EnumKey: Hashable & RawRepresentable, EnumKey.RawValue == String {
+    ) throws where EnumKey: Hashable & RawRepresentable, EnumKey.RawValue == String, Value: Encodable {
         var nestedContainer = nestedContainer(keyedBy: RawValueCodingKey.self, forKey: key)
 
         for enumKey in dictionary.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
