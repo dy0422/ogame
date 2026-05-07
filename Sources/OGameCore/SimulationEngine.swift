@@ -14,7 +14,7 @@ public enum SimulationEngine {
                 time: universe.gameTime,
                 kind: .system,
                 title: "Simulation Advanced",
-                message: "Advanced the universe by \(Int(delta)) seconds."
+                message: "Advanced the universe by \(delta) seconds."
             )
         )
     }

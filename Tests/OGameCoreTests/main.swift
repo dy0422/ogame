@@ -363,6 +363,24 @@ func testSimulationTickIgnoresNonFiniteDeltas() {
     requireEqual(nanUniverse.events, originalNaNEvents, "Simulation tick should not record events for NaN deltas")
 }
 
+func testSimulationTickAcceptsHugeFinitePositiveDeltas() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 13, playerName: "Commander")
+    let previousEventCount = universe.events.count
+    let delta = TimeInterval.greatestFiniteMagnitude
+
+    SimulationEngine.tick(universe: &universe, delta: delta)
+
+    requireEqual(universe.gameTime, delta, "Simulation tick should advance by huge finite positive deltas")
+    requireEqual(universe.events.count, previousEventCount + 1, "Simulation tick should append an event for huge finite deltas")
+    requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation tick should record huge finite delta advancement")
+    requireEqual(universe.events.last?.time, universe.gameTime, "Simulation tick event should use advanced huge finite time")
+    requireEqual(
+        universe.events.last?.message,
+        "Advanced the universe by \(delta) seconds.",
+        "Simulation tick should format huge finite delta messages without integer conversion"
+    )
+}
+
 try testEntityIDsAreCodableAndEquatable()
 testResourceBundleClampsToStorageLimits()
 testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
@@ -375,4 +393,5 @@ try testStarterUniverseIsDeterministicForSeed()
 testSimulationTickAdvancesGameTimeAndRecordsEvent()
 testSimulationTickIgnoresNonPositiveDeltas()
 testSimulationTickIgnoresNonFiniteDeltas()
+testSimulationTickAcceptsHugeFinitePositiveDeltas()
 print("OGameCoreTests passed")
