@@ -102,7 +102,7 @@ public enum AIEconomyEngine {
             return []
         }
 
-        guard let paymentPlanet = planets.first else {
+        guard let paymentPlanet = researchPaymentPlanet(for: faction, in: universe) else {
             return []
         }
 
@@ -345,6 +345,16 @@ public enum AIEconomyEngine {
                 ownedIDs.contains(planet.id) && planet.ownerID == faction.id
             }
             .sorted(by: comparePlanets)
+    }
+
+    private static func researchPaymentPlanet(for faction: Faction, in universe: Universe) -> Planet? {
+        for planetID in faction.ownedPlanetIDs {
+            if let planet = universe.planets.first(where: { $0.id == planetID && $0.ownerID == faction.id }) {
+                return planet
+            }
+        }
+
+        return nil
     }
 
     private static func normalizedBuildingLevels(for planet: Planet) -> [BuildingKind: Int] {

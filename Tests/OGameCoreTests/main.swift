@@ -961,6 +961,65 @@ func testAIEconomyStrategyPrioritiesChooseDistinctEarlyGrowthPaths() {
     requireEqual(universe.fleets, [], "AI economic growth should not create fleets")
 }
 
+func testAIEconomyResearchPreviewUsesQueueEnginePaymentPlanetOrder() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let technologistID = aiTestFactionID(6)
+    let poorPlanetID = aiTestPlanetID(6)
+    let richPaymentPlanetID = aiTestPlanetID(7)
+    let technologist = Faction(
+        id: technologistID,
+        name: "Multi-Planet Technologist",
+        kind: .ai,
+        strategy: .technologist,
+        ownedPlanetIDs: [richPaymentPlanetID, poorPlanetID]
+    )
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let poorPlanet = Planet(
+        id: poorPlanetID,
+        name: "Poor Sorted First",
+        coordinate: Coordinate(galaxy: 1, system: 16, position: 4),
+        ownerID: technologistID,
+        resources: ResourceBundle(metal: 100, crystal: 100, deuterium: 100),
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.metalMine: 1, .crystalMine: 1, .solarPlant: 1]
+    )
+    let richPaymentPlanet = Planet(
+        id: richPaymentPlanetID,
+        name: "Rich Payment First",
+        coordinate: Coordinate(galaxy: 1, system: 17, position: 4),
+        ownerID: technologistID,
+        resources: ResourceBundle(metal: 1_000, crystal: 1_000, deuterium: 1_000),
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.metalMine: 1, .crystalMine: 1, .solarPlant: 1, .researchLab: 1]
+    )
+    var universe = makeAIEconomyUniverse(
+        factions: [player, technologist],
+        planets: [playerPlanet, poorPlanet, richPaymentPlanet]
+    )
+
+    AIEconomyEngine.makeDecisions(in: &universe)
+
+    let updatedTechnologist = requireFaction(technologistID, in: universe, "Technologist faction should remain in the universe")
+    let updatedPoorPlanet = requirePlanet(poorPlanetID, in: universe, "Poor AI planet should remain in the universe")
+    let updatedRichPaymentPlanet = requirePlanet(richPaymentPlanetID, in: universe, "Rich AI payment planet should remain in the universe")
+
+    requireEqual(
+        updatedTechnologist.researchQueue.first?.technologyKind,
+        .computer,
+        "AI should preview research affordability from QueueEngine's first owned payment planet"
+    )
+    requireEqual(
+        updatedPoorPlanet.resources,
+        poorPlanet.resources,
+        "AI research should not deduct from UUID-sorted planets that are later in QueueEngine payment order"
+    )
+    requireEqual(
+        updatedRichPaymentPlanet.resources,
+        ResourceBundle(metal: 1_000, crystal: 600, deuterium: 400),
+        "AI research should be charged to the first planet in faction ownedPlanetIDs order"
+    )
+}
+
 func testAIEconomyDoesNotMutatePlayerState() {
     let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
     let ai = makeAIEconomyFaction(index: 1, strategy: .miner)
@@ -1878,6 +1937,7 @@ testQueueEngineRejectsInvalidBuildingRuleValuesWithoutMutation()
 testQueueEngineRejectsInvalidResearchDurationWithoutMutation()
 testAIEconomyQueuesOneAffordableUpgradePerAIFaction()
 testAIEconomyStrategyPrioritiesChooseDistinctEarlyGrowthPaths()
+testAIEconomyResearchPreviewUsesQueueEnginePaymentPlanetOrder()
 testAIEconomyDoesNotMutatePlayerState()
 try testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState()
 testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals()
