@@ -13,6 +13,18 @@ func requireEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String) {
     }
 }
 
+func requireApproxEqual(_ actual: Double, _ expected: Double, _ message: String, accuracy: Double = 0.000_001) {
+    if abs(actual - expected) > accuracy {
+        fatalError("\(message): \(actual) != \(expected)")
+    }
+}
+
+func requireApproxEqual(_ actual: ResourceBundle, _ expected: ResourceBundle, _ message: String, accuracy: Double = 0.000_001) {
+    requireApproxEqual(actual.metal, expected.metal, "\(message) metal", accuracy: accuracy)
+    requireApproxEqual(actual.crystal, expected.crystal, "\(message) crystal", accuracy: accuracy)
+    requireApproxEqual(actual.deuterium, expected.deuterium, "\(message) deuterium", accuracy: accuracy)
+}
+
 func requireIdentifiable<Entity: Identifiable, ID: Equatable>(_ entity: Entity, id expected: ID, _ message: String) where Entity.ID == ID {
     requireEqual(entity.id, expected, message)
 }
@@ -674,6 +686,202 @@ func testStarterUniverseIsDeterministicForSeed() throws {
     requireEqual(decoded, first, "Starter universe should preserve stable enum-map JSON behavior")
 }
 
+func makeEconomyUniverse(planets: [Planet], factions: [Faction]? = nil) -> Universe {
+    let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
+    let resolvedFactions = factions ?? [
+        Faction(
+            id: playerID,
+            name: "Player",
+            kind: .player,
+            strategy: .balanced,
+            ownedPlanetIDs: planets.filter { $0.ownerID == playerID }.map(\.id)
+        )
+    ]
+
+    return Universe(
+        id: UniverseID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b0")!),
+        name: "Economy Test",
+        seed: 1,
+        gameTime: 0,
+        playerFactionID: playerID,
+        factions: resolvedFactions,
+        planets: planets,
+        fleets: [],
+        events: [],
+        ruleSet: .fastSkirmish
+    )
+}
+
+func testEconomyProductionPerHourUsesMineLevelsAndEnergyRatio() {
+    let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
+    let planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b2")!),
+        name: "Balanced Mines",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 4),
+        ownerID: playerID,
+        resources: .zero,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [
+            .metalMine: 2,
+            .crystalMine: 1,
+            .deuteriumSynthesizer: 1,
+            .solarPlant: 4
+        ]
+    )
+
+    let production = EconomyEngine.productionPerHour(for: planet, ruleSet: .fastSkirmish)
+
+    requireApproxEqual(
+        production,
+        ResourceBundle(metal: 180 * 2 * pow(1.12, 1), crystal: 120, deuterium: 72),
+        "Economy production should scale base mine output by level and exponential growth"
+    )
+}
+
+func testEconomyOneHourTickIncreasesOwnedPlanetResources() {
+    let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
+    var planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b3")!),
+        name: "Productive",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 5),
+        ownerID: playerID,
+        resources: ResourceBundle(metal: 100, crystal: 200, deuterium: 300),
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [
+            .metalMine: 2,
+            .crystalMine: 1,
+            .deuteriumSynthesizer: 1,
+            .solarPlant: 4
+        ]
+    )
+
+    EconomyEngine.applyProduction(to: &planet, delta: 3_600, ruleSet: .fastSkirmish)
+
+    requireApproxEqual(
+        planet.resources,
+        ResourceBundle(metal: 503.2, crystal: 320, deuterium: 372),
+        "One-hour economy tick should add mine production to resources"
+    )
+}
+
+func testEconomyProductionClampsToStorageCaps() {
+    let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
+    var planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b4")!),
+        name: "Capped",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 6),
+        ownerID: playerID,
+        resources: ResourceBundle(metal: 490, crystal: 490, deuterium: 490),
+        storage: ResourceStorage(metal: 500, crystal: 510, deuterium: 520),
+        buildingLevels: [
+            .metalMine: 3,
+            .crystalMine: 3,
+            .deuteriumSynthesizer: 3,
+            .solarPlant: 8
+        ]
+    )
+
+    EconomyEngine.applyProduction(to: &planet, delta: 3_600, ruleSet: .fastSkirmish)
+
+    requireEqual(
+        planet.resources,
+        ResourceBundle(metal: 500, crystal: 510, deuterium: 520),
+        "Economy production should clamp resources to storage caps"
+    )
+}
+
+func testEconomyEnergyShortageReducesMineOutput() {
+    let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
+    let planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b5")!),
+        name: "Power Starved",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 7),
+        ownerID: playerID,
+        resources: .zero,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [
+            .metalMine: 2,
+            .crystalMine: 2,
+            .solarPlant: 1
+        ]
+    )
+
+    let production = EconomyEngine.productionPerHour(for: planet, ruleSet: .fastSkirmish)
+
+    requireApproxEqual(
+        production,
+        ResourceBundle(metal: 322.56, crystal: 215.04, deuterium: 0),
+        "Energy shortage should reduce mine output by the produced-over-used energy ratio"
+    )
+}
+
+func testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed() {
+    let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
+    var planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b6")!),
+        name: "Solar Refit",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 8),
+        ownerID: playerID,
+        resources: .zero,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        energy: EnergyState(produced: 1, used: 1),
+        buildingLevels: [
+            .metalMine: 2,
+            .crystalMine: 1,
+            .deuteriumSynthesizer: 1,
+            .solarPlant: 3
+        ]
+    )
+
+    EconomyEngine.recomputeEnergy(for: &planet, ruleSet: .fastSkirmish)
+
+    requireEqual(
+        planet.energy,
+        EnergyState(produced: 96, used: 46),
+        "Economy energy recomputation should derive produced and used energy from current building levels"
+    )
+}
+
+func testEconomyUniverseTickDoesNotProduceOnNonOwnedPlanets() {
+    let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
+    let ownedPlanet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b7")!),
+        name: "Owned",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 9),
+        ownerID: playerID,
+        resources: .zero,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.metalMine: 1, .solarPlant: 1]
+    )
+    let unownedPlanet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b8")!),
+        name: "Unowned",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 10),
+        ownerID: nil,
+        resources: .zero,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.metalMine: 5, .solarPlant: 5]
+    )
+    var universe = makeEconomyUniverse(planets: [ownedPlanet, unownedPlanet])
+
+    EconomyEngine.tick(universe: &universe, delta: 3_600)
+
+    requireApproxEqual(universe.planets[0].resources.metal, 180, "Owned planet should produce resources")
+    requireEqual(universe.planets[1].resources, .zero, "Non-owned planet should not produce resources")
+}
+
+func testSimulationTickEmitsAtMostOneEconomySummaryEventPerTick() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 14, playerName: "Commander")
+
+    SimulationEngine.tick(universe: &universe, delta: 60)
+
+    let economyEvents = universe.events.filter { $0.kind == .economy }
+    requireEqual(economyEvents.count, 1, "Simulation tick should emit at most one economy summary event")
+    requireEqual(economyEvents[0].title, "Economy Updated", "Economy summary should have a deterministic title")
+    requireEqual(economyEvents[0].time, universe.gameTime, "Economy summary event should use advanced game time")
+    requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation advanced event should remain the final tick event")
+}
+
 func testSimulationTickAdvancesGameTimeAndRecordsEvent() {
     var universe = StarterUniverseFactory.makeNewGame(seed: 9, playerName: "Commander")
     let previousEventCount = universe.events.count
@@ -681,7 +889,7 @@ func testSimulationTickAdvancesGameTimeAndRecordsEvent() {
     SimulationEngine.tick(universe: &universe, delta: 60)
 
     requireEqual(universe.gameTime, 60, "Simulation tick should advance game time")
-    requireEqual(universe.events.count, previousEventCount + 1, "Simulation tick should append one event")
+    requireEqual(universe.events.count, previousEventCount + 2, "Simulation tick should append economy and system events")
     requireEqual(universe.events.last?.kind, .system, "Simulation tick should record a system event")
     requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation tick should record an event")
     requireEqual(universe.events.last?.time, universe.gameTime, "Simulation tick event should use advanced time")
@@ -727,7 +935,7 @@ func testSimulationTickAcceptsHugeFinitePositiveDeltas() {
     SimulationEngine.tick(universe: &universe, delta: delta)
 
     requireEqual(universe.gameTime, delta, "Simulation tick should advance by huge finite positive deltas")
-    requireEqual(universe.events.count, previousEventCount + 1, "Simulation tick should append an event for huge finite deltas")
+    requireEqual(universe.events.count, previousEventCount + 2, "Simulation tick should append economy and system events for huge finite deltas")
     requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation tick should record huge finite delta advancement")
     requireEqual(universe.events.last?.time, universe.gameTime, "Simulation tick event should use advanced huge finite time")
     requireEqual(
@@ -757,6 +965,13 @@ testSeededGeneratorProducesDeterministicDistinctSequences()
 testSeededGeneratorEqualityTracksSeedAndState()
 testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
+testEconomyProductionPerHourUsesMineLevelsAndEnergyRatio()
+testEconomyOneHourTickIncreasesOwnedPlanetResources()
+testEconomyProductionClampsToStorageCaps()
+testEconomyEnergyShortageReducesMineOutput()
+testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed()
+testEconomyUniverseTickDoesNotProduceOnNonOwnedPlanets()
+testSimulationTickEmitsAtMostOneEconomySummaryEventPerTick()
 testSimulationTickAdvancesGameTimeAndRecordsEvent()
 testSimulationTickIgnoresNonPositiveDeltas()
 testSimulationTickIgnoresNonFiniteDeltas()

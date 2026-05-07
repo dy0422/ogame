@@ -6,6 +6,8 @@ public enum SimulationEngine {
             return
         }
 
+        EconomyEngine.tick(universe: &universe, delta: delta)
+
         universe.gameTime += delta
 
         universe.events.append(
