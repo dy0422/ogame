@@ -58,16 +58,13 @@ public enum OfflineSimulationEngine {
         while remaining > 0 {
             let delta = min(chunkInterval, remaining)
             let eventStartCount = universe.events.count
-            let buildQueueCountBefore = activeBuildQueueCount(in: universe)
-            let researchQueueCountBefore = activeResearchQueueCount(in: universe)
 
             SimulationEngine.tick(universe: &universe, delta: delta)
 
-            let buildQueueCountAfter = activeBuildQueueCount(in: universe)
-            let researchQueueCountAfter = activeResearchQueueCount(in: universe)
-            summary.completedConstructionCount += max(0, buildQueueCountBefore - buildQueueCountAfter)
-            summary.completedResearchCount += max(0, researchQueueCountBefore - researchQueueCountAfter)
-            summary.generatedEventCount += max(0, universe.events.count - eventStartCount)
+            let generatedEvents = Array(universe.events[eventStartCount..<universe.events.count])
+            summary.completedConstructionCount += generatedEvents.filter { $0.title == "Construction Complete" }.count
+            summary.completedResearchCount += generatedEvents.filter { $0.title == "Research Complete" }.count
+            summary.generatedEventCount += generatedEvents.count
             if universe.events.count > eventStartCount {
                 universe.events.removeSubrange(eventStartCount..<universe.events.count)
             }
@@ -102,18 +99,6 @@ public enum OfflineSimulationEngine {
         }
 
         return max(ruleSet.offlineChunkInterval, minimumChunkInterval)
-    }
-
-    private static func activeBuildQueueCount(in universe: Universe) -> Int {
-        universe.planets.reduce(0) { count, planet in
-            count + planet.buildQueue.count
-        }
-    }
-
-    private static func activeResearchQueueCount(in universe: Universe) -> Int {
-        universe.factions.reduce(0) { count, faction in
-            count + faction.researchQueue.count
-        }
     }
 
     private static func summaryEvent(

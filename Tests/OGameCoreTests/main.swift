@@ -773,6 +773,286 @@ func fastSkirmishRules(offlineChunkInterval: TimeInterval) -> RuleSet {
     return ruleSet
 }
 
+func aiTestPlayerID() -> FactionID {
+    FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000e0")!)
+}
+
+func aiTestFactionID(_ index: Int) -> FactionID {
+    FactionID(UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", 0x0e0 + index))!)
+}
+
+func aiTestPlanetID(_ index: Int) -> PlanetID {
+    PlanetID(UUID(uuidString: String(format: "00000000-0000-0000-0001-%012d", 0x0e0 + index))!)
+}
+
+func makeAIEconomyFaction(
+    index: Int,
+    kind: Faction.Kind = .ai,
+    strategy: Faction.Strategy,
+    researchLevels: [TechnologyKind: Int] = [:],
+    researchQueue: [ResearchQueueItem] = []
+) -> Faction {
+    let factionID = kind == .player ? aiTestPlayerID() : aiTestFactionID(index)
+    let planetID = kind == .player ? aiTestPlanetID(0) : aiTestPlanetID(index)
+
+    return Faction(
+        id: factionID,
+        name: kind == .player ? "Player" : "AI \(index)",
+        kind: kind,
+        strategy: strategy,
+        technology: ResearchState(levels: researchLevels),
+        ownedPlanetIDs: [planetID],
+        researchQueue: researchQueue
+    )
+}
+
+func makeAIEconomyPlanet(
+    index: Int,
+    ownerID: FactionID,
+    resources: ResourceBundle = ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 10_000),
+    buildingLevels: [BuildingKind: Int] = [
+        .metalMine: 1,
+        .crystalMine: 1,
+        .solarPlant: 1
+    ],
+    buildQueue: [BuildQueueItem] = []
+) -> Planet {
+    Planet(
+        id: index == 0 ? aiTestPlanetID(0) : aiTestPlanetID(index),
+        name: index == 0 ? "Player World" : "AI World \(index)",
+        coordinate: Coordinate(galaxy: 1, system: 10 + index, position: 4),
+        ownerID: ownerID,
+        resources: resources,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: buildingLevels,
+        buildQueue: buildQueue
+    )
+}
+
+func makeAIEconomyUniverse(
+    seed: UInt64 = 24,
+    gameTime: TimeInterval = 0,
+    factions: [Faction],
+    planets: [Planet],
+    ruleSet: RuleSet = .fastSkirmish
+) -> Universe {
+    Universe(
+        id: UniverseID(UUID(uuidString: "00000000-0000-0000-0000-0000000000ef")!),
+        name: "AI Economy Test",
+        seed: seed,
+        gameTime: gameTime,
+        playerFactionID: aiTestPlayerID(),
+        factions: factions,
+        planets: planets,
+        fleets: [],
+        events: [],
+        ruleSet: ruleSet
+    )
+}
+
+func requireFaction(_ factionID: FactionID, in universe: Universe, _ message: String) -> Faction {
+    guard let faction = universe.factions.first(where: { $0.id == factionID }) else {
+        fatalError(message)
+    }
+
+    return faction
+}
+
+func requirePlanet(_ planetID: PlanetID, in universe: Universe, _ message: String) -> Planet {
+    guard let planet = universe.planets.first(where: { $0.id == planetID }) else {
+        fatalError(message)
+    }
+
+    return planet
+}
+
+func queuedAIActionCount(for factionID: FactionID, in universe: Universe) -> Int {
+    let researchCount = universe.factions.first(where: { $0.id == factionID })?.researchQueue.count ?? 0
+    let buildCount = universe.planets
+        .filter { $0.ownerID == factionID }
+        .reduce(0) { count, planet in count + planet.buildQueue.count }
+
+    return researchCount + buildCount
+}
+
+func testAIEconomyQueuesOneAffordableUpgradePerAIFaction() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let miner = makeAIEconomyFaction(index: 1, strategy: .miner)
+    let poorRaider = makeAIEconomyFaction(index: 2, strategy: .raider)
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let minerPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: miner.id,
+        resources: ResourceBundle(metal: 500, crystal: 500, deuterium: 100)
+    )
+    let poorPlanet = makeAIEconomyPlanet(
+        index: 2,
+        ownerID: poorRaider.id,
+        resources: ResourceBundle(metal: 10, crystal: 10, deuterium: 0)
+    )
+    var universe = makeAIEconomyUniverse(
+        factions: [player, miner, poorRaider],
+        planets: [playerPlanet, minerPlanet, poorPlanet]
+    )
+
+    AIEconomyEngine.makeDecisions(in: &universe)
+
+    let updatedMinerPlanet = requirePlanet(minerPlanet.id, in: universe, "Miner planet should remain in the universe")
+    let updatedPoorPlanet = requirePlanet(poorPlanet.id, in: universe, "Poor AI planet should remain in the universe")
+
+    requireEqual(updatedMinerPlanet.buildQueue.count, 1, "Affordable AI faction should queue exactly one upgrade")
+    requireEqual(updatedMinerPlanet.buildQueue[0].buildingKind, .metalMine, "Miner should choose an affordable mine upgrade first")
+    requireEqual(updatedPoorPlanet.buildQueue, [], "AI faction without affordable options should not queue an upgrade")
+    requireEqual(queuedAIActionCount(for: miner.id, in: universe), 1, "AI should queue only one action for a faction in a decision window")
+}
+
+func testAIEconomyStrategyPrioritiesChooseDistinctEarlyGrowthPaths() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let miner = makeAIEconomyFaction(index: 1, strategy: .miner)
+    let technologist = makeAIEconomyFaction(index: 2, strategy: .technologist)
+    let expansionist = makeAIEconomyFaction(index: 3, strategy: .expansionist)
+    let balanced = makeAIEconomyFaction(index: 4, strategy: .balanced)
+    let raider = makeAIEconomyFaction(index: 5, strategy: .raider)
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let minerPlanet = makeAIEconomyPlanet(index: 1, ownerID: miner.id)
+    let technologistPlanet = makeAIEconomyPlanet(
+        index: 2,
+        ownerID: technologist.id,
+        buildingLevels: [.metalMine: 1, .crystalMine: 1, .solarPlant: 1, .researchLab: 1]
+    )
+    let expansionistPlanet = makeAIEconomyPlanet(index: 3, ownerID: expansionist.id)
+    let balancedPlanet = makeAIEconomyPlanet(
+        index: 4,
+        ownerID: balanced.id,
+        buildingLevels: [
+            .metalMine: 2,
+            .crystalMine: 2,
+            .deuteriumSynthesizer: 1
+        ]
+    )
+    let raiderPlanet = makeAIEconomyPlanet(
+        index: 5,
+        ownerID: raider.id,
+        buildingLevels: [
+            .metalMine: 1,
+            .crystalMine: 1,
+            .solarPlant: 1,
+            .roboticsFactory: 1
+        ]
+    )
+    var universe = makeAIEconomyUniverse(
+        factions: [player, miner, technologist, expansionist, balanced, raider],
+        planets: [playerPlanet, minerPlanet, technologistPlanet, expansionistPlanet, balancedPlanet, raiderPlanet]
+    )
+
+    AIEconomyEngine.makeDecisions(in: &universe)
+
+    let updatedMinerPlanet = requirePlanet(minerPlanet.id, in: universe, "Miner planet should remain in the universe")
+    let updatedTechnologist = requireFaction(technologist.id, in: universe, "Technologist faction should remain in the universe")
+    let updatedExpansionistPlanet = requirePlanet(expansionistPlanet.id, in: universe, "Expansionist planet should remain in the universe")
+    let updatedBalancedPlanet = requirePlanet(balancedPlanet.id, in: universe, "Balanced planet should remain in the universe")
+    let updatedRaiderPlanet = requirePlanet(raiderPlanet.id, in: universe, "Raider planet should remain in the universe")
+
+    requireEqual(updatedMinerPlanet.buildQueue.first?.buildingKind, .metalMine, "Miner strategy should prioritize mine growth")
+    requireEqual(updatedTechnologist.researchQueue.first?.technologyKind, .computer, "Technologist strategy should prioritize research when a lab exists")
+    requireEqual(updatedExpansionistPlanet.buildQueue.first?.buildingKind, .roboticsFactory, "Expansionist strategy should prioritize robotics setup")
+    requireEqual(updatedBalancedPlanet.buildQueue.first?.buildingKind, .solarPlant, "Balanced strategy should address early energy deficits")
+    requireEqual(updatedRaiderPlanet.buildQueue.first?.buildingKind, .shipyard, "Raider strategy should prioritize combat-adjacent shipyard setup")
+    requireEqual(universe.fleets, [], "AI economic growth should not create fleets")
+}
+
+func testAIEconomyDoesNotMutatePlayerState() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let ai = makeAIEconomyFaction(index: 1, strategy: .miner)
+    let playerPlanet = makeAIEconomyPlanet(
+        index: 0,
+        ownerID: player.id,
+        resources: ResourceBundle(metal: 9_000, crystal: 9_000, deuterium: 9_000),
+        buildingLevels: [.metalMine: 4, .crystalMine: 4, .solarPlant: 6]
+    )
+    let aiPlanet = makeAIEconomyPlanet(index: 1, ownerID: ai.id)
+    var universe = makeAIEconomyUniverse(factions: [player, ai], planets: [playerPlanet, aiPlanet])
+    let originalPlayer = player
+    let originalPlayerPlanet = playerPlanet
+    let originalGameTime = universe.gameTime
+    let originalEvents = universe.events
+
+    AIEconomyEngine.makeDecisions(in: &universe)
+
+    requireEqual(
+        requireFaction(player.id, in: universe, "Player faction should remain in the universe"),
+        originalPlayer,
+        "AI decision calls should not mutate the player faction"
+    )
+    requireEqual(
+        requirePlanet(playerPlanet.id, in: universe, "Player planet should remain in the universe"),
+        originalPlayerPlanet,
+        "AI decision calls should not mutate the player's planet"
+    )
+    requireEqual(universe.gameTime, originalGameTime, "AI decision calls should not advance shared universe time")
+    requireEqual(universe.events, originalEvents, "AI decision calls should not append feed events")
+    requireEqual(queuedAIActionCount(for: ai.id, in: universe), 1, "AI decision call should still act for AI factions")
+}
+
+func testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState() throws {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let miner = makeAIEconomyFaction(index: 1, strategy: .miner)
+    let technologist = makeAIEconomyFaction(index: 2, strategy: .technologist)
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let minerPlanet = makeAIEconomyPlanet(index: 1, ownerID: miner.id)
+    let technologistPlanet = makeAIEconomyPlanet(
+        index: 2,
+        ownerID: technologist.id,
+        buildingLevels: [.metalMine: 1, .crystalMine: 1, .solarPlant: 1, .researchLab: 1]
+    )
+    let original = makeAIEconomyUniverse(
+        seed: 77,
+        gameTime: 900,
+        factions: [player, miner, technologist],
+        planets: [playerPlanet, minerPlanet, technologistPlanet]
+    )
+    let data = try JSONEncoder().encode(original)
+    var first = try JSONDecoder().decode(Universe.self, from: data)
+    var second = try JSONDecoder().decode(Universe.self, from: data)
+
+    AIEconomyEngine.makeDecisions(in: &first)
+    AIEconomyEngine.makeDecisions(in: &second)
+
+    requireEqual(first, second, "AI decisions should be deterministic for the same seed, game time, and state")
+}
+
+func testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let ai = makeAIEconomyFaction(index: 1, strategy: .miner)
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let aiPlanet = makeAIEconomyPlanet(index: 1, ownerID: ai.id)
+    let ruleSet = fastSkirmishRules(offlineChunkInterval: 300)
+    let original = makeAIEconomyUniverse(
+        factions: [player, ai],
+        planets: [playerPlanet, aiPlanet],
+        ruleSet: ruleSet
+    )
+    var belowInterval = original
+    var atInterval = original
+
+    let belowSummary = OfflineSimulationEngine.catchUp(
+        universe: &belowInterval,
+        elapsed: 299,
+        now: Date(timeIntervalSince1970: 7_000)
+    )
+    let atSummary = OfflineSimulationEngine.catchUp(
+        universe: &atInterval,
+        elapsed: 300,
+        now: Date(timeIntervalSince1970: 7_300)
+    )
+
+    requireEqual(belowSummary.processedChunks, 1, "Offline catch-up should process sub-interval elapsed time in one bounded chunk")
+    requireEqual(atSummary.processedChunks, 1, "Offline catch-up should process one AI decision interval in one bounded chunk")
+    requireEqual(queuedAIActionCount(for: ai.id, in: belowInterval), 0, "Offline catch-up should not run AI before the decision interval boundary")
+    requireEqual(queuedAIActionCount(for: ai.id, in: atInterval), 1, "Offline catch-up should run one AI decision at the decision interval boundary")
+    requireEqual(queuedAIActionCount(for: player.id, in: atInterval), 0, "Offline-triggered AI decisions should not queue player actions")
+}
+
 func testQueueEngineStartsBuildingUpgradeAndPaysCost() {
     var universe = makeQueueUniverse(
         resources: ResourceBundle(metal: 1_000, crystal: 1_000, deuterium: 1_000),
@@ -1596,6 +1876,11 @@ testQueueEngineRejectsBusyBuildingAndResearchQueuesWithoutMutation()
 testQueueEngineReportsMissingEntitiesAndRulesWithoutMutation()
 testQueueEngineRejectsInvalidBuildingRuleValuesWithoutMutation()
 testQueueEngineRejectsInvalidResearchDurationWithoutMutation()
+testAIEconomyQueuesOneAffordableUpgradePerAIFaction()
+testAIEconomyStrategyPrioritiesChooseDistinctEarlyGrowthPaths()
+testAIEconomyDoesNotMutatePlayerState()
+try testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState()
+testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals()
 testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent()
 testSimulationTickCompletesAlreadyDueConstructionBeforeProduction()
 testQueueEngineStartsResearchAndPaysFromOwnedPlanet()
