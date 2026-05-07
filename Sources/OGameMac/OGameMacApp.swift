@@ -16,6 +16,7 @@ struct OGameMacApp: App {
                     model.save()
                 }
                 .keyboardShortcut("s", modifiers: [.command])
+                .disabled(!model.canSave)
             }
 
             CommandMenu("Simulation") {
@@ -23,6 +24,11 @@ struct OGameMacApp: App {
                     model.advanceOneMinute()
                 }
                 .keyboardShortcut("t", modifiers: [.command])
+                .disabled(!model.canSave)
+
+                Button("New Game") {
+                    model.startNewGame()
+                }
             }
         }
     }

@@ -330,12 +330,23 @@ private struct ActivityPanel: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!model.canSave)
 
                 Button {
                     model.save()
                 } label: {
                     Label("Save", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity)
+                }
+                .disabled(!model.canSave)
+
+                if !model.canSave {
+                    Button {
+                        model.startNewGame()
+                    } label: {
+                        Label("New Game", systemImage: "plus")
+                            .frame(maxWidth: .infinity)
+                    }
                 }
             }
 
@@ -344,6 +355,7 @@ private struct ActivityPanel: View {
             StatusMetric(title: "Game Time", value: "T+\(Formatters.wholeSeconds(model.universe.gameTime))")
             StatusMetric(title: "Factions", value: Formatters.wholeNumber(Double(model.universe.factions.count)))
             StatusMetric(title: "Fleets", value: Formatters.wholeNumber(Double(model.universe.fleets.count)))
+            StatusMetric(title: "Save", value: model.canSave ? "Ready" : "Protected")
 
             Spacer()
         }
