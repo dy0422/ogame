@@ -32,6 +32,18 @@ func testResourceBundleClampsToStorageLimits() {
     )
 }
 
+func testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid() {
+    let resources = ResourceBundle(metal: -5, crystal: 5, deuterium: 40)
+    let storage = ResourceStorage(metal: -1, crystal: -10, deuterium: 20)
+
+    requireEqual(
+        resources.clamped(to: storage),
+        ResourceBundle(metal: 0, crystal: 0, deuterium: 20),
+        "ResourceBundle should never clamp below zero"
+    )
+}
+
 try testEntityIDsAreCodableAndEquatable()
 testResourceBundleClampsToStorageLimits()
+testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
 print("OGameCoreTests passed")

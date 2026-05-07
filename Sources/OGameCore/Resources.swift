@@ -14,10 +14,14 @@ public struct ResourceBundle: Codable, Equatable, Sendable {
     public static let zero = ResourceBundle()
 
     public func clamped(to storage: ResourceStorage) -> ResourceBundle {
-        ResourceBundle(
-            metal: min(max(metal, 0), storage.metal),
-            crystal: min(max(crystal, 0), storage.crystal),
-            deuterium: min(max(deuterium, 0), storage.deuterium)
+        let metalLimit = max(storage.metal, 0)
+        let crystalLimit = max(storage.crystal, 0)
+        let deuteriumLimit = max(storage.deuterium, 0)
+
+        return ResourceBundle(
+            metal: min(max(metal, 0), metalLimit),
+            crystal: min(max(crystal, 0), crystalLimit),
+            deuterium: min(max(deuterium, 0), deuteriumLimit)
         )
     }
 }
