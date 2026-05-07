@@ -224,6 +224,181 @@ func testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults() throws {
     )
 }
 
+func testBuildQueueItemRoundTripsThroughJSON() throws {
+    let id = UUID(uuidString: "00000000-0000-0000-0000-000000000070")!
+    let planetID = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000071")!)
+    let item = BuildQueueItem(
+        id: id,
+        planetID: planetID,
+        buildingKind: .metalMine,
+        targetLevel: 13,
+        startTime: 120,
+        finishTime: 360,
+        paidCost: ResourceBundle(metal: 1_200, crystal: 400, deuterium: 50)
+    )
+
+    let data = try JSONEncoder().encode(item)
+    let decoded = try JSONDecoder().decode(BuildQueueItem.self, from: data)
+
+    requireIdentifiable(item, id: id, "BuildQueueItem should be Identifiable by its id")
+    requireEqual(decoded, item, "BuildQueueItem should round-trip through JSON")
+
+    let json = requireDictionary(try JSONSerialization.jsonObject(with: data), "BuildQueueItem should encode as a JSON object")
+    requireEqual(json["buildingKind"] as? String, "metalMine", "Build queue building kind should encode by raw value")
+}
+
+func testResearchQueueItemRoundTripsThroughJSON() throws {
+    let id = UUID(uuidString: "00000000-0000-0000-0000-000000000080")!
+    let factionID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000081")!)
+    let item = ResearchQueueItem(
+        id: id,
+        factionID: factionID,
+        technologyKind: .computer,
+        targetLevel: 4,
+        startTime: 480,
+        finishTime: 960,
+        paidCost: ResourceBundle(metal: 600, crystal: 1_200, deuterium: 200)
+    )
+
+    let data = try JSONEncoder().encode(item)
+    let decoded = try JSONDecoder().decode(ResearchQueueItem.self, from: data)
+
+    requireIdentifiable(item, id: id, "ResearchQueueItem should be Identifiable by its id")
+    requireEqual(decoded, item, "ResearchQueueItem should round-trip through JSON")
+
+    let json = requireDictionary(try JSONSerialization.jsonObject(with: data), "ResearchQueueItem should encode as a JSON object")
+    requireEqual(json["technologyKind"] as? String, "computer", "Research queue technology kind should encode by raw value")
+}
+
+func testPlanetFactionAndUniverseQueuesRoundTripThroughJSON() throws {
+    let player = FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000090")!)
+    let homeworld = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000091")!)
+    let buildQueueItem = BuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000092")!,
+        planetID: homeworld,
+        buildingKind: .solarPlant,
+        targetLevel: 11,
+        startTime: 30,
+        finishTime: 90,
+        paidCost: ResourceBundle(metal: 800, crystal: 300)
+    )
+    let researchQueueItem = ResearchQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000093")!,
+        factionID: player,
+        technologyKind: .energy,
+        targetLevel: 3,
+        startTime: 95,
+        finishTime: 250,
+        paidCost: ResourceBundle(crystal: 1_000, deuterium: 300)
+    )
+    let simulatedAt = Date(timeIntervalSince1970: 4_000)
+    let universe = Universe(
+        id: UniverseID(UUID(uuidString: "00000000-0000-0000-0000-000000000094")!),
+        name: "Queued Universe",
+        seed: 84,
+        gameTime: 95,
+        lastSimulatedWallClockTime: simulatedAt,
+        playerFactionID: player,
+        factions: [
+            Faction(
+                id: player,
+                name: "Player",
+                kind: .player,
+                strategy: .balanced,
+                technology: ResearchState(levels: [.energy: 2]),
+                ownedPlanetIDs: [homeworld],
+                researchQueue: [researchQueueItem]
+            )
+        ],
+        planets: [
+            Planet(
+                id: homeworld,
+                name: "Homeworld",
+                coordinate: Coordinate(galaxy: 1, system: 1, position: 4),
+                ownerID: player,
+                resources: ResourceBundle(metal: 500, crystal: 500, deuterium: 100),
+                buildingLevels: [.solarPlant: 10],
+                buildQueue: [buildQueueItem]
+            )
+        ],
+        fleets: [],
+        events: [],
+        ruleSet: RuleSet.fastSkirmish
+    )
+
+    let data = try JSONEncoder().encode(universe)
+    let decoded = try JSONDecoder().decode(Universe.self, from: data)
+
+    requireEqual(decoded, universe, "Universe should round-trip queued economy metadata through JSON")
+
+    let json = requireDictionary(try JSONSerialization.jsonObject(with: data), "Universe should encode as a JSON object")
+    require(json["lastSimulatedWallClockTime"] != nil, "Universe should encode non-nil last simulation wall-clock metadata")
+
+    let factionsJSON = requireArray(json["factions"], "Factions should encode as a JSON array")
+    let factionJSON = requireDictionary(factionsJSON.first, "Faction should encode as a JSON object")
+    let researchQueueJSON = requireArray(factionJSON["researchQueue"], "Faction research queue should encode as a JSON array")
+    requireEqual(researchQueueJSON.count, 1, "Faction research queue should preserve queued items")
+
+    let planetsJSON = requireArray(json["planets"], "Planets should encode as a JSON array")
+    let planetJSON = requireDictionary(planetsJSON.first, "Planet should encode as a JSON object")
+    let buildQueueJSON = requireArray(planetJSON["buildQueue"], "Planet build queue should encode as a JSON array")
+    requireEqual(buildQueueJSON.count, 1, "Planet build queue should preserve queued items")
+}
+
+func testQueueFieldsDefaultWhenDecodingOlderUniverseJSON() throws {
+    let olderUniverseJSON = """
+    {
+      "id": { "rawValue": "00000000-0000-0000-0000-0000000000a0" },
+      "name": "Older Universe",
+      "seed": 21,
+      "gameTime": 45,
+      "playerFactionID": { "rawValue": "00000000-0000-0000-0000-0000000000a1" },
+      "factions": [
+        {
+          "id": { "rawValue": "00000000-0000-0000-0000-0000000000a1" },
+          "name": "Player",
+          "kind": "player",
+          "strategy": "balanced",
+          "technology": { "levels": { "computer": 1 } },
+          "ownedPlanetIDs": [
+            { "rawValue": "00000000-0000-0000-0000-0000000000a2" }
+          ]
+        }
+      ],
+      "planets": [
+        {
+          "id": { "rawValue": "00000000-0000-0000-0000-0000000000a2" },
+          "name": "Homeworld",
+          "coordinate": { "galaxy": 1, "system": 1, "position": 4 },
+          "ownerID": { "rawValue": "00000000-0000-0000-0000-0000000000a1" },
+          "resources": { "metal": 100, "crystal": 50, "deuterium": 25 },
+          "storage": { "metal": 10000, "crystal": 10000, "deuterium": 10000 },
+          "energy": { "produced": 20, "used": 8 },
+          "buildingLevels": { "metalMine": 2 },
+          "shipInventory": { "smallCargo": 1 },
+          "defenseInventory": { "rocketLauncher": 3 }
+        }
+      ],
+      "fleets": [],
+      "events": [],
+      "ruleSet": {
+        "id": "fast-skirmish-v1",
+        "displayName": "Fast Skirmish",
+        "baseTickInterval": 1,
+        "offlineChunkInterval": 300
+      }
+    }
+    """
+
+    let decoded = try JSONDecoder().decode(Universe.self, from: Data(olderUniverseJSON.utf8))
+
+    requireEqual(decoded.lastSimulatedWallClockTime, nil, "Older universe JSON should default missing simulation metadata to nil")
+    requireEqual(decoded.factions[0].researchQueue, [], "Older faction JSON should default missing research queue to empty")
+    requireEqual(decoded.planets[0].buildQueue, [], "Older planet JSON should default missing build queue to empty")
+    requireEqual(decoded.planets[0].buildingLevels, [.metalMine: 2], "Older planet JSON should keep raw-value building map behavior")
+    requireEqual(decoded.ruleSet.buildingRules, RuleSet.fastSkirmish.buildingRules, "Older universe JSON should keep RuleSet defaults")
+}
+
 func testUniverseModelRoundTripsThroughJSON() throws {
     let player = FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000010")!)
     let homeworld = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000020")!)
@@ -535,6 +710,10 @@ testFastSkirmishBuildingRulesCoverEarlyEconomy()
 testFastSkirmishResearchRulesCoverEarlyTechnologies()
 try testRuleSetBalanceRulesUseRawValueKeyedJSONObjects()
 try testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults()
+try testBuildQueueItemRoundTripsThroughJSON()
+try testResearchQueueItemRoundTripsThroughJSON()
+try testPlanetFactionAndUniverseQueuesRoundTripThroughJSON()
+try testQueueFieldsDefaultWhenDecodingOlderUniverseJSON()
 try testUniverseModelRoundTripsThroughJSON()
 try testPlanetEnumDictionaryDecodesRawValueKeysAndRejectsUnknownKeys()
 testSeededGeneratorProducesDeterministicDistinctSequences()

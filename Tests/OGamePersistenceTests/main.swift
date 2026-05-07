@@ -48,6 +48,48 @@ func testRepositorySavesAndLoadsUniverse() throws {
     requireEqual(loaded.schemaVersion, SaveEnvelope.currentSchemaVersion, "Repository should preserve schema version")
 }
 
+func testRepositorySavesAndLoadsQueueMetadata() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    var universe = StarterUniverseFactory.makeNewGame(seed: 14, playerName: "Commander")
+    let factionID = universe.playerFactionID
+    let planetID = universe.planets[0].id
+    let buildQueueItem = BuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000b0")!,
+        planetID: planetID,
+        buildingKind: .metalMine,
+        targetLevel: 2,
+        startTime: 10,
+        finishTime: 70,
+        paidCost: ResourceBundle(metal: 60, crystal: 15)
+    )
+    let researchQueueItem = ResearchQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!,
+        factionID: factionID,
+        technologyKind: .computer,
+        targetLevel: 1,
+        startTime: 75,
+        finishTime: 180,
+        paidCost: ResourceBundle(crystal: 400, deuterium: 600)
+    )
+
+    universe.lastSimulatedWallClockTime = Date(timeIntervalSince1970: 5_000)
+    universe.planets[0].buildQueue = [buildQueueItem]
+    universe.factions[0].researchQueue = [researchQueueItem]
+
+    try repository.save(universe, wallClockDate: Date(timeIntervalSince1970: 6_000))
+    let loaded = try repository.load()
+
+    requireEqual(loaded.universe, universe, "Repository should preserve queue metadata through save/load")
+    requireEqual(loaded.universe.planets[0].buildQueue, [buildQueueItem], "Repository should preserve planet build queue")
+    requireEqual(loaded.universe.factions[0].researchQueue, [researchQueueItem], "Repository should preserve faction research queue")
+    requireEqual(
+        loaded.universe.lastSimulatedWallClockTime,
+        Date(timeIntervalSince1970: 5_000),
+        "Repository should preserve simulation wall-clock metadata"
+    )
+}
+
 func testRepositoryReportsMissingSave() {
     let repository = JSONSaveRepository(saveDirectory: uniqueTemporaryDirectory())
 
@@ -132,6 +174,7 @@ func testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode() throws {
 }
 
 try testRepositorySavesAndLoadsUniverse()
+try testRepositorySavesAndLoadsQueueMetadata()
 testRepositoryReportsMissingSave()
 try testRepositoryRejectsUnsupportedSchema()
 try testRepositoryRejectsInvalidFileNamesBeforeSaving()
