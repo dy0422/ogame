@@ -922,7 +922,7 @@ final class AppModel: ObservableObject {
             return
         }
 
-        SimulationEngine.tick(universe: &universe, delta: advanceDelta)
+        SimulationEngine.tick(universe: &universe, delta: advanceDelta, aiDifficulty: settings.difficulty)
         refreshStrategicState()
         statusMessage = "Advanced \(Self.formattedDuration(advanceDelta)) at \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x speed to T+\(Self.formattedWholeSeconds(universe.gameTime))."
     }
@@ -981,7 +981,7 @@ final class AppModel: ObservableObject {
 
     func updateDifficulty(_ difficulty: GameSettings.Difficulty) {
         settings.difficulty = difficulty
-        statusMessage = "Difficulty set to \(difficulty.displayName). Save to keep this setting."
+        statusMessage = "Difficulty set to \(difficulty.displayName). \(difficulty.behaviorDescription)"
     }
 
     func refreshSaveSlots() {
@@ -1580,6 +1580,17 @@ extension GameSettings.Difficulty {
             return "Standard"
         case .hard:
             return "Hard"
+        }
+    }
+
+    var behaviorDescription: String {
+        switch self {
+        case .easy:
+            return "AI scouts before attacks and reacts to threats with heavier defenses."
+        case .standard:
+            return "AI balances scouting, expansion, attacks, and defensive reactions."
+        case .hard:
+            return "AI uses rankings and relation pressure more aggressively without reading hidden inventories."
         }
     }
 }

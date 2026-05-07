@@ -7,7 +7,8 @@ public enum SimulationEngine {
     public static func tick(
         universe: inout Universe,
         delta: TimeInterval,
-        allowAggressiveAIStrategy: Bool = true
+        allowAggressiveAIStrategy: Bool = true,
+        aiDifficulty: GameSettings.Difficulty = .standard
     ) {
         guard delta.isFinite, delta > 0 else {
             return
@@ -25,7 +26,8 @@ public enum SimulationEngine {
         runAIStrategyDecisionsIfNeeded(
             in: &universe,
             from: initialGameTime,
-            allowAggressiveMissions: allowAggressiveAIStrategy
+            allowAggressiveMissions: allowAggressiveAIStrategy,
+            aiDifficulty: aiDifficulty
         )
         StrategicEngine.updateStrategicState(in: &universe)
 
@@ -51,7 +53,8 @@ public enum SimulationEngine {
     private static func runAIStrategyDecisionsIfNeeded(
         in universe: inout Universe,
         from initialGameTime: TimeInterval,
-        allowAggressiveMissions: Bool
+        allowAggressiveMissions: Bool,
+        aiDifficulty: GameSettings.Difficulty
     ) {
         guard shouldRunAIStrategyDecisions(from: initialGameTime, to: universe.gameTime, ruleSet: universe.ruleSet) else {
             return
@@ -59,7 +62,8 @@ public enum SimulationEngine {
 
         AIStrategyEngine.makeStrategicDecisions(
             in: &universe,
-            allowAggressiveMissions: allowAggressiveMissions
+            allowAggressiveMissions: allowAggressiveMissions,
+            policy: AIDifficultyPolicy(difficulty: aiDifficulty)
         )
     }
 

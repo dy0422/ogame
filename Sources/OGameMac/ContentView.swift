@@ -679,6 +679,11 @@ private struct SettingsPanel: View {
                     }
                 }
 
+                Text(model.settings.difficulty.behaviorDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 HStack {
                     Spacer()
 

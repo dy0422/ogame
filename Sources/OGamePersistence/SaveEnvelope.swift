@@ -36,7 +36,8 @@ public struct SaveEnvelope: Codable, Equatable, Sendable {
         let summary = OfflineSimulationEngine.catchUp(
             universe: &caughtUpUniverse,
             elapsed: elapsedSinceLastSave(until: currentDate),
-            now: currentDate
+            now: currentDate,
+            aiDifficulty: settings.difficulty
         )
         return (caughtUpUniverse, summary)
     }

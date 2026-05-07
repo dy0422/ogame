@@ -37,7 +37,8 @@ public enum OfflineSimulationEngine {
     public static func catchUp(
         universe: inout Universe,
         elapsed: TimeInterval,
-        now: Date
+        now: Date,
+        aiDifficulty: GameSettings.Difficulty = .standard
     ) -> OfflineCatchUpSummary {
         guard elapsed.isFinite, elapsed > 0 else {
             return emptySummary()
@@ -67,7 +68,8 @@ public enum OfflineSimulationEngine {
             SimulationEngine.tick(
                 universe: &universe,
                 delta: delta,
-                allowAggressiveAIStrategy: allowAggressiveAI
+                allowAggressiveAIStrategy: allowAggressiveAI,
+                aiDifficulty: aiDifficulty
             )
 
             let generatedEvents = Array(universe.events[eventStartCount..<universe.events.count])

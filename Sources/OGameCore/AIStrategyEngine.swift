@@ -3,21 +3,26 @@ import Foundation
 public enum AIStrategyEngine {
     public static func makeStrategicDecisions(
         in universe: inout Universe,
-        allowAggressiveMissions: Bool = true
+        allowAggressiveMissions: Bool = true,
+        policy: AIDifficultyPolicy = .standard
     ) {
         let aiFactions = universe.factions
             .filter { $0.kind == .ai && $0.id != universe.playerFactionID }
             .sorted(by: compareFactions)
 
         for faction in aiFactions {
-            makeProductionDecisions(for: faction, in: &universe)
+            makeProductionDecisions(for: faction, policy: policy, in: &universe)
             if allowAggressiveMissions {
-                launchStrategicFleetIfNeeded(for: faction, in: &universe)
+                launchStrategicFleetIfNeeded(for: faction, policy: policy, in: &universe)
             }
         }
     }
 
-    private static func makeProductionDecisions(for faction: Faction, in universe: inout Universe) {
+    private static func makeProductionDecisions(
+        for faction: Faction,
+        policy: AIDifficultyPolicy,
+        in universe: inout Universe
+    ) {
         let planets = ownedPlanets(for: faction, in: universe)
         guard !planets.isEmpty else {
             return
@@ -34,6 +39,7 @@ public enum AIStrategyEngine {
                     for: faction,
                     planetID: planet.id,
                     threatScore: threatScore,
+                    policy: policy,
                     in: &universe
                 )
             }
@@ -75,6 +81,7 @@ public enum AIStrategyEngine {
         for faction: Faction,
         planetID: PlanetID,
         threatScore: Int,
+        policy: AIDifficultyPolicy,
         in universe: inout Universe
     ) {
         guard threatScore > 0,
@@ -85,12 +92,13 @@ public enum AIStrategyEngine {
             return
         }
 
+        let quantity = policy.defenseBuildQuantity(forThreatScore: threatScore)
         for kind in preferredDefenses(for: faction.strategy, threatScore: threatScore) {
-            guard canAffordDefense(kind, quantity: 1, on: planet, ruleSet: universe.ruleSet) else {
+            guard canAffordDefense(kind, quantity: quantity, on: planet, ruleSet: universe.ruleSet) else {
                 continue
             }
 
-            if QueueEngine.startDefenseBuild(on: planetID, in: &universe, kind: kind, quantity: 1) == .queued {
+            if QueueEngine.startDefenseBuild(on: planetID, in: &universe, kind: kind, quantity: quantity) == .queued {
                 return
             }
         }
@@ -131,7 +139,11 @@ public enum AIStrategyEngine {
         }
     }
 
-    private static func launchStrategicFleetIfNeeded(for faction: Faction, in universe: inout Universe) {
+    private static func launchStrategicFleetIfNeeded(
+        for faction: Faction,
+        policy: AIDifficultyPolicy,
+        in universe: inout Universe
+    ) {
         guard !hasActiveFleet(for: faction.id, in: universe) else {
             return
         }
@@ -144,7 +156,7 @@ public enum AIStrategyEngine {
             return
         }
 
-        if launchAttackFleet(for: faction, in: &universe) {
+        if launchAttackFleet(for: faction, policy: policy, in: &universe) {
             return
         }
 
@@ -206,8 +218,12 @@ public enum AIStrategyEngine {
         return false
     }
 
-    private static func launchAttackFleet(for faction: Faction, in universe: inout Universe) -> Bool {
-        let knownTargets = knownAttackTargets(for: faction, in: universe)
+    private static func launchAttackFleet(
+        for faction: Faction,
+        policy: AIDifficultyPolicy,
+        in universe: inout Universe
+    ) -> Bool {
+        let knownTargets = attackTargets(for: faction, policy: policy, in: universe)
 
         for target in knownTargets {
             guard let origin = attackOrigin(for: faction, in: universe) else {
@@ -255,17 +271,49 @@ public enum AIStrategyEngine {
         return false
     }
 
-    private static func knownAttackTargets(for faction: Faction, in universe: Universe) -> [Planet] {
+    private static func attackTargets(
+        for faction: Faction,
+        policy: AIDifficultyPolicy,
+        in universe: Universe
+    ) -> [Planet] {
         let knownTargetIDs = Set(
             StrategicEngine.explorationRecords(for: faction.id, in: universe)
                 .filter { $0.discoveredOwnerID != nil && $0.discoveredOwnerID != faction.id }
                 .map(\.targetPlanetID)
         )
 
-        return visibleRivalPlanets(for: faction, in: universe)
+        let reportTargets = visibleRivalPlanets(for: faction, in: universe)
             .filter { target in
                 knownTargetIDs.contains(target.id) &&
                     isKnownWeakTarget(for: faction.id, targetPlanetID: target.id, in: universe)
+            }
+            .sorted(by: comparePlanets)
+
+        guard reportTargets.isEmpty, policy.allowsRankingBasedAttacks else {
+            return reportTargets
+        }
+
+        return rankedPressureTargets(for: faction, in: universe)
+    }
+
+    private static func rankedPressureTargets(for faction: Faction, in universe: Universe) -> [Planet] {
+        guard let attackerScore = universe.rankings.first(where: { $0.factionID == faction.id }) else {
+            return []
+        }
+
+        let scoreByFactionID = Dictionary(uniqueKeysWithValues: universe.rankings.map { ($0.factionID, $0) })
+
+        return visibleRivalPlanets(for: faction, in: universe)
+            .filter { target in
+                guard let ownerID = target.ownerID,
+                      let defenderScore = scoreByFactionID[ownerID]
+                else {
+                    return false
+                }
+
+                return attackerScore.rank > 0 &&
+                    defenderScore.rank > attackerScore.rank &&
+                    attackerScore.totalScore >= max(defenderScore.totalScore * 1.5, defenderScore.totalScore + 1_000)
             }
             .sorted(by: comparePlanets)
     }

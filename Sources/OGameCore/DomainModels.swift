@@ -75,6 +75,42 @@ public struct GameSettings: Codable, Equatable, Sendable {
     }
 }
 
+public struct AIDifficultyPolicy: Equatable, Sendable {
+    public var difficulty: GameSettings.Difficulty
+    public var allowsRankingBasedAttacks: Bool
+    public var requiresReportBeforeAttack: Bool
+    public var defensiveQuantityBonus: Int
+
+    public init(difficulty: GameSettings.Difficulty = .standard) {
+        self.difficulty = difficulty
+
+        switch difficulty {
+        case .easy:
+            self.allowsRankingBasedAttacks = false
+            self.requiresReportBeforeAttack = true
+            self.defensiveQuantityBonus = 1
+        case .standard:
+            self.allowsRankingBasedAttacks = false
+            self.requiresReportBeforeAttack = true
+            self.defensiveQuantityBonus = 0
+        case .hard:
+            self.allowsRankingBasedAttacks = true
+            self.requiresReportBeforeAttack = false
+            self.defensiveQuantityBonus = 0
+        }
+    }
+
+    public static let standard = AIDifficultyPolicy(difficulty: .standard)
+
+    public func defenseBuildQuantity(forThreatScore threatScore: Int) -> Int {
+        guard threatScore > 0 else {
+            return 0
+        }
+
+        return max(1, min(3, 1 + defensiveQuantityBonus))
+    }
+}
+
 public struct Universe: Codable, Equatable, Sendable, Identifiable {
     public var id: UniverseID
     public var name: String

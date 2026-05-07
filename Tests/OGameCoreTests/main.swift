@@ -3310,6 +3310,113 @@ func testOfflineCatchUpCapsAIAggressiveFleetLaunchesByChunkPressure() {
     requireEqual(universe.events.last?.title, "Offline Catch-Up Complete", "Offline catch-up should keep the summary event")
 }
 
+func testEasyAIDoesNotAttackWithoutReport() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let raider = makeAIEconomyFaction(index: 1, strategy: .raider)
+    let playerPlanet = makeAIEconomyPlanet(
+        index: 0,
+        ownerID: player.id,
+        resources: ResourceBundle(metal: 20_000, crystal: 10_000, deuterium: 5_000)
+    )
+    let raiderPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: raider.id,
+        resources: ResourceBundle(metal: 30_000, crystal: 30_000, deuterium: 10_000),
+        buildingLevels: [.shipyard: 1, .roboticsFactory: 1, .solarPlant: 2],
+        shipInventory: [.lightFighter: 10, .smallCargo: 2, .espionageProbe: 1]
+    )
+    var universe = makeAIEconomyUniverse(factions: [player, raider], planets: [playerPlanet, raiderPlanet])
+
+    AIStrategyEngine.makeStrategicDecisions(
+        in: &universe,
+        policy: AIDifficultyPolicy(difficulty: .easy)
+    )
+
+    requireEqual(universe.fleets.count, 1, "Easy AI should launch at most one cautious fleet")
+    requireEqual(universe.fleets[0].mission, .espionage, "Easy AI should scout instead of attacking without a report")
+}
+
+func testHardAICanUseRankingsButNotHiddenInventory() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let raider = makeAIEconomyFaction(index: 1, strategy: .raider)
+    let exposedPlayerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let hiddenStrongPlayerPlanet = makeAIEconomyPlanet(
+        index: 0,
+        ownerID: player.id,
+        shipInventory: [.battleship: 300],
+        defenseInventory: [.plasmaTurret: 100]
+    )
+    let raiderPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: raider.id,
+        resources: ResourceBundle(metal: 30_000, crystal: 30_000, deuterium: 10_000),
+        buildingLevels: [.shipyard: 1, .roboticsFactory: 1, .solarPlant: 2],
+        shipInventory: [.lightFighter: 10, .smallCargo: 2, .espionageProbe: 1]
+    )
+    var first = makeAIEconomyUniverse(factions: [player, raider], planets: [exposedPlayerPlanet, raiderPlanet])
+    var second = makeAIEconomyUniverse(factions: [player, raider], planets: [hiddenStrongPlayerPlanet, raiderPlanet])
+    let rankings = [
+        FactionScore(factionID: raider.id, factionName: "AI 1", rank: 1, totalScore: 30_000),
+        FactionScore(factionID: player.id, factionName: "Player", rank: 2, totalScore: 2_000)
+    ]
+    first.rankings = rankings
+    second.rankings = rankings
+
+    AIStrategyEngine.makeStrategicDecisions(
+        in: &first,
+        policy: AIDifficultyPolicy(difficulty: .hard)
+    )
+    AIStrategyEngine.makeStrategicDecisions(
+        in: &second,
+        policy: AIDifficultyPolicy(difficulty: .hard)
+    )
+
+    requireEqual(first.fleets.count, 1, "Hard AI should launch one ranked-pressure fleet")
+    requireEqual(second.fleets.count, 1, "Hard AI should launch one ranked-pressure fleet in the hidden clone")
+    requireEqual(first.fleets[0].mission, .attack, "Hard AI may attack from ranking pressure")
+    requireEqual(second.fleets[0].mission, .attack, "Hard AI should not switch away because hidden inventories changed")
+    requireEqual(first.fleets[0].targetPlanetID, second.fleets[0].targetPlanetID, "Hard AI ranked attack target should not depend on hidden inventory")
+    requireEqual(first.fleets[0].ships, second.fleets[0].ships, "Hard AI ranked attack fleet should not depend on hidden inventory")
+}
+
+func testThreatMemoryChangesDefensivePosture() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let threatenedMiner = makeAIEconomyFaction(
+        index: 1,
+        strategy: .miner,
+        relations: [FactionRelation(factionID: player.id, posture: .hostile, threatScore: 5)]
+    )
+    let cautiousMinerPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: threatenedMiner.id,
+        resources: ResourceBundle(metal: 12_000, crystal: 4_000, deuterium: 1_000),
+        buildingLevels: [.shipyard: 1, .solarPlant: 2]
+    )
+    var easyUniverse = makeAIEconomyUniverse(
+        factions: [player, threatenedMiner],
+        planets: [makeAIEconomyPlanet(index: 0, ownerID: player.id), cautiousMinerPlanet]
+    )
+    var hardUniverse = easyUniverse
+
+    AIStrategyEngine.makeStrategicDecisions(
+        in: &easyUniverse,
+        policy: AIDifficultyPolicy(difficulty: .easy)
+    )
+    AIStrategyEngine.makeStrategicDecisions(
+        in: &hardUniverse,
+        policy: AIDifficultyPolicy(difficulty: .hard)
+    )
+
+    let easyDefense = requirePlanet(cautiousMinerPlanet.id, in: easyUniverse, "Easy miner planet should remain")
+        .defenseBuildQueue
+        .first
+    let hardDefense = requirePlanet(cautiousMinerPlanet.id, in: hardUniverse, "Hard miner planet should remain")
+        .defenseBuildQueue
+        .first
+
+    require(easyDefense?.quantity ?? 0 > hardDefense?.quantity ?? 0, "Easy threat memory should produce a heavier defensive posture")
+}
+
 func testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals() {
     let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
     let ai = makeAIEconomyFaction(index: 1, strategy: .miner)
@@ -4553,6 +4660,9 @@ testAIExpansionistColonizesKnownNeutralWorld()
 testAIRecyclerCollectsKnownDebris()
 testAIAttackUsesKnownWeakTargetOnly()
 testOfflineCatchUpCapsAIAggressiveFleetLaunchesByChunkPressure()
+testEasyAIDoesNotAttackWithoutReport()
+testHardAICanUseRankingsButNotHiddenInventory()
+testThreatMemoryChangesDefensivePosture()
 testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals()
 testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent()
 testSimulationTickCompletesAlreadyDueConstructionBeforeProduction()
