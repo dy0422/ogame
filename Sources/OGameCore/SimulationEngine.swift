@@ -1,12 +1,21 @@
 import Foundation
 
 public enum SimulationEngine {
+    private static let minimumAIDecisionInterval: TimeInterval = 60
+
     public static func tick(universe: inout Universe, delta: TimeInterval) {
         guard delta.isFinite, delta > 0 else {
             return
         }
 
+        let initialGameTime = universe.gameTime
+
+        QueueEngine.completeDueItems(in: &universe)
+        EconomyEngine.tick(universe: &universe, delta: delta)
+
         universe.gameTime += delta
+        QueueEngine.completeDueItems(in: &universe)
+        runAIDecisionsIfNeeded(in: &universe, from: initialGameTime)
 
         universe.events.append(
             GameEvent(
@@ -17,6 +26,38 @@ public enum SimulationEngine {
                 message: "Advanced the universe by \(delta) seconds."
             )
         )
+    }
+
+    private static func runAIDecisionsIfNeeded(in universe: inout Universe, from initialGameTime: TimeInterval) {
+        guard shouldRunAIDecisions(from: initialGameTime, to: universe.gameTime, ruleSet: universe.ruleSet) else {
+            return
+        }
+
+        AIEconomyEngine.makeDecisions(in: &universe)
+    }
+
+    private static func shouldRunAIDecisions(
+        from initialGameTime: TimeInterval,
+        to currentGameTime: TimeInterval,
+        ruleSet: RuleSet
+    ) -> Bool {
+        guard initialGameTime.isFinite, currentGameTime.isFinite else {
+            return false
+        }
+
+        let interval = aiDecisionInterval(from: ruleSet)
+        let initialWindow = floor(max(initialGameTime, 0) / interval)
+        let currentWindow = floor(max(currentGameTime, 0) / interval)
+
+        return currentWindow > initialWindow
+    }
+
+    private static func aiDecisionInterval(from ruleSet: RuleSet) -> TimeInterval {
+        guard ruleSet.offlineChunkInterval.isFinite, ruleSet.offlineChunkInterval > 0 else {
+            return minimumAIDecisionInterval
+        }
+
+        return max(ruleSet.offlineChunkInterval, minimumAIDecisionInterval)
     }
 
     private static func simulationEventID(index: Int) -> EventID {

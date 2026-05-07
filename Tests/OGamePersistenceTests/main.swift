@@ -48,6 +48,76 @@ func testRepositorySavesAndLoadsUniverse() throws {
     requireEqual(loaded.schemaVersion, SaveEnvelope.currentSchemaVersion, "Repository should preserve schema version")
 }
 
+func testRepositorySavesAndLoadsQueueMetadata() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    var universe = StarterUniverseFactory.makeNewGame(seed: 14, playerName: "Commander")
+    let factionID = universe.playerFactionID
+    let planetID = universe.planets[0].id
+    let buildQueueItem = BuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000b0")!,
+        planetID: planetID,
+        buildingKind: .metalMine,
+        targetLevel: 2,
+        startTime: 10,
+        finishTime: 70,
+        paidCost: ResourceBundle(metal: 60, crystal: 15)
+    )
+    let researchQueueItem = ResearchQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!,
+        factionID: factionID,
+        technologyKind: .computer,
+        targetLevel: 1,
+        startTime: 75,
+        finishTime: 180,
+        paidCost: ResourceBundle(crystal: 400, deuterium: 600)
+    )
+
+    universe.lastSimulatedWallClockTime = Date(timeIntervalSince1970: 5_000)
+    universe.planets[0].buildQueue = [buildQueueItem]
+    universe.factions[0].researchQueue = [researchQueueItem]
+
+    try repository.save(universe, wallClockDate: Date(timeIntervalSince1970: 6_000))
+    let loaded = try repository.load()
+
+    requireEqual(loaded.universe, universe, "Repository should preserve queue metadata through save/load")
+    requireEqual(loaded.universe.planets[0].buildQueue, [buildQueueItem], "Repository should preserve planet build queue")
+    requireEqual(loaded.universe.factions[0].researchQueue, [researchQueueItem], "Repository should preserve faction research queue")
+    requireEqual(
+        loaded.universe.lastSimulatedWallClockTime,
+        Date(timeIntervalSince1970: 5_000),
+        "Repository should preserve simulation wall-clock metadata"
+    )
+}
+
+func testLoadedEnvelopePreparesOfflineCatchUpWithoutSavingUntilExplicitWrite() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    let universe = StarterUniverseFactory.makeNewGame(seed: 15, playerName: "Commander")
+    let savedAt = Date(timeIntervalSince1970: 10_000)
+    let currentDate = Date(timeIntervalSince1970: 10_600)
+
+    try repository.save(universe, wallClockDate: savedAt)
+    let loaded = try repository.load()
+    let elapsed = loaded.elapsedSinceLastSave(until: currentDate)
+    let catchUpResult = loaded.offlineCatchUp(until: currentDate)
+    let unchangedAfterCatchUp = try repository.load()
+
+    try repository.save(catchUpResult.universe, wallClockDate: currentDate)
+    let reloaded = try repository.load()
+
+    requireEqual(elapsed, 600, "Loaded envelope should compute elapsed seconds from its wall-clock save date")
+    requireEqual(catchUpResult.summary.elapsedSeconds, 600, "Offline catch-up should use the loaded wall-clock elapsed time")
+    requireEqual(catchUpResult.summary.didMutate, true, "Positive loaded elapsed time should mutate during offline catch-up")
+    requireEqual(unchangedAfterCatchUp.lastSavedAt, savedAt, "Prepared catch-up should not rewrite the save date before explicit save")
+    requireEqual(unchangedAfterCatchUp.universe, universe, "Prepared catch-up should not rewrite the saved universe before explicit save")
+    requireEqual(catchUpResult.universe.lastSimulatedWallClockTime, currentDate, "Catch-up should store the current wall-clock date")
+    requireEqual(catchUpResult.universe.events.last?.title, "Offline Catch-Up Complete", "Catch-up should record a summary event")
+    requireEqual(reloaded.schemaVersion, SaveEnvelope.currentSchemaVersion, "Resaved catch-up should preserve schema version")
+    requireEqual(reloaded.lastSavedAt, currentDate, "Resaved catch-up should preserve the current wall-clock date")
+    requireEqual(reloaded.universe, catchUpResult.universe, "Resaved catch-up universe should round-trip without schema drift")
+}
+
 func testRepositoryReportsMissingSave() {
     let repository = JSONSaveRepository(saveDirectory: uniqueTemporaryDirectory())
 
@@ -132,6 +202,8 @@ func testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode() throws {
 }
 
 try testRepositorySavesAndLoadsUniverse()
+try testRepositorySavesAndLoadsQueueMetadata()
+try testLoadedEnvelopePreparesOfflineCatchUpWithoutSavingUntilExplicitWrite()
 testRepositoryReportsMissingSave()
 try testRepositoryRejectsUnsupportedSchema()
 try testRepositoryRejectsInvalidFileNamesBeforeSaving()

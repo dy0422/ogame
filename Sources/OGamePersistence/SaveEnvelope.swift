@@ -20,4 +20,21 @@ public struct SaveEnvelope: Codable, Equatable, Sendable {
         self.lastSavedAt = lastSavedAt
         self.universe = universe
     }
+
+    public func elapsedSinceLastSave(until currentDate: Date) -> TimeInterval {
+        currentDate.timeIntervalSince(lastSavedAt)
+    }
+
+    public func offlineCatchUp(until currentDate: Date) -> (
+        universe: Universe,
+        summary: OfflineCatchUpSummary
+    ) {
+        var caughtUpUniverse = universe
+        let summary = OfflineSimulationEngine.catchUp(
+            universe: &caughtUpUniverse,
+            elapsed: elapsedSinceLastSave(until: currentDate),
+            now: currentDate
+        )
+        return (caughtUpUniverse, summary)
+    }
 }

@@ -103,7 +103,7 @@ private struct DashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     HeaderView(universe: model.universe, faction: model.playerFaction)
-                    PlanetSummaryView(planets: model.playerPlanets)
+                    PlanetSummaryView(planets: model.playerPlanets, model: model)
                     RecentEventsView(events: Array(model.universe.events.suffix(6).reversed()))
                 }
                 .padding(24)
@@ -143,6 +143,7 @@ private struct HeaderView: View {
 
 private struct PlanetSummaryView: View {
     let planets: [Planet]
+    @ObservedObject var model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -153,7 +154,7 @@ private struct PlanetSummaryView: View {
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
                     ForEach(planets) { planet in
-                        PlanetSummaryCard(planet: planet)
+                        PlanetSummaryCard(planet: planet, model: model)
                     }
                 }
             }
@@ -163,6 +164,7 @@ private struct PlanetSummaryView: View {
 
 private struct PlanetSummaryCard: View {
     let planet: Planet
+    @ObservedObject var model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -178,14 +180,9 @@ private struct PlanetSummaryCard: View {
             }
 
             ResourceGrid(resources: planet.resources)
+            ResourceRateGrid(rates: model.productionPerHour(for: planet))
 
-            Label(
-                "\(Formatters.signedWholeNumber(planet.energy.available)) energy",
-                systemImage: "bolt.fill"
-            )
-            .font(.caption)
-            .foregroundStyle(planet.energy.available >= 0 ? Color.secondary : Color.red)
-            .lineLimit(1)
+            EnergyStatusLine(planet: planet, model: model)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -210,6 +207,19 @@ private struct ResourceGrid: View {
     }
 }
 
+private struct ResourceRateGrid: View {
+    let rates: ResourceBundle
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+            ResourceRateRow(label: "Metal /h", value: rates.metal)
+            ResourceRateRow(label: "Crystal /h", value: rates.crystal)
+            ResourceRateRow(label: "Deuterium /h", value: rates.deuterium)
+        }
+        .font(.caption)
+    }
+}
+
 private struct ResourceRow: View {
     let label: String
     let value: Double
@@ -226,6 +236,38 @@ private struct ResourceRow: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
         }
+    }
+}
+
+private struct ResourceRateRow: View {
+    let label: String
+    let value: Double
+
+    var body: some View {
+        GridRow {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text("+\(Formatters.wholeNumber(value))")
+                .monospacedDigit()
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+    }
+}
+
+private struct EnergyStatusLine: View {
+    let planet: Planet
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        Label(model.energyStatusText(for: planet), systemImage: "bolt.fill")
+            .font(.caption)
+            .foregroundStyle(planet.energy.available >= 0 ? Color.secondary : Color.red)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
     }
 }
 
@@ -322,6 +364,10 @@ private struct ActivityPanel: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let offlineSummaryText = model.offlineSummaryText {
+                OfflineSummaryLine(summaryText: offlineSummaryText)
+            }
+
             VStack(spacing: 8) {
                 Button {
                     model.advanceOneMinute()
@@ -364,6 +410,24 @@ private struct ActivityPanel: View {
     }
 }
 
+private struct OfflineSummaryLine: View {
+    let summaryText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Offline Catch-Up", systemImage: "clock.arrow.circlepath")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Text(summaryText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 private struct StatusMetric: View {
     let title: String
     let value: String
@@ -402,9 +466,9 @@ private struct PlanetDetailView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    ResourceCard(title: "Resources", resources: planet.resources)
-                    ResourceCard(title: "Storage", resources: planet.storage.resourceBundle)
-                    InventoryCard(title: "Buildings", values: planet.buildingLevels)
+                    PlanetEconomyView(planet: planet, model: model)
+                    BuildQueueView(planet: planet, model: model)
+                    BuildingControlsView(planet: planet, model: model)
                     InventoryCard(title: "Ships", values: planet.shipInventory)
                     InventoryCard(title: "Defense", values: planet.defenseInventory)
                 }
@@ -417,6 +481,233 @@ private struct PlanetDetailView: View {
             ActivityPanel(model: model)
         }
         .navigationTitle(planet.name)
+    }
+}
+
+private struct PlanetEconomyView: View {
+    let planet: Planet
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionTitle(title: "Economy", detail: model.energyStatusText(for: planet))
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 180), alignment: .topLeading)],
+                    alignment: .leading,
+                    spacing: 16
+                ) {
+                    EconomyColumn(title: "Resources") {
+                        ResourceGrid(resources: planet.resources)
+                    }
+
+                    EconomyColumn(title: "Hourly Rates") {
+                        ResourceRateGrid(rates: model.productionPerHour(for: planet))
+                    }
+
+                    EconomyColumn(title: "Storage") {
+                        ResourceGrid(resources: planet.storage.resourceBundle)
+                    }
+                }
+
+                EnergyMeterView(planet: planet, model: model)
+            }
+        }
+        .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private struct EconomyColumn<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct EnergyMeterView: View {
+    let planet: Planet
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Label("Energy", systemImage: "bolt.fill")
+                    .font(.callout.weight(.semibold))
+
+                Spacer(minLength: 12)
+
+                Text(model.energyStatusText(for: planet))
+                    .font(.caption)
+                    .foregroundStyle(planet.energy.available >= 0 ? Color.secondary : Color.red)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+
+            ProgressView(value: model.energySupplyRatio(for: planet))
+                .tint(planet.energy.available >= 0 ? Color.green : Color.red)
+        }
+    }
+}
+
+private struct BuildQueueView: View {
+    let planet: Planet
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(
+                    title: "Construction Queue",
+                    detail: planet.buildQueue.isEmpty ? "Idle" : "\(planet.buildQueue.count) active"
+                )
+
+                if planet.buildQueue.isEmpty {
+                    QueueEmptyLine(title: "No active construction", systemImage: "hammer")
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(planet.buildQueue) { item in
+                            BuildQueueRow(item: item, model: model)
+
+                            if item.id != planet.buildQueue.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private struct BuildQueueRow: View {
+    let item: BuildQueueItem
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: item.buildingKind.systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(item.buildingKind.rawValue.displayName)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 12)
+
+                    Text(model.queueRemainingText(until: item.finishTime))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+
+                Text(model.buildQueueStatus(item))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                ProgressView(value: model.queueProgress(startTime: item.startTime, finishTime: item.finishTime))
+            }
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+private struct BuildingControlsView: View {
+    let planet: Planet
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(
+                    title: "Buildings",
+                    detail: planet.buildQueue.isEmpty ? "Ready" : "Queue busy"
+                )
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(model.availableBuildingKinds, id: \.self) { kind in
+                        BuildingUpgradeRow(planet: planet, kind: kind, model: model)
+
+                        if kind != model.availableBuildingKinds.last {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private struct BuildingUpgradeRow: View {
+    let planet: Planet
+    let kind: BuildingKind
+    @ObservedObject var model: AppModel
+
+    private var cost: ResourceBundle? {
+        model.buildingUpgradeCost(for: planet, kind: kind)
+    }
+
+    private var canAfford: Bool {
+        cost.map { planet.resources.canAfford($0) } ?? false
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: kind.systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(kind.rawValue.displayName)
+                    .font(.headline)
+                    .lineLimit(1)
+
+                Text("Level \(model.buildingLevel(for: kind, on: planet)) -> \(model.nextBuildingLevel(for: kind, on: planet))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                ResourceCostLine(
+                    cost: cost,
+                    durationText: model.durationText(model.buildingUpgradeDuration(for: planet, kind: kind)),
+                    canAfford: canAfford
+                )
+            }
+
+            Spacer(minLength: 12)
+
+            Button {
+                model.startBuildingUpgrade(planetID: planet.id, kind: kind)
+            } label: {
+                Label("Upgrade", systemImage: "arrow.up.circle")
+            }
+            .controlSize(.small)
+            .buttonStyle(.bordered)
+            .disabled(!model.canStartBuildingUpgrade(planet: planet, kind: kind))
+        }
+        .padding(.vertical, 10)
     }
 }
 
@@ -447,24 +738,173 @@ private struct ResearchOverviewView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        let levels = model.playerFaction?.technology.levels ?? [:]
+        HStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Research")
+                        .font(.largeTitle.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
 
-        ManagementListView(
-            title: "Research",
-            emptyTitle: "No research levels recorded",
-            emptySystemImage: "atom",
-            isEmpty: levels.isEmpty,
-            model: model
-        ) {
-            ForEach(levels.keys.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { technology in
-                EventStyleRow(
-                    title: technology.rawValue.displayName,
-                    detail: "Level \(levels[technology, default: 0])",
-                    accessory: nil,
-                    systemImage: "atom"
+                    ResearchQueueView(model: model)
+                    ResearchControlsView(model: model)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            ActivityPanel(model: model)
+        }
+        .navigationTitle("Research")
+    }
+}
+
+private struct ResearchQueueView: View {
+    @ObservedObject var model: AppModel
+
+    private var queue: [ResearchQueueItem] {
+        model.playerFaction?.researchQueue ?? []
+    }
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(
+                    title: "Research Queue",
+                    detail: queue.isEmpty ? "Idle" : "\(queue.count) active"
                 )
+
+                if queue.isEmpty {
+                    QueueEmptyLine(title: "No active research", systemImage: "atom")
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(queue) { item in
+                            ResearchQueueRow(item: item, model: model)
+
+                            if item.id != queue.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                }
             }
         }
+        .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private struct ResearchQueueRow: View {
+    let item: ResearchQueueItem
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: item.technologyKind.systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(item.technologyKind.rawValue.displayName)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 12)
+
+                    Text(model.queueRemainingText(until: item.finishTime))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+
+                Text(model.researchQueueStatus(item))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                ProgressView(value: model.queueProgress(startTime: item.startTime, finishTime: item.finishTime))
+            }
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+private struct ResearchControlsView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(
+                    title: "Technologies",
+                    detail: model.playerFaction?.researchQueue.isEmpty == false ? "Queue busy" : "Ready"
+                )
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(model.availableResearchKinds, id: \.self) { technology in
+                        ResearchUpgradeRow(technology: technology, model: model)
+
+                        if technology != model.availableResearchKinds.last {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private struct ResearchUpgradeRow: View {
+    let technology: TechnologyKind
+    @ObservedObject var model: AppModel
+
+    private var cost: ResourceBundle? {
+        model.researchCost(for: technology)
+    }
+
+    private var canAfford: Bool {
+        model.canAffordResearch(technology)
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: technology.systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(technology.rawValue.displayName)
+                    .font(.headline)
+                    .lineLimit(1)
+
+                Text("Level \(model.researchLevel(for: technology)) -> \(model.nextResearchLevel(for: technology))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                ResourceCostLine(
+                    cost: cost,
+                    durationText: model.durationText(model.researchDuration(for: technology)),
+                    canAfford: canAfford
+                )
+            }
+
+            Spacer(minLength: 12)
+
+            Button {
+                model.startResearch(technology)
+            } label: {
+                Label("Research", systemImage: "play.circle")
+            }
+            .controlSize(.small)
+            .buttonStyle(.bordered)
+            .disabled(!model.canStartResearch(technology))
+        }
+        .padding(.vertical, 10)
     }
 }
 
@@ -559,6 +999,65 @@ private struct EventStyleRow: View {
             }
         }
         .padding(.vertical, 10)
+    }
+}
+
+private struct ResourceCostLine: View {
+    let cost: ResourceBundle?
+    let durationText: String
+    let canAfford: Bool
+
+    var body: some View {
+        if let cost {
+            HStack(spacing: 8) {
+                Text("M \(Formatters.wholeNumber(cost.metal))")
+                Text("C \(Formatters.wholeNumber(cost.crystal))")
+                Text("D \(Formatters.wholeNumber(cost.deuterium))")
+                Text("Time \(durationText)")
+            }
+            .font(.caption)
+            .foregroundStyle(canAfford ? Color.secondary : Color.red)
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+        } else {
+            Text("Rule unavailable")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .lineLimit(1)
+        }
+    }
+}
+
+private struct QueueEmptyLine: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct PanelSurface<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.16))
+            }
     }
 }
 
@@ -682,6 +1181,52 @@ private enum Formatters {
 private extension ResourceStorage {
     var resourceBundle: ResourceBundle {
         ResourceBundle(metal: metal, crystal: crystal, deuterium: deuterium)
+    }
+}
+
+private extension BuildingKind {
+    var systemImage: String {
+        switch self {
+        case .metalMine:
+            return "cube.box"
+        case .crystalMine:
+            return "diamond"
+        case .deuteriumSynthesizer:
+            return "drop"
+        case .solarPlant:
+            return "sun.max"
+        case .roboticsFactory:
+            return "gearshape.2"
+        case .shipyard:
+            return "wrench.and.screwdriver"
+        case .researchLab:
+            return "testtube.2"
+        }
+    }
+}
+
+private extension TechnologyKind {
+    var systemImage: String {
+        switch self {
+        case .espionage:
+            return "eye"
+        case .computer:
+            return "desktopcomputer"
+        case .weapons:
+            return "scope"
+        case .shielding:
+            return "shield"
+        case .armor:
+            return "hexagon"
+        case .energy:
+            return "bolt"
+        case .combustionDrive:
+            return "flame"
+        case .impulseDrive:
+            return "wave.3.forward"
+        case .hyperspaceDrive:
+            return "sparkles"
+        }
     }
 }
 
