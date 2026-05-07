@@ -3498,6 +3498,56 @@ func testUIHelpersExposeLockedReason() {
     )
 }
 
+func testFastSkirmishRuleSetBackfillsRequirementsWhenDecodingOlderJSON() throws {
+    let json = """
+    {
+      "id": "fast-skirmish-v1",
+      "displayName": "Fast Skirmish",
+      "baseTickInterval": 1,
+      "offlineChunkInterval": 300,
+      "buildingRules": {},
+      "researchRules": {},
+      "shipRules": {
+        "cruiser": {
+          "baseCost": { "metal": 20000, "crystal": 7000, "deuterium": 2000 },
+          "baseDuration": 45,
+          "aiPriorityWeight": 0.45,
+          "speed": 15000,
+          "cargoCapacity": 800,
+          "fuelCost": 300,
+          "attack": 400,
+          "shield": 50,
+          "hull": 27000
+        }
+      },
+      "defenseRules": {}
+    }
+    """.data(using: .utf8)!
+
+    let decoded = try JSONDecoder().decode(RuleSet.self, from: json)
+
+    requireEqual(
+        decoded.buildingRules[.shipyard]?.requirements,
+        RuleSet.fastSkirmish.buildingRules[.shipyard]?.requirements,
+        "Older fast-skirmish building rules should regain default requirements"
+    )
+    requireEqual(
+        decoded.researchRules[.hyperspaceDrive]?.requirements,
+        RuleSet.fastSkirmish.researchRules[.hyperspaceDrive]?.requirements,
+        "Older fast-skirmish research rules should regain default requirements"
+    )
+    requireEqual(
+        decoded.shipRules[.cruiser]?.requirements,
+        RuleSet.fastSkirmish.shipRules[.cruiser]?.requirements,
+        "Older fast-skirmish ship rules should regain default requirements"
+    )
+    requireEqual(
+        decoded.defenseRules[.plasmaTurret]?.requirements,
+        RuleSet.fastSkirmish.defenseRules[.plasmaTurret]?.requirements,
+        "Older fast-skirmish defense rules should regain default requirements"
+    )
+}
+
 func testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals() {
     let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
     let ai = makeAIEconomyFaction(index: 1, strategy: .miner)
@@ -4747,6 +4797,7 @@ testThreatMemoryChangesDefensivePosture()
 testShipBuildRequiresConfiguredTechnologyGate()
 testDefenseBuildRequiresConfiguredBuildingGate()
 testUIHelpersExposeLockedReason()
+try testFastSkirmishRuleSetBackfillsRequirementsWhenDecodingOlderJSON()
 testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals()
 testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent()
 testSimulationTickCompletesAlreadyDueConstructionBeforeProduction()

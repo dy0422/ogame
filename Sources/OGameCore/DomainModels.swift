@@ -1161,16 +1161,24 @@ public struct RuleSet: Codable, Equatable, Sendable {
         self.displayName = try container.decode(String.self, forKey: .displayName)
         self.baseTickInterval = try container.decode(TimeInterval.self, forKey: .baseTickInterval)
         self.offlineChunkInterval = try container.decode(TimeInterval.self, forKey: .offlineChunkInterval)
-        self.buildingRules = try container.decodeRawValueDictionaryIfPresent(BuildingKind.self, forKey: .buildingRules)
+        let decodedBuildingRules = try container.decodeRawValueDictionaryIfPresent(BuildingKind.self, forKey: .buildingRules)
             ?? RuleSet.fastSkirmish.buildingRules
-        self.researchRules = try container.decodeRawValueDictionaryIfPresent(TechnologyKind.self, forKey: .researchRules)
+        self.buildingRules = RuleSet.migrateBuildingRulesForRequirements(decodedBuildingRules, ruleSetID: id)
+        let decodedResearchRules = try container.decodeRawValueDictionaryIfPresent(TechnologyKind.self, forKey: .researchRules)
             ?? RuleSet.fastSkirmish.researchRules
+        self.researchRules = RuleSet.migrateResearchRulesForRequirements(decodedResearchRules, ruleSetID: id)
         let decodedShipRules = try container.decodeRawValueDictionaryIfPresent(ShipKind.self, forKey: .shipRules)
             ?? RuleSet.fastSkirmish.shipRules
-        self.shipRules = RuleSet.migrateShipRulesForFleetFields(decodedShipRules)
+        self.shipRules = RuleSet.migrateShipRulesForRequirements(
+            RuleSet.migrateShipRulesForFleetFields(decodedShipRules),
+            ruleSetID: id
+        )
         let decodedDefenseRules = try container.decodeRawValueDictionaryIfPresent(DefenseKind.self, forKey: .defenseRules)
             ?? RuleSet.fastSkirmish.defenseRules
-        self.defenseRules = RuleSet.migrateDefenseRulesForCombatFields(decodedDefenseRules)
+        self.defenseRules = RuleSet.migrateDefenseRulesForRequirements(
+            RuleSet.migrateDefenseRulesForCombatFields(decodedDefenseRules),
+            ruleSetID: id
+        )
     }
 
     public func encode(to encoder: Encoder) throws {

@@ -382,6 +382,102 @@ public struct DefenseRule: Codable, Equatable, Sendable {
 }
 
 extension RuleSet {
+    static func migrateBuildingRulesForRequirements(
+        _ buildingRules: [BuildingKind: BuildingRule],
+        ruleSetID: String
+    ) -> [BuildingKind: BuildingRule] {
+        guard ruleSetID == RuleSet.fastSkirmish.id else {
+            return buildingRules
+        }
+
+        var migratedRules = buildingRules
+
+        for (buildingKind, defaultRule) in RuleSet.fastSkirmishBuildingRules {
+            if var decodedRule = migratedRules[buildingKind] {
+                if decodedRule.requirements.isEmpty, !defaultRule.requirements.isEmpty {
+                    decodedRule.requirements = defaultRule.requirements
+                    migratedRules[buildingKind] = decodedRule
+                }
+            } else {
+                migratedRules[buildingKind] = defaultRule
+            }
+        }
+
+        return migratedRules
+    }
+
+    static func migrateResearchRulesForRequirements(
+        _ researchRules: [TechnologyKind: ResearchRule],
+        ruleSetID: String
+    ) -> [TechnologyKind: ResearchRule] {
+        guard ruleSetID == RuleSet.fastSkirmish.id else {
+            return researchRules
+        }
+
+        var migratedRules = researchRules
+
+        for (technologyKind, defaultRule) in RuleSet.fastSkirmishResearchRules {
+            if var decodedRule = migratedRules[technologyKind] {
+                if decodedRule.requirements.isEmpty, !defaultRule.requirements.isEmpty {
+                    decodedRule.requirements = defaultRule.requirements
+                    migratedRules[technologyKind] = decodedRule
+                }
+            } else {
+                migratedRules[technologyKind] = defaultRule
+            }
+        }
+
+        return migratedRules
+    }
+
+    static func migrateShipRulesForRequirements(
+        _ shipRules: [ShipKind: ShipRule],
+        ruleSetID: String
+    ) -> [ShipKind: ShipRule] {
+        guard ruleSetID == RuleSet.fastSkirmish.id else {
+            return shipRules
+        }
+
+        var migratedRules = shipRules
+
+        for (shipKind, defaultRule) in RuleSet.fastSkirmishShipRules {
+            if var decodedRule = migratedRules[shipKind] {
+                if decodedRule.requirements.isEmpty, !defaultRule.requirements.isEmpty {
+                    decodedRule.requirements = defaultRule.requirements
+                    migratedRules[shipKind] = decodedRule
+                }
+            } else {
+                migratedRules[shipKind] = defaultRule
+            }
+        }
+
+        return migratedRules
+    }
+
+    static func migrateDefenseRulesForRequirements(
+        _ defenseRules: [DefenseKind: DefenseRule],
+        ruleSetID: String
+    ) -> [DefenseKind: DefenseRule] {
+        guard ruleSetID == RuleSet.fastSkirmish.id else {
+            return defenseRules
+        }
+
+        var migratedRules = defenseRules
+
+        for (defenseKind, defaultRule) in RuleSet.fastSkirmishDefenseRules {
+            if var decodedRule = migratedRules[defenseKind] {
+                if decodedRule.requirements.isEmpty, !defaultRule.requirements.isEmpty {
+                    decodedRule.requirements = defaultRule.requirements
+                    migratedRules[defenseKind] = decodedRule
+                }
+            } else {
+                migratedRules[defenseKind] = defaultRule
+            }
+        }
+
+        return migratedRules
+    }
+
     static func migrateShipRulesForFleetFields(_ shipRules: [ShipKind: ShipRule]) -> [ShipKind: ShipRule] {
         var migratedRules = shipRules
 
