@@ -1,6 +1,6 @@
 import Foundation
 
-public struct Universe: Codable, Equatable, Sendable {
+public struct Universe: Codable, Equatable, Sendable, Identifiable {
     public var id: UniverseID
     public var name: String
     public var seed: UInt64
@@ -37,7 +37,7 @@ public struct Universe: Codable, Equatable, Sendable {
     }
 }
 
-public struct Faction: Codable, Equatable, Sendable {
+public struct Faction: Codable, Equatable, Sendable, Identifiable {
     public enum Kind: String, Codable, Sendable {
         case player
         case ai
@@ -91,7 +91,7 @@ public struct Coordinate: Codable, Equatable, Hashable, Sendable {
     }
 }
 
-public struct Planet: Codable, Equatable, Sendable {
+public struct Planet: Codable, Equatable, Sendable, Identifiable {
     public var id: PlanetID
     public var name: String
     public var coordinate: Coordinate
@@ -126,9 +126,52 @@ public struct Planet: Codable, Equatable, Sendable {
         self.shipInventory = shipInventory
         self.defenseInventory = defenseInventory
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case coordinate
+        case ownerID
+        case resources
+        case storage
+        case energy
+        case buildingLevels
+        case shipInventory
+        case defenseInventory
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.id = try container.decode(PlanetID.self, forKey: .id)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.coordinate = try container.decode(Coordinate.self, forKey: .coordinate)
+        self.ownerID = try container.decodeIfPresent(FactionID.self, forKey: .ownerID)
+        self.resources = try container.decode(ResourceBundle.self, forKey: .resources)
+        self.storage = try container.decode(ResourceStorage.self, forKey: .storage)
+        self.energy = try container.decode(EnergyState.self, forKey: .energy)
+        self.buildingLevels = try container.decodeRawValueDictionary(BuildingKind.self, forKey: .buildingLevels)
+        self.shipInventory = try container.decodeRawValueDictionary(ShipKind.self, forKey: .shipInventory)
+        self.defenseInventory = try container.decodeRawValueDictionary(DefenseKind.self, forKey: .defenseInventory)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(coordinate, forKey: .coordinate)
+        try container.encodeIfPresent(ownerID, forKey: .ownerID)
+        try container.encode(resources, forKey: .resources)
+        try container.encode(storage, forKey: .storage)
+        try container.encode(energy, forKey: .energy)
+        try container.encodeRawValueDictionary(buildingLevels, forKey: .buildingLevels)
+        try container.encodeRawValueDictionary(shipInventory, forKey: .shipInventory)
+        try container.encodeRawValueDictionary(defenseInventory, forKey: .defenseInventory)
+    }
 }
 
-public struct Fleet: Codable, Equatable, Sendable {
+public struct Fleet: Codable, Equatable, Sendable, Identifiable {
     public enum Mission: String, Codable, Sendable {
         case transport
         case colonize
@@ -183,6 +226,52 @@ public struct Fleet: Codable, Equatable, Sendable {
         self.returnTime = returnTime
         self.phase = phase
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case ownerID
+        case mission
+        case origin
+        case target
+        case ships
+        case cargo
+        case launchTime
+        case arrivalTime
+        case returnTime
+        case phase
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.id = try container.decode(FleetID.self, forKey: .id)
+        self.ownerID = try container.decode(FactionID.self, forKey: .ownerID)
+        self.mission = try container.decode(Mission.self, forKey: .mission)
+        self.origin = try container.decode(Coordinate.self, forKey: .origin)
+        self.target = try container.decode(Coordinate.self, forKey: .target)
+        self.ships = try container.decodeRawValueDictionary(ShipKind.self, forKey: .ships)
+        self.cargo = try container.decode(ResourceBundle.self, forKey: .cargo)
+        self.launchTime = try container.decode(TimeInterval.self, forKey: .launchTime)
+        self.arrivalTime = try container.decode(TimeInterval.self, forKey: .arrivalTime)
+        self.returnTime = try container.decode(TimeInterval.self, forKey: .returnTime)
+        self.phase = try container.decode(Phase.self, forKey: .phase)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        try container.encode(id, forKey: .id)
+        try container.encode(ownerID, forKey: .ownerID)
+        try container.encode(mission, forKey: .mission)
+        try container.encode(origin, forKey: .origin)
+        try container.encode(target, forKey: .target)
+        try container.encodeRawValueDictionary(ships, forKey: .ships)
+        try container.encode(cargo, forKey: .cargo)
+        try container.encode(launchTime, forKey: .launchTime)
+        try container.encode(arrivalTime, forKey: .arrivalTime)
+        try container.encode(returnTime, forKey: .returnTime)
+        try container.encode(phase, forKey: .phase)
+    }
 }
 
 public struct ResearchState: Codable, Equatable, Sendable {
@@ -190,6 +279,22 @@ public struct ResearchState: Codable, Equatable, Sendable {
 
     public init(levels: [TechnologyKind: Int] = [:]) {
         self.levels = levels
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case levels
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.levels = try container.decodeRawValueDictionary(TechnologyKind.self, forKey: .levels)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        try container.encodeRawValueDictionary(levels, forKey: .levels)
     }
 }
 
@@ -280,4 +385,61 @@ public enum DefenseKind: String, Codable, CaseIterable, Sendable {
     case gaussCannon
     case ionCannon
     case plasmaTurret
+}
+
+private struct RawValueCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+
+    init(_ stringValue: String) {
+        self.stringValue = stringValue
+        self.intValue = nil
+    }
+
+    init?(stringValue: String) {
+        self.init(stringValue)
+    }
+
+    init?(intValue: Int) {
+        return nil
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeRawValueDictionary<EnumKey>(
+        _ enumKeyType: EnumKey.Type,
+        forKey key: Key
+    ) throws -> [EnumKey: Int] where EnumKey: Hashable & RawRepresentable, EnumKey.RawValue == String {
+        let nestedContainer = try nestedContainer(keyedBy: RawValueCodingKey.self, forKey: key)
+        var decoded: [EnumKey: Int] = [:]
+
+        for rawKey in nestedContainer.allKeys {
+            guard let enumKey = EnumKey(rawValue: rawKey.stringValue) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: rawKey,
+                    in: nestedContainer,
+                    debugDescription: "Unknown \(EnumKey.self) key '\(rawKey.stringValue)'"
+                )
+            }
+
+            decoded[enumKey] = try nestedContainer.decode(Int.self, forKey: rawKey)
+        }
+
+        return decoded
+    }
+}
+
+private extension KeyedEncodingContainer {
+    mutating func encodeRawValueDictionary<EnumKey>(
+        _ dictionary: [EnumKey: Int],
+        forKey key: Key
+    ) throws where EnumKey: Hashable & RawRepresentable, EnumKey.RawValue == String {
+        var nestedContainer = nestedContainer(keyedBy: RawValueCodingKey.self, forKey: key)
+
+        for enumKey in dictionary.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            if let value = dictionary[enumKey] {
+                try nestedContainer.encode(value, forKey: RawValueCodingKey(enumKey.rawValue))
+            }
+        }
+    }
 }
