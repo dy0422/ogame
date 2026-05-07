@@ -201,7 +201,7 @@ public struct Faction: Codable, Equatable, Sendable, Identifiable {
         self.strategy = try container.decode(Strategy.self, forKey: .strategy)
         self.technology = try container.decode(ResearchState.self, forKey: .technology)
         self.ownedPlanetIDs = try container.decode([PlanetID].self, forKey: .ownedPlanetIDs)
-        self.researchQueue = try container.decodeIfPresent([ResearchQueueItem].self, forKey: .researchQueue) ?? []
+        self.researchQueue = try container.decodeIfPresentStrict([ResearchQueueItem].self, forKey: .researchQueue) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -297,7 +297,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         self.storage = try container.decode(ResourceStorage.self, forKey: .storage)
         self.energy = try container.decode(EnergyState.self, forKey: .energy)
         self.buildingLevels = try container.decodeRawValueDictionary(BuildingKind.self, forKey: .buildingLevels)
-        self.buildQueue = try container.decodeIfPresent([BuildQueueItem].self, forKey: .buildQueue) ?? []
+        self.buildQueue = try container.decodeIfPresentStrict([BuildQueueItem].self, forKey: .buildQueue) ?? []
         self.shipInventory = try container.decodeRawValueDictionary(ShipKind.self, forKey: .shipInventory)
         self.defenseInventory = try container.decodeRawValueDictionary(DefenseKind.self, forKey: .defenseInventory)
     }
@@ -629,6 +629,17 @@ private extension KeyedDecodingContainer {
         }
 
         return try decodeRawValueDictionary(enumKeyType, forKey: key)
+    }
+
+    func decodeIfPresentStrict<Value>(
+        _ type: Value.Type,
+        forKey key: Key
+    ) throws -> Value? where Value: Decodable {
+        guard contains(key) else {
+            return nil
+        }
+
+        return try decode(type, forKey: key)
     }
 }
 

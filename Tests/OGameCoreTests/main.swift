@@ -399,6 +399,42 @@ func testQueueFieldsDefaultWhenDecodingOlderUniverseJSON() throws {
     requireEqual(decoded.ruleSet.buildingRules, RuleSet.fastSkirmish.buildingRules, "Older universe JSON should keep RuleSet defaults")
 }
 
+func testQueueFieldsRejectExplicitNullWhenDecodingJSON() {
+    let factionWithNullResearchQueueJSON = """
+    {
+      "id": { "rawValue": "00000000-0000-0000-0000-0000000000a3" },
+      "name": "Null Queue Player",
+      "kind": "player",
+      "strategy": "balanced",
+      "technology": { "levels": {} },
+      "ownedPlanetIDs": [],
+      "researchQueue": null
+    }
+    """
+    let planetWithNullBuildQueueJSON = """
+    {
+      "id": { "rawValue": "00000000-0000-0000-0000-0000000000a4" },
+      "name": "Null Queue Planet",
+      "coordinate": { "galaxy": 1, "system": 1, "position": 4 },
+      "ownerID": null,
+      "resources": { "metal": 100, "crystal": 50, "deuterium": 25 },
+      "storage": { "metal": 10000, "crystal": 10000, "deuterium": 10000 },
+      "energy": { "produced": 20, "used": 8 },
+      "buildingLevels": { "metalMine": 2 },
+      "buildQueue": null,
+      "shipInventory": { "smallCargo": 1 },
+      "defenseInventory": { "rocketLauncher": 3 }
+    }
+    """
+
+    requireThrowsDecodingError("Explicit null researchQueue should fail decoding") {
+        _ = try JSONDecoder().decode(Faction.self, from: Data(factionWithNullResearchQueueJSON.utf8))
+    }
+    requireThrowsDecodingError("Explicit null buildQueue should fail decoding") {
+        _ = try JSONDecoder().decode(Planet.self, from: Data(planetWithNullBuildQueueJSON.utf8))
+    }
+}
+
 func testUniverseModelRoundTripsThroughJSON() throws {
     let player = FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000010")!)
     let homeworld = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000020")!)
@@ -714,6 +750,7 @@ try testBuildQueueItemRoundTripsThroughJSON()
 try testResearchQueueItemRoundTripsThroughJSON()
 try testPlanetFactionAndUniverseQueuesRoundTripThroughJSON()
 try testQueueFieldsDefaultWhenDecodingOlderUniverseJSON()
+testQueueFieldsRejectExplicitNullWhenDecodingJSON()
 try testUniverseModelRoundTripsThroughJSON()
 try testPlanetEnumDictionaryDecodesRawValueKeysAndRejectsUnknownKeys()
 testSeededGeneratorProducesDeterministicDistinctSequences()
