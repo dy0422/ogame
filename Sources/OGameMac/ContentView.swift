@@ -18,6 +18,10 @@ struct ContentView: View {
 private enum SidebarDestination: Hashable {
     case dashboard
     case fleets
+    case starMap
+    case rankings
+    case victory
+    case relations
     case research
     case planet(PlanetID)
 }
@@ -37,6 +41,20 @@ private struct SidebarView: View {
 
                 Label("Research", systemImage: "atom")
                     .tag(SidebarDestination.research)
+            }
+
+            Section("Strategy") {
+                Label("Star Map", systemImage: "map")
+                    .tag(SidebarDestination.starMap)
+
+                Label("Rankings", systemImage: "list.number")
+                    .tag(SidebarDestination.rankings)
+
+                Label("Victory", systemImage: "flag.checkered")
+                    .tag(SidebarDestination.victory)
+
+                Label("Relations", systemImage: "person.2.wave.2")
+                    .tag(SidebarDestination.relations)
             }
 
             Section("Planets") {
@@ -89,6 +107,14 @@ private struct DetailView: View {
             }
         case .fleets:
             FleetOverviewView(model: model)
+        case .starMap:
+            StarMapView(model: model)
+        case .rankings:
+            RankingsView(model: model)
+        case .victory:
+            VictoryProgressView(model: model)
+        case .relations:
+            FactionRelationsView(model: model)
         case .research:
             ResearchOverviewView(model: model)
         }
@@ -1619,6 +1645,623 @@ private struct ExplorationEventReportRow: View {
     }
 }
 
+private struct StarMapView: View {
+    @ObservedObject var model: AppModel
+
+    private var allPlanets: [StarMapPlanetSummary] {
+        model.starMapSections.flatMap(\.planets)
+    }
+
+    private var debrisSystemCount: Int {
+        allPlanets.filter { $0.debrisTotal > 0 }.count
+    }
+
+    private var activeFleetTouchCount: Int {
+        allPlanets.reduce(0) { $0 + $1.friendlyFleetCount + $1.otherFleetCount }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Star Map")
+                        .font(.largeTitle.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    PanelSurface {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 150), alignment: .topLeading)],
+                            alignment: .leading,
+                            spacing: 12
+                        ) {
+                            StrategicMetric(title: "Planets", value: Formatters.wholeNumber(Double(allPlanets.count)))
+                            StrategicMetric(title: "Owned", value: Formatters.wholeNumber(Double(model.playerPlanets.count)))
+                            StrategicMetric(title: "Debris", value: Formatters.wholeNumber(Double(debrisSystemCount)))
+                            StrategicMetric(title: "Fleet Marks", value: Formatters.wholeNumber(Double(activeFleetTouchCount)))
+                        }
+                    }
+                    .frame(maxWidth: 860, alignment: .leading)
+
+                    ForEach(model.starMapSections) { section in
+                        StarMapSectionView(section: section)
+                    }
+
+                    ExplorationSummaryPanel(model: model)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            ActivityPanel(model: model)
+        }
+        .navigationTitle("Star Map")
+    }
+}
+
+private struct StarMapSectionView: View {
+    let section: StarMapPlanetSection
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: section.kind.title, detail: "\(section.planets.count) systems")
+
+                if section.planets.isEmpty {
+                    QueueEmptyLine(title: "No systems in this section", systemImage: section.kind.systemImage)
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(section.planets) { summary in
+                            StarMapPlanetRow(summary: summary)
+
+                            if summary.id != section.planets.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct StarMapPlanetRow: View {
+    let summary: StarMapPlanetSummary
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .foregroundStyle(iconTint)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(summary.displayName)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+
+                    Text(summary.planet.coordinate.displayText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+
+                    Spacer(minLength: 12)
+
+                    Text(summary.ownerName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 86), alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 6
+                ) {
+                    StrategicChip(title: ownershipTitle, systemImage: systemImage, tint: iconTint)
+
+                    if summary.debrisTotal > 0 {
+                        StrategicChip(
+                            title: "Debris \(Formatters.wholeNumber(summary.debrisTotal))",
+                            systemImage: "sparkles",
+                            tint: .orange
+                        )
+                    }
+
+                    if summary.friendlyFleetCount > 0 {
+                        StrategicChip(
+                            title: "Fleet \(summary.friendlyFleetCount)",
+                            systemImage: "paperplane",
+                            tint: .blue
+                        )
+                    }
+
+                    if summary.otherFleetCount > 0 {
+                        StrategicChip(
+                            title: "Contact \(summary.otherFleetCount)",
+                            systemImage: "scope",
+                            tint: .red
+                        )
+                    }
+
+                    StrategicChip(
+                        title: summary.isExploredByPlayer ? "Explored" : "Unscouted",
+                        systemImage: summary.isExploredByPlayer ? "checkmark.seal" : "questionmark.circle",
+                        tint: summary.isExploredByPlayer ? .green : .secondary
+                    )
+                }
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    private var ownershipTitle: String {
+        if summary.isPlayerOwned {
+            return "Owned"
+        }
+
+        if !summary.isVisible {
+            return "Unknown"
+        }
+
+        if summary.ownerKind == .ai {
+            return "AI"
+        }
+
+        return "Neutral"
+    }
+
+    private var systemImage: String {
+        if summary.isPlayerOwned {
+            return "house.and.flag"
+        }
+
+        if !summary.isVisible {
+            return "questionmark.circle"
+        }
+
+        if summary.ownerKind == .ai {
+            return "cpu"
+        }
+
+        return "circle.dashed"
+    }
+
+    private var iconTint: Color {
+        if summary.isPlayerOwned {
+            return .blue
+        }
+
+        if !summary.isVisible {
+            return .secondary
+        }
+
+        if summary.ownerKind == .ai {
+            return .red
+        }
+
+        return .secondary
+    }
+}
+
+private struct ExplorationSummaryPanel: View {
+    @ObservedObject var model: AppModel
+
+    private var summaries: [ExplorationSummary] {
+        Array(model.playerExplorationSummaries.prefix(8))
+    }
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(
+                    title: "Exploration Intel",
+                    detail: summaries.isEmpty ? "No records" : "\(summaries.count) recent"
+                )
+
+                if summaries.isEmpty {
+                    QueueEmptyLine(title: "No explored systems recorded", systemImage: "sparkles")
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(summaries) { summary in
+                            ExplorationSummaryRow(summary: summary)
+
+                            if summary.id != summaries.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct ExplorationSummaryRow: View {
+    let summary: ExplorationSummary
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(summary.planet.name)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    Text(summary.planet.coordinate.displayText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+
+                    Spacer(minLength: 12)
+
+                    Text("T+\(Formatters.wholeSeconds(summary.exploredAt))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+
+                Text("Owner \(summary.ownerName)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                StrategicResourceLine(title: "Reward", resources: summary.reward)
+                StrategicResourceLine(title: "Resources", resources: summary.discoveredResources)
+                StrategicResourceLine(title: "Debris", resources: summary.discoveredDebris)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+private struct RankingsView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Rankings")
+                        .font(.largeTitle.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    PanelSurface {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionTitle(title: "Faction Standings", detail: "\(model.factionRankings.count) factions")
+
+                            if model.factionRankings.isEmpty {
+                                QueueEmptyLine(title: "No rankings available", systemImage: "list.number")
+                            } else {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    ForEach(model.factionRankings) { ranking in
+                                        RankingRow(ranking: ranking, isPlayer: ranking.factionID == model.universe.playerFactionID)
+
+                                        if ranking.id != model.factionRankings.last?.id {
+                                            Divider()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: 920, alignment: .leading)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            ActivityPanel(model: model)
+        }
+        .navigationTitle("Rankings")
+    }
+}
+
+private struct RankingRow: View {
+    let ranking: FactionScore
+    let isPlayer: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text("#\(ranking.rank)")
+                .font(.title3.monospacedDigit().weight(.semibold))
+                .frame(width: 44, alignment: .leading)
+                .lineLimit(1)
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(ranking.factionName)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    if isPlayer {
+                        StrategicChip(title: "Player", systemImage: "person.crop.circle", tint: .blue)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Text(Formatters.wholeNumber(ranking.totalScore))
+                        .font(.headline.monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+
+                ProgressView(value: ranking.victoryProgress)
+                    .tint(isPlayer ? Color.blue : Color.secondary)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 110), alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    StrategicMetric(title: "Economy", value: Formatters.wholeNumber(ranking.economyScore))
+                    StrategicMetric(title: "Fleet", value: Formatters.wholeNumber(ranking.fleetScore))
+                    StrategicMetric(title: "Research", value: Formatters.wholeNumber(ranking.researchScore))
+                    StrategicMetric(title: "Planets", value: Formatters.wholeNumber(ranking.planetScore))
+                    StrategicMetric(title: "Defense", value: Formatters.wholeNumber(ranking.defenseScore))
+                }
+            }
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+private struct VictoryProgressView: View {
+    @ObservedObject var model: AppModel
+
+    private var playerRoutes: [VictoryProgressSummary] {
+        model.victoryProgressSummaries.filter(\.isPlayer)
+    }
+
+    private var leadingRoutes: [VictoryProgressSummary] {
+        Array(model.victoryProgressSummaries.sorted { lhs, rhs in
+            if lhs.progress != rhs.progress {
+                return lhs.progress > rhs.progress
+            }
+            if lhs.factionName != rhs.factionName {
+                return lhs.factionName < rhs.factionName
+            }
+            return lhs.route.rawValue < rhs.route.rawValue
+        }.prefix(8))
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Victory")
+                        .font(.largeTitle.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    VictoryBannerView(summary: model.victoryBannerSummary)
+
+                    VictoryRoutePanel(title: "Player Routes", routes: playerRoutes)
+                    VictoryRoutePanel(title: "Route Leaders", routes: leadingRoutes)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            ActivityPanel(model: model)
+        }
+        .navigationTitle("Victory")
+    }
+}
+
+private struct VictoryBannerView: View {
+    let summary: VictoryBannerSummary
+
+    var body: some View {
+        PanelSurface {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: summary.isComplete ? "flag.checkered" : "flag")
+                    .foregroundStyle(summary.isComplete ? Color.green : Color.blue)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(summary.title)
+                        .font(.title2.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Text(summary.detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct VictoryRoutePanel: View {
+    let title: String
+    let routes: [VictoryProgressSummary]
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: title, detail: routes.isEmpty ? "No progress" : "\(routes.count) routes")
+
+                if routes.isEmpty {
+                    QueueEmptyLine(title: "No route progress available", systemImage: "flag")
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(routes) { route in
+                            VictoryRouteRow(route: route)
+
+                            if route.id != routes.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct VictoryRouteRow: View {
+    let route: VictoryProgressSummary
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: route.route.systemImage)
+                .foregroundStyle(route.isPlayer ? Color.blue : Color.secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(route.route.rawValue.displayName)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    Text(route.factionName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 12)
+
+                    Text(Formatters.percent(route.progress))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                ProgressView(value: route.progress)
+                    .tint(route.isPlayer ? Color.blue : Color.secondary)
+
+                Text("\(Formatters.wholeNumber(route.currentValue)) / \(Formatters.wholeNumber(route.targetValue))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+private struct FactionRelationsView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Relations")
+                        .font(.largeTitle.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    PanelSurface {
+                        VStack(alignment: .leading, spacing: 12) {
+                            SectionTitle(title: "Faction Relations", detail: "\(model.relationSummaries.count) contacts")
+
+                            if model.relationSummaries.isEmpty {
+                                QueueEmptyLine(title: "No faction contacts available", systemImage: "person.2.wave.2")
+                            } else {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    ForEach(model.relationSummaries) { summary in
+                                        FactionRelationRow(summary: summary)
+
+                                        if summary.id != model.relationSummaries.last?.id {
+                                            Divider()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: 860, alignment: .leading)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            ActivityPanel(model: model)
+        }
+        .navigationTitle("Relations")
+    }
+}
+
+private struct FactionRelationRow: View {
+    let summary: FactionRelationSummary
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: summary.posture.systemImage)
+                .foregroundStyle(summary.posture.tint)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(summary.factionName)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    StrategicChip(
+                        title: summary.posture.rawValue.displayName,
+                        systemImage: summary.posture.systemImage,
+                        tint: summary.posture.tint
+                    )
+
+                    Spacer(minLength: 12)
+
+                    Text(summary.perspective)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Text(summary.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 100), alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    StrategicMetric(title: "Strategy", value: summary.strategy.rawValue.displayName)
+                    StrategicMetric(title: "Threat", value: "\(summary.threatScore)")
+                    StrategicMetric(title: "Attacks", value: "\(summary.attackCount)")
+                    StrategicMetric(title: "Last", value: lastInteractionText)
+                }
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    private var lastInteractionText: String {
+        summary.lastInteractionTime > 0 ? "T+\(Formatters.wholeSeconds(summary.lastInteractionTime))" : "None"
+    }
+}
+
 private struct ResearchOverviewView: View {
     @ObservedObject var model: AppModel
 
@@ -1887,6 +2530,62 @@ private struct EventStyleRow: View {
     }
 }
 
+private struct StrategicMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text(value)
+                .font(.callout.monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct StrategicChip: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
+private struct StrategicResourceLine: View {
+    let title: String
+    let resources: ResourceBundle
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .foregroundStyle(.secondary)
+
+            Text("M \(Formatters.wholeNumber(resources.metal))")
+            Text("C \(Formatters.wholeNumber(resources.crystal))")
+            Text("D \(Formatters.wholeNumber(resources.deuterium))")
+        }
+        .font(.caption)
+        .monospacedDigit()
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+    }
+}
+
 private struct ResourceCostLine: View {
     let cost: ResourceBundle?
     let durationText: String
@@ -2061,6 +2760,14 @@ private enum Formatters {
         let formatted = wholeNumber(abs(value))
         return value >= 0 ? "+\(formatted)" : "-\(formatted)"
     }
+
+    static func percent(_ value: Double) -> String {
+        guard value.isFinite else {
+            return "unknown"
+        }
+
+        return value.formatted(.percent.precision(.fractionLength(0)))
+    }
 }
 
 private extension ResourceStorage {
@@ -2181,6 +2888,49 @@ private extension Fleet.Mission {
             return "sparkles"
         case .returning:
             return "arrow.uturn.backward"
+        }
+    }
+}
+
+private extension VictoryRoute {
+    var systemImage: String {
+        switch self {
+        case .economy:
+            return "chart.line.uptrend.xyaxis"
+        case .technology:
+            return "atom"
+        case .domination:
+            return "scope"
+        case .exploration:
+            return "sparkles"
+        }
+    }
+}
+
+private extension RelationPosture {
+    var systemImage: String {
+        switch self {
+        case .neutral:
+            return "circle"
+        case .wary:
+            return "exclamationmark.triangle"
+        case .hostile:
+            return "target"
+        case .pressured:
+            return "shield.lefthalf.filled"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .neutral:
+            return .secondary
+        case .wary:
+            return .orange
+        case .hostile:
+            return .red
+        case .pressured:
+            return .purple
         }
     }
 }

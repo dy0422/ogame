@@ -121,6 +121,201 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var starMapSections: [StarMapPlanetSection] {
+        let factionNamesByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.name) })
+        let factionKindsByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.kind) })
+        let playerOwnedPlanetIDs = Set(playerFaction?.ownedPlanetIDs ?? [])
+        let exploredPlanetIDs = Set(
+            StrategicEngine
+                .explorationRecords(for: universe.playerFactionID, in: universe)
+                .map(\.targetPlanetID)
+        )
+
+        let summaries = universe.planets
+            .sorted(by: Self.sortPlanetsByCoordinate)
+            .map { planet in
+                let isPlayerOwned = planet.ownerID == universe.playerFactionID || playerOwnedPlanetIDs.contains(planet.id)
+                let isExploredByPlayer = exploredPlanetIDs.contains(planet.id)
+                let isVisible = isPlayerOwned || isExploredByPlayer
+                let touchingFleets = isVisible ? universe.fleets.filter { fleet in
+                    fleet.phase != .completed && Self.fleet(fleet, touches: planet.id)
+                } : []
+                let friendlyFleetCount = touchingFleets.filter { $0.ownerID == universe.playerFactionID }.count
+                let otherFleetCount = touchingFleets.count - friendlyFleetCount
+                let ownerName = isPlayerOwned
+                    ? (playerFaction?.name ?? "Player")
+                    : isVisible ? planet.ownerID.flatMap { factionNamesByID[$0] } ?? "Neutral" : "Unknown"
+                let ownerKind = isPlayerOwned
+                    ? Faction.Kind.player
+                    : isVisible ? planet.ownerID.flatMap { factionKindsByID[$0] } : nil
+
+                return StarMapPlanetSummary(
+                    planet: planet,
+                    displayName: isVisible ? planet.name : "Unknown Sector",
+                    ownerName: ownerName,
+                    ownerKind: ownerKind,
+                    isPlayerOwned: isPlayerOwned,
+                    isExploredByPlayer: isExploredByPlayer,
+                    isVisible: isVisible,
+                    debrisTotal: isVisible ? planet.debrisField.totalAmountForDisplay : 0,
+                    friendlyFleetCount: friendlyFleetCount,
+                    otherFleetCount: otherFleetCount
+                )
+            }
+
+        return StarMapPlanetSection.Kind.allCases.map { kind in
+            StarMapPlanetSection(
+                kind: kind,
+                planets: summaries.filter { summary in
+                    switch kind {
+                    case .player:
+                        return summary.isPlayerOwned
+                    case .ai:
+                        return summary.isVisible && summary.ownerKind == .ai
+                    case .neutral:
+                        return summary.isVisible && summary.ownerKind == nil
+                    case .unknown:
+                        return !summary.isVisible
+                    }
+                }
+            )
+        }
+    }
+
+    var factionRankings: [FactionScore] {
+        let rankings = universe.rankings.isEmpty ? StrategicEngine.rankings(in: universe) : universe.rankings
+        return rankings.sorted { lhs, rhs in
+            if lhs.rank != rhs.rank {
+                return lhs.rank < rhs.rank
+            }
+
+            return lhs.totalScore > rhs.totalScore
+        }
+    }
+
+    var victoryBannerSummary: VictoryBannerSummary {
+        if let winningFactionID = universe.victoryState.winningFactionID {
+            let factionName = factionName(for: winningFactionID)
+            let routeName = universe.victoryState.winningRoute?.rawValue.displayName ?? "Strategic"
+            let achievedText = universe.victoryState.achievedAt.map { " at T+\(Self.formattedWholeSeconds($0))" } ?? ""
+            return VictoryBannerSummary(
+                title: "\(factionName) victory secured",
+                detail: "\(routeName) route completed\(achievedText).",
+                isComplete: true
+            )
+        }
+
+        if let leadingProgress = victoryProgressSummaries
+            .filter(\.isPlayer)
+            .max(by: { lhs, rhs in lhs.progress < rhs.progress })
+        {
+            return VictoryBannerSummary(
+                title: "Victory routes active",
+                detail: "\(leadingProgress.route.rawValue.displayName) leads at \(Self.formattedPercent(leadingProgress.progress)).",
+                isComplete: false
+            )
+        }
+
+        return VictoryBannerSummary(
+            title: "Victory routes active",
+            detail: "Strategic progress will appear as factions develop.",
+            isComplete: false
+        )
+    }
+
+    var victoryProgressSummaries: [VictoryProgressSummary] {
+        universe.victoryState.progress.map { progress in
+            VictoryProgressSummary(
+                factionID: progress.factionID,
+                factionName: factionName(for: progress.factionID),
+                isPlayer: progress.factionID == universe.playerFactionID,
+                route: progress.route,
+                currentValue: progress.currentValue,
+                targetValue: progress.targetValue,
+                progress: progress.progress
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.isPlayer != rhs.isPlayer {
+                return lhs.isPlayer
+            }
+            if lhs.progress != rhs.progress {
+                return lhs.progress > rhs.progress
+            }
+            if lhs.factionName != rhs.factionName {
+                return lhs.factionName < rhs.factionName
+            }
+            return lhs.route.rawValue < rhs.route.rawValue
+        }
+    }
+
+    var relationSummaries: [FactionRelationSummary] {
+        let playerRelationByFactionID = Dictionary(
+            uniqueKeysWithValues: (playerFaction?.relations ?? []).map { ($0.factionID, $0) }
+        )
+
+        return universe.factions
+            .filter { $0.id != universe.playerFactionID }
+            .map { faction in
+                let directRelation = playerRelationByFactionID[faction.id]
+                let relation = directRelation ?? FactionRelation(factionID: faction.id)
+                let perspective = directRelation == nil ? "No contact" : "Our memory"
+                let summary = directRelation?.summary ?? "No player-side contact recorded."
+
+                return FactionRelationSummary(
+                    factionID: faction.id,
+                    factionName: faction.name,
+                    kind: faction.kind,
+                    strategy: faction.strategy,
+                    posture: relation.posture,
+                    threatScore: relation.threatScore,
+                    attackCount: relation.attackCount,
+                    lastInteractionTime: relation.lastInteractionTime,
+                    summary: summary,
+                    perspective: perspective
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.posture.severity != rhs.posture.severity {
+                    return lhs.posture.severity > rhs.posture.severity
+                }
+                if lhs.threatScore != rhs.threatScore {
+                    return lhs.threatScore > rhs.threatScore
+                }
+                return lhs.factionName < rhs.factionName
+            }
+    }
+
+    var playerExplorationSummaries: [ExplorationSummary] {
+        StrategicEngine
+            .explorationRecords(for: universe.playerFactionID, in: universe)
+            .sorted { lhs, rhs in
+                if lhs.exploredAt != rhs.exploredAt {
+                    return lhs.exploredAt > rhs.exploredAt
+                }
+
+                return lhs.targetPlanetID.rawValue.uuidString < rhs.targetPlanetID.rawValue.uuidString
+            }
+            .compactMap { record in
+                guard let planet = universe.planets.first(where: { $0.id == record.targetPlanetID }) else {
+                    return nil
+                }
+
+                let ownerName = record.discoveredOwnerID.map(factionName(for:)) ??
+                    (record.discoveredNeutral ? "Neutral" : "Unknown")
+
+                return ExplorationSummary(
+                    planet: planet,
+                    exploredAt: record.exploredAt,
+                    ownerName: ownerName,
+                    reward: record.reward,
+                    discoveredResources: record.discoveredResources,
+                    discoveredDebris: record.discoveredDebris,
+                    discoveredNeutral: record.discoveredNeutral
+                )
+            }
+    }
+
     var recentReports: [Report] {
         universe.reports
             .filter { report in
@@ -1088,6 +1283,28 @@ final class AppModel: ObservableObject {
             playerFaction?.ownedPlanetIDs.contains(planet.id) == true
     }
 
+    private func factionName(for factionID: FactionID) -> String {
+        universe.factions.first { $0.id == factionID }?.name ?? "Unknown faction"
+    }
+
+    private static func sortPlanetsByCoordinate(_ lhs: Planet, _ rhs: Planet) -> Bool {
+        if lhs.coordinate.galaxy != rhs.coordinate.galaxy {
+            return lhs.coordinate.galaxy < rhs.coordinate.galaxy
+        }
+        if lhs.coordinate.system != rhs.coordinate.system {
+            return lhs.coordinate.system < rhs.coordinate.system
+        }
+        if lhs.coordinate.position != rhs.coordinate.position {
+            return lhs.coordinate.position < rhs.coordinate.position
+        }
+
+        return lhs.name < rhs.name
+    }
+
+    private static func fleet(_ fleet: Fleet, touches planetID: PlanetID) -> Bool {
+        fleet.originPlanetID == planetID || fleet.targetPlanetID == planetID
+    }
+
     private func fleetNextTime(_ fleet: Fleet) -> TimeInterval {
         switch fleet.phase {
         case .outbound, .holding:
@@ -1159,6 +1376,125 @@ final class AppModel: ObservableObject {
         formatter.zeroFormattingBehavior = .dropAll
         return formatter
     }()
+}
+
+struct StarMapPlanetSection: Identifiable {
+    enum Kind: String, CaseIterable {
+        case player
+        case ai
+        case neutral
+        case unknown
+
+        var title: String {
+            switch self {
+            case .player:
+                return "Owned Worlds"
+            case .ai:
+                return "AI Worlds"
+            case .neutral:
+                return "Neutral Systems"
+            case .unknown:
+                return "Unknown Sectors"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .player:
+                return "house.and.flag"
+            case .ai:
+                return "cpu"
+            case .neutral:
+                return "circle.dashed"
+            case .unknown:
+                return "questionmark.circle"
+            }
+        }
+    }
+
+    let kind: Kind
+    let planets: [StarMapPlanetSummary]
+
+    var id: Kind { kind }
+}
+
+struct StarMapPlanetSummary: Identifiable {
+    let planet: Planet
+    let displayName: String
+    let ownerName: String
+    let ownerKind: Faction.Kind?
+    let isPlayerOwned: Bool
+    let isExploredByPlayer: Bool
+    let isVisible: Bool
+    let debrisTotal: Double
+    let friendlyFleetCount: Int
+    let otherFleetCount: Int
+
+    var id: PlanetID { planet.id }
+}
+
+struct VictoryBannerSummary {
+    let title: String
+    let detail: String
+    let isComplete: Bool
+}
+
+struct VictoryProgressSummary: Identifiable {
+    let factionID: FactionID
+    let factionName: String
+    let isPlayer: Bool
+    let route: VictoryRoute
+    let currentValue: Double
+    let targetValue: Double
+    let progress: Double
+
+    var id: String {
+        "\(factionID.rawValue.uuidString)-\(route.rawValue)"
+    }
+}
+
+struct FactionRelationSummary: Identifiable {
+    let factionID: FactionID
+    let factionName: String
+    let kind: Faction.Kind
+    let strategy: Faction.Strategy
+    let posture: RelationPosture
+    let threatScore: Int
+    let attackCount: Int
+    let lastInteractionTime: TimeInterval
+    let summary: String
+    let perspective: String
+
+    var id: FactionID { factionID }
+}
+
+struct ExplorationSummary: Identifiable {
+    let planet: Planet
+    let exploredAt: TimeInterval
+    let ownerName: String
+    let reward: ResourceBundle
+    let discoveredResources: ResourceBundle
+    let discoveredDebris: ResourceBundle
+    let discoveredNeutral: Bool
+
+    var id: String {
+        "\(planet.id.rawValue.uuidString)-\(exploredAt)"
+    }
+}
+
+private extension RelationPosture {
+    var severity: Int {
+        switch self {
+        case .neutral:
+            return 0
+        case .wary:
+            return 1
+        case .pressured:
+            return 2
+        case .hostile:
+            return 3
+        }
+    }
 }
 
 private extension ResourceBundle {
