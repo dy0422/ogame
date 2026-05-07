@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import OGameCore
 import OGamePersistence
@@ -7,10 +8,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var universe: Universe
     @Published var statusMessage: String
     @Published private(set) var canSave: Bool
+    @Published private(set) var offlineSummary: OfflineCatchUpSummary?
 
     private let repository: JSONSaveRepository
 
-    init(repository: JSONSaveRepository? = nil) {
+    init(
+        repository: JSONSaveRepository? = nil,
+        currentDate: () -> Date = Date.init
+    ) {
         let resolvedRepository: JSONSaveRepository
         if let repository {
             resolvedRepository = repository
@@ -28,15 +33,36 @@ final class AppModel: ObservableObject {
 
         do {
             let envelope = try resolvedRepository.load()
-            universe = envelope.universe
-            statusMessage = "Loaded save from \(envelope.lastSavedAt.formatted(date: .abbreviated, time: .shortened))."
+            let loadedAt = currentDate()
+            var loadedUniverse = envelope.universe
+            let catchUpSummary = OfflineSimulationEngine.catchUp(
+                universe: &loadedUniverse,
+                elapsed: envelope.elapsedSinceLastSave(until: loadedAt),
+                now: loadedAt
+            )
+
+            universe = loadedUniverse
+            offlineSummary = catchUpSummary.didMutate ? catchUpSummary : nil
             canSave = true
+
+            if catchUpSummary.didMutate {
+                do {
+                    try resolvedRepository.save(loadedUniverse, wallClockDate: loadedAt)
+                    statusMessage = Self.offlineCatchUpStatus(for: catchUpSummary, autosaveError: nil)
+                } catch {
+                    statusMessage = Self.offlineCatchUpStatus(for: catchUpSummary, autosaveError: error)
+                }
+            } else {
+                statusMessage = "Loaded save from \(envelope.lastSavedAt.formatted(date: .abbreviated, time: .shortened))."
+            }
         } catch JSONSaveRepository.RepositoryError.missingSave {
             universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+            offlineSummary = nil
             statusMessage = "New fast skirmish initialized."
             canSave = true
         } catch {
             universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+            offlineSummary = nil
             statusMessage = Self.loadFailureStatus(for: error)
             canSave = false
         }
@@ -68,6 +94,14 @@ final class AppModel: ObservableObject {
         TechnologyKind.allCases.filter { technology in
             universe.ruleSet.researchRules[technology] != nil
         }
+    }
+
+    var offlineSummaryText: String? {
+        guard let offlineSummary else {
+            return nil
+        }
+
+        return Self.offlineSummaryDetail(for: offlineSummary)
     }
 
     func startBuildingUpgrade(planetID: PlanetID, kind: BuildingKind) {
@@ -286,6 +320,7 @@ final class AppModel: ObservableObject {
 
     func startNewGame() {
         universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+        offlineSummary = nil
         canSave = true
         statusMessage = "New game started. Saving will replace the current autosave."
     }
@@ -312,6 +347,30 @@ final class AppModel: ObservableObject {
         }
 
         return seconds.formatted(.number.precision(.fractionLength(0))) + " seconds"
+    }
+
+    private static func offlineCatchUpStatus(
+        for summary: OfflineCatchUpSummary,
+        autosaveError: Error?
+    ) -> String {
+        let saveText: String
+        if let autosaveError {
+            saveText = "Autosave failed: \(autosaveError.localizedDescription)"
+        } else {
+            saveText = "Autosaved."
+        }
+
+        return "Caught up \(formattedDuration(summary.elapsedSeconds)) offline. \(saveText)"
+    }
+
+    private static func offlineSummaryDetail(for summary: OfflineCatchUpSummary) -> String {
+        let constructionText = itemCountText(summary.completedConstructionCount, singular: "construction")
+        let researchText = itemCountText(summary.completedResearchCount, singular: "research")
+        return "Processed \(summary.processedChunks) chunks; completed \(constructionText) and \(researchText)."
+    }
+
+    private static func itemCountText(_ count: Int, singular: String) -> String {
+        count == 1 ? "1 \(singular)" : "\(count) \(singular)"
     }
 
     private var playerResearchPaymentPlanet: Planet? {

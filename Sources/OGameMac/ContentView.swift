@@ -364,6 +364,10 @@ private struct ActivityPanel: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let offlineSummaryText = model.offlineSummaryText {
+                OfflineSummaryLine(summaryText: offlineSummaryText)
+            }
+
             VStack(spacing: 8) {
                 Button {
                     model.advanceOneMinute()
@@ -403,6 +407,24 @@ private struct ActivityPanel: View {
         }
         .padding(20)
         .frame(width: 280, alignment: .topLeading)
+    }
+}
+
+private struct OfflineSummaryLine: View {
+    let summaryText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Offline Catch-Up", systemImage: "clock.arrow.circlepath")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Text(summaryText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

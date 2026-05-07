@@ -20,4 +20,8 @@ public struct SaveEnvelope: Codable, Equatable, Sendable {
         self.lastSavedAt = lastSavedAt
         self.universe = universe
     }
+
+    public func elapsedSinceLastSave(until currentDate: Date) -> TimeInterval {
+        currentDate.timeIntervalSince(lastSavedAt)
+    }
 }
