@@ -318,6 +318,31 @@ func testStarterUniverseIsDeterministicForSeed() throws {
     requireEqual(decoded, first, "Starter universe should preserve stable enum-map JSON behavior")
 }
 
+func testSimulationTickAdvancesGameTimeAndRecordsEvent() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 9, playerName: "Commander")
+    let previousEventCount = universe.events.count
+
+    SimulationEngine.tick(universe: &universe, delta: 60)
+
+    requireEqual(universe.gameTime, 60, "Simulation tick should advance game time")
+    requireEqual(universe.events.count, previousEventCount + 1, "Simulation tick should append one event")
+    requireEqual(universe.events.last?.kind, .system, "Simulation tick should record a system event")
+    requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation tick should record an event")
+    requireEqual(universe.events.last?.time, universe.gameTime, "Simulation tick event should use advanced time")
+}
+
+func testSimulationTickIgnoresNonPositiveDeltas() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 10, playerName: "Commander")
+    let originalGameTime = universe.gameTime
+    let originalEvents = universe.events
+
+    SimulationEngine.tick(universe: &universe, delta: 0)
+    SimulationEngine.tick(universe: &universe, delta: -30)
+
+    requireEqual(universe.gameTime, originalGameTime, "Simulation tick should ignore non-positive deltas")
+    requireEqual(universe.events, originalEvents, "Simulation tick should not record events for non-positive deltas")
+}
+
 try testEntityIDsAreCodableAndEquatable()
 testResourceBundleClampsToStorageLimits()
 testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
@@ -327,4 +352,6 @@ testSeededGeneratorProducesDeterministicDistinctSequences()
 testSeededGeneratorEqualityTracksSeedAndState()
 testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
+testSimulationTickAdvancesGameTimeAndRecordsEvent()
+testSimulationTickIgnoresNonPositiveDeltas()
 print("OGameCoreTests passed")
