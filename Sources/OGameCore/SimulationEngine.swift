@@ -9,6 +9,7 @@ public enum SimulationEngine {
         EconomyEngine.tick(universe: &universe, delta: delta)
 
         universe.gameTime += delta
+        QueueEngine.completeDueItems(in: &universe)
 
         universe.events.append(
             GameEvent(

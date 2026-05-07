@@ -712,6 +712,305 @@ func makeEconomyUniverse(planets: [Planet], factions: [Faction]? = nil) -> Unive
     )
 }
 
+func queuePlayerID() -> FactionID {
+    FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c1")!)
+}
+
+func queuePlanetID() -> PlanetID {
+    PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c2")!)
+}
+
+func makeQueueUniverse(
+    gameTime: TimeInterval = 0,
+    resources: ResourceBundle = ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 10_000),
+    buildingLevels: [BuildingKind: Int] = [:],
+    researchLevels: [TechnologyKind: Int] = [:],
+    buildQueue: [BuildQueueItem] = [],
+    researchQueue: [ResearchQueueItem] = [],
+    ruleSet: RuleSet = .fastSkirmish
+) -> Universe {
+    let playerID = queuePlayerID()
+    let planetID = queuePlanetID()
+
+    return Universe(
+        id: UniverseID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c0")!),
+        name: "Queue Test",
+        seed: 2,
+        gameTime: gameTime,
+        playerFactionID: playerID,
+        factions: [
+            Faction(
+                id: playerID,
+                name: "Player",
+                kind: .player,
+                strategy: .balanced,
+                technology: ResearchState(levels: researchLevels),
+                ownedPlanetIDs: [planetID],
+                researchQueue: researchQueue
+            )
+        ],
+        planets: [
+            Planet(
+                id: planetID,
+                name: "Queue World",
+                coordinate: Coordinate(galaxy: 1, system: 1, position: 4),
+                ownerID: playerID,
+                resources: resources,
+                storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+                buildingLevels: buildingLevels,
+                buildQueue: buildQueue
+            )
+        ],
+        fleets: [],
+        events: [],
+        ruleSet: ruleSet
+    )
+}
+
+func testQueueEngineStartsBuildingUpgradeAndPaysCost() {
+    var universe = makeQueueUniverse(
+        resources: ResourceBundle(metal: 1_000, crystal: 1_000, deuterium: 1_000),
+        buildingLevels: [.metalMine: 1]
+    )
+
+    let result = QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &universe, kind: .metalMine)
+
+    requireEqual(result, QueueResult.queued, "Affordable building upgrade should be queued")
+    requireEqual(universe.planets[0].buildQueue.count, 1, "Building queue should contain the started upgrade")
+
+    let item = universe.planets[0].buildQueue[0]
+    let expectedCost = ResourceBundle(metal: 90, crystal: 22.5, deuterium: 0)
+    requireEqual(item.planetID, queuePlanetID(), "Build queue item should target the requested planet")
+    requireEqual(item.buildingKind, .metalMine, "Build queue item should store the building kind")
+    requireEqual(item.targetLevel, 2, "Build queue item should target the next building level")
+    requireEqual(item.startTime, 0, "Build queue item should start at current game time")
+    requireEqual(item.finishTime, 26, "Build queue item should finish after the level-scaled duration")
+    requireEqual(item.paidCost, expectedCost, "Build queue item should store the paid cost")
+    requireEqual(
+        universe.planets[0].resources,
+        ResourceBundle(metal: 910, crystal: 977.5, deuterium: 1_000),
+        "Starting a building upgrade should deduct the paid cost immediately"
+    )
+}
+
+func testQueueEngineRejectsUnaffordableBuildingAndResearchWithoutMutation() {
+    var buildingUniverse = makeQueueUniverse(resources: ResourceBundle(metal: 59, crystal: 15, deuterium: 0))
+    let originalBuildingUniverse = buildingUniverse
+
+    let buildingResult = QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &buildingUniverse, kind: .metalMine)
+
+    requireEqual(buildingResult, QueueResult.insufficientResources, "Unaffordable building upgrade should fail")
+    requireEqual(buildingUniverse, originalBuildingUniverse, "Unaffordable building upgrade should not mutate the universe")
+
+    var researchUniverse = makeQueueUniverse(resources: ResourceBundle(metal: 10_000, crystal: 399, deuterium: 600))
+    let originalResearchUniverse = researchUniverse
+
+    let researchResult = QueueEngine.startResearch(for: queuePlayerID(), in: &researchUniverse, technology: .computer)
+
+    requireEqual(researchResult, QueueResult.insufficientResources, "Unaffordable research should fail")
+    requireEqual(researchUniverse, originalResearchUniverse, "Unaffordable research should not mutate the universe")
+}
+
+func testQueueEngineRejectsBusyBuildingAndResearchQueuesWithoutMutation() {
+    let buildItem = BuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000c3")!,
+        planetID: queuePlanetID(),
+        buildingKind: .solarPlant,
+        targetLevel: 1,
+        startTime: 0,
+        finishTime: 18,
+        paidCost: ResourceBundle(metal: 75, crystal: 30)
+    )
+    var buildingUniverse = makeQueueUniverse(buildQueue: [buildItem])
+    let originalBuildingUniverse = buildingUniverse
+
+    let buildingResult = QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &buildingUniverse, kind: .metalMine)
+
+    requireEqual(buildingResult, QueueResult.queueBusy, "Planet with an active building queue should reject another building")
+    requireEqual(buildingUniverse, originalBuildingUniverse, "Busy building queue rejection should not mutate the universe")
+
+    let researchItem = ResearchQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000c4")!,
+        factionID: queuePlayerID(),
+        technologyKind: .energy,
+        targetLevel: 1,
+        startTime: 0,
+        finishTime: 50,
+        paidCost: ResourceBundle(crystal: 800, deuterium: 400)
+    )
+    var researchUniverse = makeQueueUniverse(researchQueue: [researchItem])
+    let originalResearchUniverse = researchUniverse
+
+    let researchResult = QueueEngine.startResearch(for: queuePlayerID(), in: &researchUniverse, technology: .computer)
+
+    requireEqual(researchResult, QueueResult.queueBusy, "Faction with an active research queue should reject another research")
+    requireEqual(researchUniverse, originalResearchUniverse, "Busy research queue rejection should not mutate the universe")
+}
+
+func testQueueEngineReportsMissingEntitiesAndRulesWithoutMutation() {
+    let missingPlanetID = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c5")!)
+    let missingFactionID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c6")!)
+
+    var missingEntityUniverse = makeQueueUniverse()
+    let originalMissingEntityUniverse = missingEntityUniverse
+
+    let missingPlanetResult = QueueEngine.startBuildingUpgrade(on: missingPlanetID, in: &missingEntityUniverse, kind: .metalMine)
+    let missingFactionResult = QueueEngine.startResearch(for: missingFactionID, in: &missingEntityUniverse, technology: .computer)
+
+    requireEqual(missingPlanetResult, QueueResult.missingPlanet, "Building upgrade should report a missing planet")
+    requireEqual(missingFactionResult, QueueResult.missingFaction, "Research should report a missing faction")
+    requireEqual(missingEntityUniverse, originalMissingEntityUniverse, "Missing entity failures should not mutate the universe")
+
+    var missingBuildingRuleSet = RuleSet.fastSkirmish
+    missingBuildingRuleSet.buildingRules[.metalMine] = nil
+    var missingBuildingRuleUniverse = makeQueueUniverse(ruleSet: missingBuildingRuleSet)
+    let originalMissingBuildingRuleUniverse = missingBuildingRuleUniverse
+
+    let missingBuildingRuleResult = QueueEngine.startBuildingUpgrade(
+        on: queuePlanetID(),
+        in: &missingBuildingRuleUniverse,
+        kind: .metalMine
+    )
+
+    requireEqual(missingBuildingRuleResult, QueueResult.missingRule, "Building upgrade should report a missing rule")
+    requireEqual(missingBuildingRuleUniverse, originalMissingBuildingRuleUniverse, "Missing building rule should not mutate the universe")
+
+    var missingResearchRuleSet = RuleSet.fastSkirmish
+    missingResearchRuleSet.researchRules[.computer] = nil
+    var missingResearchRuleUniverse = makeQueueUniverse(ruleSet: missingResearchRuleSet)
+    let originalMissingResearchRuleUniverse = missingResearchRuleUniverse
+
+    let missingResearchRuleResult = QueueEngine.startResearch(
+        for: queuePlayerID(),
+        in: &missingResearchRuleUniverse,
+        technology: .computer
+    )
+
+    requireEqual(missingResearchRuleResult, QueueResult.missingRule, "Research should report a missing rule")
+    requireEqual(missingResearchRuleUniverse, originalMissingResearchRuleUniverse, "Missing research rule should not mutate the universe")
+}
+
+func testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent() {
+    var universe = makeQueueUniverse()
+
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &universe, kind: .solarPlant),
+        QueueResult.queued,
+        "Solar plant upgrade should queue before completion test"
+    )
+
+    SimulationEngine.tick(universe: &universe, delta: 18)
+
+    requireEqual(universe.gameTime, 18, "Simulation tick should advance to the building finish time")
+    requireEqual(universe.planets[0].buildQueue, [], "Completed building queue item should be removed")
+    requireEqual(universe.planets[0].buildingLevels[.solarPlant], 1, "Completed building queue should raise the building level")
+    requireEqual(
+        universe.planets[0].energy,
+        EnergyState(produced: 32, used: 0),
+        "Completed building queue should recompute planet energy"
+    )
+
+    guard let completionEvent = universe.events.first(where: { $0.title == "Construction Complete" }) else {
+        fatalError("Completing a building queue should record a construction event")
+    }
+
+    requireEqual(completionEvent.kind, .economy, "Construction completion event should be an economy event")
+    requireEqual(completionEvent.time, 18, "Construction completion event should use the advanced game time")
+    requireEqual(
+        completionEvent.message,
+        "Queue World completed solarPlant level 1.",
+        "Construction completion event should describe the completed building deterministically"
+    )
+    requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation advanced event should remain the final tick event")
+}
+
+func testQueueEngineStartsResearchAndPaysFromOwnedPlanet() {
+    var universe = makeQueueUniverse(
+        resources: ResourceBundle(metal: 1_000, crystal: 2_000, deuterium: 2_000),
+        researchLevels: [.computer: 1]
+    )
+
+    let result = QueueEngine.startResearch(for: queuePlayerID(), in: &universe, technology: .computer)
+
+    requireEqual(result, QueueResult.queued, "Affordable research should be queued")
+    requireEqual(universe.factions[0].researchQueue.count, 1, "Research queue should contain the started research")
+
+    let item = universe.factions[0].researchQueue[0]
+    let expectedCost = ResourceBundle(metal: 0, crystal: 800, deuterium: 1_200)
+    requireEqual(item.factionID, queuePlayerID(), "Research queue item should target the requested faction")
+    requireEqual(item.technologyKind, .computer, "Research queue item should store the technology kind")
+    requireEqual(item.targetLevel, 2, "Research queue item should target the next technology level")
+    requireEqual(item.startTime, 0, "Research queue item should start at current game time")
+    requireEqual(item.finishTime, 75, "Research queue item should finish after the level-scaled duration")
+    requireEqual(item.paidCost, expectedCost, "Research queue item should store the paid cost")
+    requireEqual(
+        universe.planets[0].resources,
+        ResourceBundle(metal: 1_000, crystal: 1_200, deuterium: 800),
+        "Starting research should deduct the paid cost from the faction's owned planet"
+    )
+}
+
+func testSimulationTickCompletesResearchQueueAndRecordsEvent() {
+    var universe = makeQueueUniverse()
+
+    requireEqual(
+        QueueEngine.startResearch(for: queuePlayerID(), in: &universe, technology: .computer),
+        QueueResult.queued,
+        "Computer research should queue before completion test"
+    )
+
+    SimulationEngine.tick(universe: &universe, delta: 50)
+
+    requireEqual(universe.gameTime, 50, "Simulation tick should advance to the research finish time")
+    requireEqual(universe.factions[0].researchQueue, [], "Completed research queue item should be removed")
+    requireEqual(universe.factions[0].technology.levels[.computer], 1, "Completed research queue should raise the technology level")
+
+    guard let completionEvent = universe.events.first(where: { $0.title == "Research Complete" }) else {
+        fatalError("Completing a research queue should record a research event")
+    }
+
+    requireEqual(completionEvent.kind, .economy, "Research completion event should be an economy event")
+    requireEqual(completionEvent.time, 50, "Research completion event should use the advanced game time")
+    requireEqual(
+        completionEvent.message,
+        "Player completed computer level 1.",
+        "Research completion event should describe the completed technology deterministically"
+    )
+    requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation advanced event should remain the final tick event")
+}
+
+func testQueueCompletionIsDeterministicAcrossSaveLoadEquality() throws {
+    var original = makeQueueUniverse()
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &original, kind: .solarPlant),
+        QueueResult.queued,
+        "Building queue should start before deterministic completion test"
+    )
+    requireEqual(
+        QueueEngine.startResearch(for: queuePlayerID(), in: &original, technology: .computer),
+        QueueResult.queued,
+        "Research queue should start before deterministic completion test"
+    )
+
+    let data = try JSONEncoder().encode(original)
+    var decoded = try JSONDecoder().decode(Universe.self, from: data)
+
+    SimulationEngine.tick(universe: &original, delta: 60)
+    SimulationEngine.tick(universe: &decoded, delta: 60)
+
+    requireEqual(decoded, original, "Queue completion should be deterministic across save/load boundaries")
+    requireEqual(
+        original.events.filter { $0.title == "Construction Complete" }.count,
+        1,
+        "Deterministic completion tick should record one construction completion"
+    )
+    requireEqual(
+        original.events.filter { $0.title == "Research Complete" }.count,
+        1,
+        "Deterministic completion tick should record one research completion"
+    )
+}
+
 func testEconomyProductionPerHourUsesMineLevelsAndEnergyRatio() {
     let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
     let planet = Planet(
@@ -971,6 +1270,14 @@ testEconomyProductionClampsToStorageCaps()
 testEconomyEnergyShortageReducesMineOutput()
 testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed()
 testEconomyUniverseTickDoesNotProduceOnNonOwnedPlanets()
+testQueueEngineStartsBuildingUpgradeAndPaysCost()
+testQueueEngineRejectsUnaffordableBuildingAndResearchWithoutMutation()
+testQueueEngineRejectsBusyBuildingAndResearchQueuesWithoutMutation()
+testQueueEngineReportsMissingEntitiesAndRulesWithoutMutation()
+testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent()
+testQueueEngineStartsResearchAndPaysFromOwnedPlanet()
+testSimulationTickCompletesResearchQueueAndRecordsEvent()
+try testQueueCompletionIsDeterministicAcrossSaveLoadEquality()
 testSimulationTickEmitsAtMostOneEconomySummaryEventPerTick()
 testSimulationTickAdvancesGameTimeAndRecordsEvent()
 testSimulationTickIgnoresNonPositiveDeltas()
