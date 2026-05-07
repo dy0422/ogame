@@ -204,9 +204,71 @@ func testPlanetEnumDictionaryDecodesRawValueKeysAndRejectsUnknownKeys() throws {
     }
 }
 
+func testStarterUniverseIsDeterministicForSeed() throws {
+    let first: Universe = StarterUniverseFactory.makeNewGame(seed: 7, playerName: "Commander")
+    let second: Universe = StarterUniverseFactory.makeNewGame(seed: 7, playerName: "Commander")
+    let differentSeed: Universe = StarterUniverseFactory.makeNewGame(seed: 8, playerName: "Commander")
+
+    requireEqual(first.seed, 7, "Starter universe seed should be preserved")
+    requireEqual(first, second, "Starter universe should be deterministic for a seed and player name")
+    require(first != differentSeed, "Starter universe should vary generated state for different seeds")
+    requireEqual(first.id, UniverseID(UUID(uuidString: "00000000-0000-0000-0000-000000000200")!), "Starter universe should use a stable id")
+    requireEqual(first.name, "Fast Skirmish", "Starter universe should use the fast skirmish universe name")
+    requireEqual(first.ruleSet, RuleSet.fastSkirmish, "Starter universe should use fast skirmish rules")
+    requireEqual(first.gameTime, 0, "Starter universe should start at game time zero")
+    requireEqual(first.fleets, [], "Starter universe should begin without fleets")
+
+    requireEqual(first.factions.count, 6, "Starter universe should create six factions")
+    requireEqual(first.planets.count, 6, "Starter universe should create six planets")
+    requireEqual(first.playerFactionID, FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000001")!), "Player faction should use a stable id")
+
+    let playerFaction = first.factions[0]
+    let homeworld = first.planets[0]
+    requireEqual(playerFaction.id, first.playerFactionID, "First starter faction should be the player")
+    requireEqual(playerFaction.name, "Commander", "Player faction name should come from the requested player name")
+    requireEqual(playerFaction.kind, Faction.Kind.player, "Player faction should be marked as player-controlled")
+    requireEqual(playerFaction.strategy, Faction.Strategy.balanced, "Player faction should use the balanced strategy")
+    requireEqual(playerFaction.ownedPlanetIDs, [homeworld.id], "Player faction should own the homeworld")
+    requireEqual(homeworld.id, PlanetID(UUID(uuidString: "00000000-0000-0000-0001-000000000001")!), "Homeworld should use a stable id")
+    requireEqual(homeworld.name, "Homeworld", "Player planet should be named Homeworld")
+    requireEqual(homeworld.coordinate, Coordinate(galaxy: 1, system: 1, position: 4), "Homeworld should use the canonical starter coordinate")
+    requireEqual(homeworld.ownerID, playerFaction.id, "Homeworld should be owned by the player")
+
+    let aiFactions = Array(first.factions.dropFirst())
+    let aiPlanets = Array(first.planets.dropFirst())
+    require(aiFactions.allSatisfy { $0.kind == Faction.Kind.ai }, "Rival factions should all be AI-controlled")
+    requireEqual(aiFactions.map(\.strategy), [Faction.Strategy.miner, .raider, .technologist, .expansionist, .balanced], "Rival factions should use the planned strategies")
+    requireEqual(aiFactions.map(\.ownedPlanetIDs), aiPlanets.map { [$0.id] }, "Each rival should own its matching starter planet")
+    require(aiPlanets.allSatisfy { (4...12).contains($0.coordinate.position) }, "Rival planet positions should be generated inside the starter range")
+    requireEqual(
+        aiPlanets.map(\.coordinate.galaxy),
+        Array(repeating: 1, count: 5),
+        "Rival planets should start in galaxy one"
+    )
+    requireEqual(
+        aiPlanets.map(\.coordinate.system),
+        [2, 3, 4, 5, 6],
+        "Rival planets should start in stable adjacent systems"
+    )
+    require(
+        first.planets.map(\.coordinate) != differentSeed.planets.map(\.coordinate),
+        "Different seeds should produce meaningfully different generated coordinates"
+    )
+
+    requireEqual(first.events.count, 1, "Starter universe should create one welcome event")
+    requireEqual(first.events.first?.title, "Command Link Established", "Starter universe should record initial event")
+    requireEqual(first.events.first?.kind, .system, "Welcome event should be a system event")
+    requireEqual(first.events.first?.time, 0, "Welcome event should occur at game time zero")
+
+    let data = try JSONEncoder().encode(first)
+    let decoded = try JSONDecoder().decode(Universe.self, from: data)
+    requireEqual(decoded, first, "Starter universe should preserve stable enum-map JSON behavior")
+}
+
 try testEntityIDsAreCodableAndEquatable()
 testResourceBundleClampsToStorageLimits()
 testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
 try testUniverseModelRoundTripsThroughJSON()
 try testPlanetEnumDictionaryDecodesRawValueKeysAndRejectsUnknownKeys()
+try testStarterUniverseIsDeterministicForSeed()
 print("OGameCoreTests passed")
