@@ -43,7 +43,44 @@ func testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid() {
     )
 }
 
+func testUniverseModelRoundTripsThroughJSON() throws {
+    let player = FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000010")!)
+    let homeworld = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000020")!)
+    let universe = Universe(
+        id: UniverseID(UUID(uuidString: "00000000-0000-0000-0000-000000000030")!),
+        name: "Test Universe",
+        seed: 42,
+        gameTime: 120,
+        playerFactionID: player,
+        factions: [
+            Faction(id: player, name: "Player", kind: .player, strategy: .balanced, technology: ResearchState(), ownedPlanetIDs: [homeworld])
+        ],
+        planets: [
+            Planet(
+                id: homeworld,
+                name: "Homeworld",
+                coordinate: Coordinate(galaxy: 1, system: 1, position: 4),
+                ownerID: player,
+                resources: ResourceBundle(metal: 500, crystal: 500, deuterium: 100),
+                storage: ResourceStorage(metal: 10_000, crystal: 10_000, deuterium: 10_000),
+                energy: EnergyState(produced: 20, used: 10)
+            )
+        ],
+        fleets: [],
+        events: [],
+        ruleSet: RuleSet.fastSkirmish
+    )
+
+    let data = try JSONEncoder().encode(universe)
+    let decoded = try JSONDecoder().decode(Universe.self, from: data)
+
+    requireEqual(decoded.name, "Test Universe", "Universe name should round-trip")
+    requireEqual(decoded.planets.first?.coordinate, Coordinate(galaxy: 1, system: 1, position: 4), "Homeworld coordinate should round-trip")
+    requireEqual(decoded.ruleSet.id, "fast-skirmish-v1", "Rule set should round-trip")
+}
+
 try testEntityIDsAreCodableAndEquatable()
 testResourceBundleClampsToStorageLimits()
 testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
+try testUniverseModelRoundTripsThroughJSON()
 print("OGameCoreTests passed")
