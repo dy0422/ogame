@@ -6,6 +6,7 @@ public enum SimulationEngine {
             return
         }
 
+        QueueEngine.completeDueItems(in: &universe)
         EconomyEngine.tick(universe: &universe, delta: delta)
 
         universe.gameTime += delta

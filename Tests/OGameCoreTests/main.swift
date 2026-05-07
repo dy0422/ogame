@@ -890,6 +890,77 @@ func testQueueEngineReportsMissingEntitiesAndRulesWithoutMutation() {
     requireEqual(missingResearchRuleUniverse, originalMissingResearchRuleUniverse, "Missing research rule should not mutate the universe")
 }
 
+func testQueueEngineRejectsInvalidBuildingRuleValuesWithoutMutation() {
+    var negativeCostRuleSet = RuleSet.fastSkirmish
+    negativeCostRuleSet.buildingRules[.metalMine] = BuildingRule(
+        baseCost: ResourceBundle(metal: -60, crystal: 15),
+        costMultiplier: 1.5,
+        baseDuration: 20,
+        durationMultiplier: 1.3,
+        productionPerHour: ResourceBundle(metal: 180),
+        energyUsed: 10,
+        aiPriorityWeight: 1
+    )
+    var negativeCostUniverse = makeQueueUniverse(
+        resources: ResourceBundle(metal: 10, crystal: 100, deuterium: 10),
+        ruleSet: negativeCostRuleSet
+    )
+    let originalNegativeCostUniverse = negativeCostUniverse
+
+    let negativeCostResult = QueueEngine.startBuildingUpgrade(
+        on: queuePlanetID(),
+        in: &negativeCostUniverse,
+        kind: .metalMine
+    )
+
+    requireEqual(negativeCostResult, QueueResult.missingRule, "Negative building costs should be rejected as invalid rules")
+    requireEqual(negativeCostUniverse, originalNegativeCostUniverse, "Invalid negative building costs should not mutate the universe")
+
+    var negativeMultiplierRuleSet = RuleSet.fastSkirmish
+    negativeMultiplierRuleSet.buildingRules[.metalMine] = BuildingRule(
+        baseCost: ResourceBundle(metal: 60, crystal: 15),
+        costMultiplier: -1.5,
+        baseDuration: 20,
+        durationMultiplier: 1.3,
+        productionPerHour: ResourceBundle(metal: 180),
+        energyUsed: 10,
+        aiPriorityWeight: 1
+    )
+    var negativeMultiplierUniverse = makeQueueUniverse(ruleSet: negativeMultiplierRuleSet)
+    let originalNegativeMultiplierUniverse = negativeMultiplierUniverse
+
+    let negativeMultiplierResult = QueueEngine.startBuildingUpgrade(
+        on: queuePlanetID(),
+        in: &negativeMultiplierUniverse,
+        kind: .metalMine
+    )
+
+    requireEqual(negativeMultiplierResult, QueueResult.missingRule, "Negative building cost multipliers should be rejected as invalid rules")
+    requireEqual(negativeMultiplierUniverse, originalNegativeMultiplierUniverse, "Invalid negative building multipliers should not mutate the universe")
+}
+
+func testQueueEngineRejectsInvalidResearchDurationWithoutMutation() {
+    var invalidDurationRuleSet = RuleSet.fastSkirmish
+    invalidDurationRuleSet.researchRules[.computer] = ResearchRule(
+        baseCost: ResourceBundle(crystal: 400, deuterium: 600),
+        costMultiplier: 2,
+        baseDuration: 50,
+        durationMultiplier: -.infinity,
+        aiPriorityWeight: 0.65
+    )
+    var invalidDurationUniverse = makeQueueUniverse(ruleSet: invalidDurationRuleSet)
+    let originalInvalidDurationUniverse = invalidDurationUniverse
+
+    let invalidDurationResult = QueueEngine.startResearch(
+        for: queuePlayerID(),
+        in: &invalidDurationUniverse,
+        technology: .computer
+    )
+
+    requireEqual(invalidDurationResult, QueueResult.missingRule, "Non-finite research duration multipliers should be rejected as invalid rules")
+    requireEqual(invalidDurationUniverse, originalInvalidDurationUniverse, "Invalid research durations should not mutate the universe")
+}
+
 func testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent() {
     var universe = makeQueueUniverse()
 
@@ -921,6 +992,87 @@ func testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent() {
         "Queue World completed solarPlant level 1.",
         "Construction completion event should describe the completed building deterministically"
     )
+    requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation advanced event should remain the final tick event")
+}
+
+func testSimulationTickCompletesAlreadyDueConstructionBeforeProduction() {
+    let playerID = queuePlayerID()
+    let solarPlanetID = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c7")!)
+    let minePlanetID = PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c8")!)
+    let solarCompletion = BuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000c9")!,
+        planetID: solarPlanetID,
+        buildingKind: .solarPlant,
+        targetLevel: 1,
+        startTime: 40,
+        finishTime: 90,
+        paidCost: ResourceBundle(metal: 75, crystal: 30)
+    )
+    let mineCompletion = BuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000ca")!,
+        planetID: minePlanetID,
+        buildingKind: .metalMine,
+        targetLevel: 1,
+        startTime: 50,
+        finishTime: 100,
+        paidCost: ResourceBundle(metal: 60, crystal: 15)
+    )
+    var universe = Universe(
+        id: UniverseID(UUID(uuidString: "00000000-0000-0000-0000-0000000000cb")!),
+        name: "Already Due Queue Test",
+        seed: 3,
+        gameTime: 120,
+        playerFactionID: playerID,
+        factions: [
+            Faction(
+                id: playerID,
+                name: "Player",
+                kind: .player,
+                strategy: .balanced,
+                ownedPlanetIDs: [solarPlanetID, minePlanetID]
+            )
+        ],
+        planets: [
+            Planet(
+                id: solarPlanetID,
+                name: "Solar Due",
+                coordinate: Coordinate(galaxy: 1, system: 1, position: 5),
+                ownerID: playerID,
+                resources: .zero,
+                storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+                buildingLevels: [.metalMine: 1],
+                buildQueue: [solarCompletion]
+            ),
+            Planet(
+                id: minePlanetID,
+                name: "Mine Due",
+                coordinate: Coordinate(galaxy: 1, system: 1, position: 6),
+                ownerID: playerID,
+                resources: .zero,
+                storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+                buildingLevels: [.solarPlant: 1],
+                buildQueue: [mineCompletion]
+            )
+        ],
+        fleets: [],
+        events: [],
+        ruleSet: .fastSkirmish
+    )
+
+    SimulationEngine.tick(universe: &universe, delta: 3_600)
+
+    requireEqual(universe.gameTime, 3_720, "Simulation tick should advance from the loaded game time")
+    requireEqual(universe.planets[0].buildQueue, [], "Already-due solar completion should be removed before production")
+    requireEqual(universe.planets[1].buildQueue, [], "Already-due mine completion should be removed before production")
+    requireEqual(universe.planets[0].buildingLevels[.solarPlant], 1, "Already-due solar queue should raise solar level")
+    requireEqual(universe.planets[1].buildingLevels[.metalMine], 1, "Already-due mine queue should raise mine level")
+    requireEqual(universe.planets[0].energy, EnergyState(produced: 32, used: 10), "Already-due solar completion should update energy before production")
+    requireApproxEqual(universe.planets[0].resources.metal, 180, "Solar completion should power existing mine production during the same tick")
+    requireApproxEqual(universe.planets[1].resources.metal, 180, "Mine completion should produce during the same tick")
+
+    let completionEvents = universe.events.filter { $0.title == "Construction Complete" }
+    requireEqual(completionEvents.count, 2, "Already-due construction queues should record deterministic completion events")
+    requireEqual(completionEvents.map(\.time), [90, 100], "Construction completion events should use queue finish times when possible")
     requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation advanced event should remain the final tick event")
 }
 
@@ -1274,7 +1426,10 @@ testQueueEngineStartsBuildingUpgradeAndPaysCost()
 testQueueEngineRejectsUnaffordableBuildingAndResearchWithoutMutation()
 testQueueEngineRejectsBusyBuildingAndResearchQueuesWithoutMutation()
 testQueueEngineReportsMissingEntitiesAndRulesWithoutMutation()
+testQueueEngineRejectsInvalidBuildingRuleValuesWithoutMutation()
+testQueueEngineRejectsInvalidResearchDurationWithoutMutation()
 testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent()
+testSimulationTickCompletesAlreadyDueConstructionBeforeProduction()
 testQueueEngineStartsResearchAndPaysFromOwnedPlanet()
 testSimulationTickCompletesResearchQueueAndRecordsEvent()
 try testQueueCompletionIsDeterministicAcrossSaveLoadEquality()

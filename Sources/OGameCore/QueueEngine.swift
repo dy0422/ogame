@@ -28,15 +28,27 @@ public enum QueueEngine {
         }
 
         let currentLevel = normalizedLevel(universe.planets[planetIndex].buildingLevels[kind] ?? 0)
+        guard currentLevel < Int.max else {
+            return .missingRule
+        }
+
         let targetLevel = currentLevel + 1
-        let paidCost = buildingCost(rule: rule, targetLevel: targetLevel)
+        guard let terms = buildingTerms(rule: rule, targetLevel: targetLevel) else {
+            return .missingRule
+        }
+
+        let paidCost = terms.cost
 
         guard universe.planets[planetIndex].resources.canAfford(paidCost) else {
             return .insufficientResources
         }
 
         let startTime = universe.gameTime
-        let finishTime = startTime + buildingDuration(rule: rule, targetLevel: targetLevel)
+        let finishTime = startTime + terms.duration
+        guard startTime.isFinite, finishTime.isFinite else {
+            return .missingRule
+        }
+
         let item = BuildQueueItem(
             id: queueItemID(
                 namespace: "0004",
@@ -87,15 +99,27 @@ public enum QueueEngine {
         }
 
         let currentLevel = normalizedLevel(universe.factions[factionIndex].technology.levels[technology] ?? 0)
+        guard currentLevel < Int.max else {
+            return .missingRule
+        }
+
         let targetLevel = currentLevel + 1
-        let paidCost = researchCost(rule: rule, targetLevel: targetLevel)
+        guard let terms = researchTerms(rule: rule, targetLevel: targetLevel) else {
+            return .missingRule
+        }
+
+        let paidCost = terms.cost
 
         guard universe.planets[planetIndex].resources.canAfford(paidCost) else {
             return .insufficientResources
         }
 
         let startTime = universe.gameTime
-        let finishTime = startTime + researchDuration(rule: rule, targetLevel: targetLevel)
+        let finishTime = startTime + terms.duration
+        guard startTime.isFinite, finishTime.isFinite else {
+            return .missingRule
+        }
+
         let item = ResearchQueueItem(
             id: queueItemID(
                 namespace: "0005",
@@ -125,11 +149,15 @@ public enum QueueEngine {
     }
 
     public static func completeDueItems(in universe: inout Universe) {
+        guard universe.gameTime.isFinite else {
+            return
+        }
+
         let completionTime = universe.gameTime
 
         for planetIndex in universe.planets.indices {
             let dueItems = universe.planets[planetIndex].buildQueue
-                .filter { $0.finishTime <= completionTime }
+                .filter { $0.finishTime.isFinite && $0.finishTime <= completionTime }
                 .sorted(by: compareBuildQueueItems)
 
             guard !dueItems.isEmpty else {
@@ -139,7 +167,7 @@ public enum QueueEngine {
             for item in dueItems {
                 let currentLevel = normalizedLevel(universe.planets[planetIndex].buildingLevels[item.buildingKind] ?? 0)
                 universe.planets[planetIndex].buildingLevels[item.buildingKind] = max(currentLevel, item.targetLevel)
-                universe.events.append(constructionCompletionEvent(for: item, planet: universe.planets[planetIndex], time: completionTime))
+                universe.events.append(constructionCompletionEvent(for: item, planet: universe.planets[planetIndex], time: item.finishTime))
             }
 
             let dueIDs = Set(dueItems.map(\.id))
@@ -149,7 +177,7 @@ public enum QueueEngine {
 
         for factionIndex in universe.factions.indices {
             let dueItems = universe.factions[factionIndex].researchQueue
-                .filter { $0.finishTime <= completionTime }
+                .filter { $0.finishTime.isFinite && $0.finishTime <= completionTime }
                 .sorted(by: compareResearchQueueItems)
 
             guard !dueItems.isEmpty else {
@@ -159,7 +187,7 @@ public enum QueueEngine {
             for item in dueItems {
                 let currentLevel = normalizedLevel(universe.factions[factionIndex].technology.levels[item.technologyKind] ?? 0)
                 universe.factions[factionIndex].technology.levels[item.technologyKind] = max(currentLevel, item.targetLevel)
-                universe.events.append(researchCompletionEvent(for: item, faction: universe.factions[factionIndex], time: completionTime))
+                universe.events.append(researchCompletionEvent(for: item, faction: universe.factions[factionIndex], time: item.finishTime))
             }
 
             let dueIDs = Set(dueItems.map(\.id))
@@ -177,20 +205,71 @@ public enum QueueEngine {
         return nil
     }
 
-    private static func buildingCost(rule: BuildingRule, targetLevel: Int) -> ResourceBundle {
-        rule.baseCost.scaled(by: pow(rule.costMultiplier, Double(max(targetLevel - 1, 0))))
+    private static func buildingTerms(rule: BuildingRule, targetLevel: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+        guard
+            isValidCost(rule.baseCost),
+            rule.costMultiplier.isFinite,
+            rule.costMultiplier > 0,
+            rule.baseDuration.isFinite,
+            rule.baseDuration > 0,
+            rule.durationMultiplier.isFinite,
+            rule.durationMultiplier > 0
+        else {
+            return nil
+        }
+
+        let exponent = Double(max(targetLevel - 1, 0))
+        let costMultiplier = pow(rule.costMultiplier, exponent)
+        let durationMultiplier = pow(rule.durationMultiplier, exponent)
+        guard costMultiplier.isFinite, durationMultiplier.isFinite else {
+            return nil
+        }
+
+        let cost = rule.baseCost.scaled(by: costMultiplier)
+        let duration = rule.baseDuration * durationMultiplier
+        guard isValidCost(cost), duration.isFinite, duration > 0 else {
+            return nil
+        }
+
+        return (cost, duration)
     }
 
-    private static func researchCost(rule: ResearchRule, targetLevel: Int) -> ResourceBundle {
-        rule.baseCost.scaled(by: pow(rule.costMultiplier, Double(max(targetLevel - 1, 0))))
+    private static func researchTerms(rule: ResearchRule, targetLevel: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+        guard
+            isValidCost(rule.baseCost),
+            rule.costMultiplier.isFinite,
+            rule.costMultiplier > 0,
+            rule.baseDuration.isFinite,
+            rule.baseDuration > 0,
+            rule.durationMultiplier.isFinite,
+            rule.durationMultiplier > 0
+        else {
+            return nil
+        }
+
+        let exponent = Double(max(targetLevel - 1, 0))
+        let costMultiplier = pow(rule.costMultiplier, exponent)
+        let durationMultiplier = pow(rule.durationMultiplier, exponent)
+        guard costMultiplier.isFinite, durationMultiplier.isFinite else {
+            return nil
+        }
+
+        let cost = rule.baseCost.scaled(by: costMultiplier)
+        let duration = rule.baseDuration * durationMultiplier
+        guard isValidCost(cost), duration.isFinite, duration > 0 else {
+            return nil
+        }
+
+        return (cost, duration)
     }
 
-    private static func buildingDuration(rule: BuildingRule, targetLevel: Int) -> TimeInterval {
-        rule.baseDuration * pow(rule.durationMultiplier, Double(max(targetLevel - 1, 0)))
-    }
-
-    private static func researchDuration(rule: ResearchRule, targetLevel: Int) -> TimeInterval {
-        rule.baseDuration * pow(rule.durationMultiplier, Double(max(targetLevel - 1, 0)))
+    private static func isValidCost(_ cost: ResourceBundle) -> Bool {
+        cost.metal.isFinite &&
+            cost.crystal.isFinite &&
+            cost.deuterium.isFinite &&
+            cost.metal >= 0 &&
+            cost.crystal >= 0 &&
+            cost.deuterium >= 0
     }
 
     private static func normalizedLevel(_ level: Int) -> Int {
