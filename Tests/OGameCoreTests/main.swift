@@ -3417,6 +3417,87 @@ func testThreatMemoryChangesDefensivePosture() {
     require(easyDefense?.quantity ?? 0 > hardDefense?.quantity ?? 0, "Easy threat memory should produce a heavier defensive posture")
 }
 
+func testShipBuildRequiresConfiguredTechnologyGate() {
+    var ruleSet = RuleSet.fastSkirmish
+    var cruiserRule = ruleSet.shipRules[.cruiser]!
+    cruiserRule.requirements = [.technology(.impulseDrive, level: 2)]
+    ruleSet.shipRules[.cruiser] = cruiserRule
+    var lockedUniverse = makeQueueUniverse(
+        resources: ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.shipyard: 4],
+        ruleSet: ruleSet
+    )
+
+    let lockedResult = QueueEngine.startShipBuild(on: queuePlanetID(), in: &lockedUniverse, kind: .cruiser, quantity: 1)
+
+    requireEqual(
+        lockedResult,
+        .missingRequirement(.technology(.impulseDrive, level: 2)),
+        "Ship build should fail when a configured technology gate is missing"
+    )
+    requireEqual(lockedUniverse.planets[0].shipBuildQueue, [], "Locked ship build should not mutate the ship queue")
+
+    var unlockedUniverse = makeQueueUniverse(
+        resources: ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.shipyard: 4],
+        researchLevels: [.impulseDrive: 2],
+        ruleSet: ruleSet
+    )
+    requireEqual(
+        QueueEngine.startShipBuild(on: queuePlanetID(), in: &unlockedUniverse, kind: .cruiser, quantity: 1),
+        .queued,
+        "Ship build should queue once the configured technology gate is met"
+    )
+}
+
+func testDefenseBuildRequiresConfiguredBuildingGate() {
+    var ruleSet = RuleSet.fastSkirmish
+    var plasmaRule = ruleSet.defenseRules[.plasmaTurret]!
+    plasmaRule.requirements = [.building(.shipyard, level: 6)]
+    ruleSet.defenseRules[.plasmaTurret] = plasmaRule
+    var lockedUniverse = makeQueueUniverse(
+        resources: ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.shipyard: 5],
+        ruleSet: ruleSet
+    )
+
+    let lockedResult = QueueEngine.startDefenseBuild(on: queuePlanetID(), in: &lockedUniverse, kind: .plasmaTurret, quantity: 1)
+
+    requireEqual(
+        lockedResult,
+        .missingRequirement(.building(.shipyard, level: 6)),
+        "Defense build should fail when a configured building gate is missing"
+    )
+    requireEqual(lockedUniverse.planets[0].defenseBuildQueue, [], "Locked defense build should not mutate the defense queue")
+
+    var unlockedUniverse = makeQueueUniverse(
+        resources: ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.shipyard: 6],
+        ruleSet: ruleSet
+    )
+    requireEqual(
+        QueueEngine.startDefenseBuild(on: queuePlanetID(), in: &unlockedUniverse, kind: .plasmaTurret, quantity: 1),
+        .queued,
+        "Defense build should queue once the configured building gate is met"
+    )
+}
+
+func testUIHelpersExposeLockedReason() {
+    let technologyGate = RuleRequirement.technology(.impulseDrive, level: 2)
+    let buildingGate = RuleRequirement.building(.shipyard, level: 6)
+
+    requireEqual(
+        technologyGate.lockedReason,
+        "Requires impulseDrive level 2",
+        "Technology requirements should expose compact locked reason text"
+    )
+    requireEqual(
+        buildingGate.lockedReason,
+        "Requires shipyard level 6",
+        "Building requirements should expose compact locked reason text"
+    )
+}
+
 func testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals() {
     let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
     let ai = makeAIEconomyFaction(index: 1, strategy: .miner)
@@ -4663,6 +4744,9 @@ testOfflineCatchUpCapsAIAggressiveFleetLaunchesByChunkPressure()
 testEasyAIDoesNotAttackWithoutReport()
 testHardAICanUseRankingsButNotHiddenInventory()
 testThreatMemoryChangesDefensivePosture()
+testShipBuildRequiresConfiguredTechnologyGate()
+testDefenseBuildRequiresConfiguredBuildingGate()
+testUIHelpersExposeLockedReason()
 testOfflineCatchUpTriggersAIEconomyDecisionsAtBoundedIntervals()
 testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent()
 testSimulationTickCompletesAlreadyDueConstructionBeforeProduction()

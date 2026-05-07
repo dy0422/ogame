@@ -1187,6 +1187,71 @@ public struct RuleSet: Codable, Equatable, Sendable {
     }
 }
 
+public enum RuleRequirement: Codable, Equatable, Sendable {
+    private enum RequirementType: String, Codable {
+        case building
+        case technology
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case buildingKind
+        case technologyKind
+        case level
+    }
+
+    case building(BuildingKind, level: Int)
+    case technology(TechnologyKind, level: Int)
+
+    public var lockedReason: String {
+        switch self {
+        case let .building(kind, level):
+            return "Requires \(kind.rawValue) level \(Self.normalizedLevel(level))"
+        case let .technology(kind, level):
+            return "Requires \(kind.rawValue) level \(Self.normalizedLevel(level))"
+        }
+    }
+
+    public var requiredLevel: Int {
+        switch self {
+        case let .building(_, level), let .technology(_, level):
+            return Self.normalizedLevel(level)
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(RequirementType.self, forKey: .type)
+        let level = Self.normalizedLevel(try container.decodeIfPresent(Int.self, forKey: .level) ?? 1)
+
+        switch type {
+        case .building:
+            self = .building(try container.decode(BuildingKind.self, forKey: .buildingKind), level: level)
+        case .technology:
+            self = .technology(try container.decode(TechnologyKind.self, forKey: .technologyKind), level: level)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        switch self {
+        case let .building(kind, level):
+            try container.encode(RequirementType.building, forKey: .type)
+            try container.encode(kind, forKey: .buildingKind)
+            try container.encode(Self.normalizedLevel(level), forKey: .level)
+        case let .technology(kind, level):
+            try container.encode(RequirementType.technology, forKey: .type)
+            try container.encode(kind, forKey: .technologyKind)
+            try container.encode(Self.normalizedLevel(level), forKey: .level)
+        }
+    }
+
+    private static func normalizedLevel(_ level: Int) -> Int {
+        max(level, 1)
+    }
+}
+
 public enum BuildingKind: String, Codable, CaseIterable, Sendable {
     case metalMine
     case crystalMine

@@ -1191,6 +1191,13 @@ private struct BuildingUpgradeRow: View {
                     durationText: model.durationText(model.buildingUpgradeDuration(for: planet, kind: kind)),
                     canAfford: canAfford
                 )
+
+                if let lockedReason = model.buildingUpgradeLockedReason(planet: planet, kind: kind) {
+                    Text(lockedReason)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Spacer(minLength: 12)
@@ -1203,6 +1210,7 @@ private struct BuildingUpgradeRow: View {
             .controlSize(.small)
             .buttonStyle(.bordered)
             .disabled(!model.canStartBuildingUpgrade(planet: planet, kind: kind))
+            .help(model.buildingUpgradeLockedReason(planet: planet, kind: kind) ?? "Queue building upgrade")
         }
         .padding(.vertical, 10)
     }
@@ -1326,6 +1334,13 @@ private struct ShipBuildRow: View {
                     durationText: model.durationText(model.shipBuildDuration(for: kind, quantity: quantity)),
                     canAfford: canAfford
                 )
+
+                if let lockedReason = model.shipBuildLockedReason(planet: planet, kind: kind, quantity: quantity) {
+                    Text(lockedReason)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Spacer(minLength: 12)
@@ -1340,6 +1355,7 @@ private struct ShipBuildRow: View {
             .controlSize(.small)
             .buttonStyle(.bordered)
             .disabled(!model.canStartShipBuild(planet: planet, kind: kind, quantity: quantity))
+            .help(model.shipBuildLockedReason(planet: planet, kind: kind, quantity: quantity) ?? "Queue ship production")
         }
         .padding(.vertical, 10)
     }
@@ -1380,6 +1396,13 @@ private struct DefenseBuildRow: View {
                     durationText: model.durationText(model.defenseBuildDuration(for: kind, quantity: quantity)),
                     canAfford: canAfford
                 )
+
+                if let lockedReason = model.defenseBuildLockedReason(planet: planet, kind: kind, quantity: quantity) {
+                    Text(lockedReason)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Spacer(minLength: 12)
@@ -1394,6 +1417,7 @@ private struct DefenseBuildRow: View {
             .controlSize(.small)
             .buttonStyle(.bordered)
             .disabled(!model.canStartDefenseBuild(planet: planet, kind: kind, quantity: quantity))
+            .help(model.defenseBuildLockedReason(planet: planet, kind: kind, quantity: quantity) ?? "Queue defense production")
         }
         .padding(.vertical, 10)
     }
@@ -2956,6 +2980,13 @@ private struct ResearchUpgradeRow: View {
                     durationText: model.durationText(model.researchDuration(for: technology)),
                     canAfford: canAfford
                 )
+
+                if let lockedReason = model.researchLockedReason(technology) {
+                    Text(lockedReason)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Spacer(minLength: 12)
@@ -2968,6 +2999,7 @@ private struct ResearchUpgradeRow: View {
             .controlSize(.small)
             .buttonStyle(.bordered)
             .disabled(!model.canStartResearch(technology))
+            .help(model.researchLockedReason(technology) ?? "Queue research")
         }
         .padding(.vertical, 10)
     }
