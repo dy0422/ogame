@@ -91,6 +91,54 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var availableShipKinds: [ShipKind] {
+        ShipKind.allCases.filter { kind in
+            universe.ruleSet.shipRules[kind] != nil
+        }
+    }
+
+    var availableDefenseKinds: [DefenseKind] {
+        DefenseKind.allCases.filter { kind in
+            universe.ruleSet.defenseRules[kind] != nil
+        }
+    }
+
+    var fleetMissionKinds: [Fleet.Mission] {
+        [.transport, .attack, .espionage, .recycle, .colonize, .explore]
+    }
+
+    var fleetTargetPlanets: [Planet] {
+        universe.planets
+    }
+
+    var activeFleets: [Fleet] {
+        universe.fleets.sorted { lhs, rhs in
+            fleetNextTime(lhs) < fleetNextTime(rhs)
+        }
+    }
+
+    var recentReports: [Report] {
+        universe.reports
+            .filter { report in
+                report.kind == .battle || report.kind == .espionage || report.kind == .exploration
+            }
+            .sorted { lhs, rhs in
+                lhs.time > rhs.time
+            }
+            .prefix(8)
+            .map { $0 }
+    }
+
+    var recentExplorationEvents: [GameEvent] {
+        universe.events
+            .filter { $0.kind == .exploration }
+            .sorted { lhs, rhs in
+                lhs.time > rhs.time
+            }
+            .prefix(5)
+            .map { $0 }
+    }
+
     var offlineSummaryText: String? {
         guard let offlineSummary else {
             return nil
@@ -139,6 +187,90 @@ final class AppModel: ObservableObject {
         let targetLevel = playerFaction?.researchQueue.first { $0.technologyKind == technology }?.targetLevel
         let status = Self.researchQueuedStatus(technology: technology, targetLevel: targetLevel)
         autosaveAfterQueueing(successStatus: status)
+    }
+
+    func startShipBuild(planetID: PlanetID, kind: ShipKind, quantity: Int) {
+        guard canSave else {
+            statusMessage = "Loading autosave failed. Start a new game before queueing ships."
+            return
+        }
+
+        guard quantity > 0 else {
+            statusMessage = "Could not queue \(kind.rawValue.displayName): quantity must be positive."
+            return
+        }
+
+        let result = QueueEngine.startShipBuild(on: planetID, in: &universe, kind: kind, quantity: quantity)
+        guard result == .queued else {
+            statusMessage = Self.shipQueueFailureStatus(result, kind: kind)
+            return
+        }
+
+        let planet = universe.planets.first { $0.id == planetID }
+        let status = "Queued \(quantity) \(kind.rawValue.displayName) on \(planet?.name ?? "colony")."
+        autosaveAfterQueueing(successStatus: status)
+    }
+
+    func startDefenseBuild(planetID: PlanetID, kind: DefenseKind, quantity: Int) {
+        guard canSave else {
+            statusMessage = "Loading autosave failed. Start a new game before queueing defenses."
+            return
+        }
+
+        guard quantity > 0 else {
+            statusMessage = "Could not queue \(kind.rawValue.displayName): quantity must be positive."
+            return
+        }
+
+        let result = QueueEngine.startDefenseBuild(on: planetID, in: &universe, kind: kind, quantity: quantity)
+        guard result == .queued else {
+            statusMessage = Self.defenseQueueFailureStatus(result, kind: kind)
+            return
+        }
+
+        let planet = universe.planets.first { $0.id == planetID }
+        let status = "Queued \(quantity) \(kind.rawValue.displayName) on \(planet?.name ?? "colony")."
+        autosaveAfterQueueing(successStatus: status)
+    }
+
+    func launchFleet(
+        originID: PlanetID?,
+        targetID: PlanetID?,
+        mission: Fleet.Mission,
+        ships: [ShipKind: Int],
+        cargo: ResourceBundle
+    ) {
+        if let validationFailure = fleetLaunchValidationFailure(
+            originID: originID,
+            targetID: targetID,
+            mission: mission,
+            ships: ships,
+            cargo: cargo
+        ) {
+            statusMessage = "Could not launch fleet: \(validationFailure.description)."
+            return
+        }
+
+        guard let originID, let targetID else {
+            statusMessage = "Could not launch fleet: select an origin and target."
+            return
+        }
+
+        let result = FleetEngine.launchFleet(
+            from: originID,
+            to: targetID,
+            in: &universe,
+            mission: mission,
+            ships: normalizedShips(ships),
+            cargo: cargo
+        )
+
+        switch result {
+        case .launched(let fleet):
+            autosaveAfterQueueing(successStatus: fleetLaunchStatus(for: fleet))
+        case .failure(let failure):
+            statusMessage = "Could not launch fleet: \(Self.fleetFailureDescription(failure))."
+        }
     }
 
     func productionPerHour(for planet: Planet) -> ResourceBundle {
@@ -243,6 +375,263 @@ final class AppModel: ObservableObject {
         }
 
         return canAffordResearch(technology)
+    }
+
+    func shipBuildCost(for kind: ShipKind, quantity: Int) -> ResourceBundle? {
+        guard let rule = universe.ruleSet.shipRules[kind] else {
+            return nil
+        }
+
+        return unitTerms(baseCost: rule.baseCost, baseDuration: rule.baseDuration, quantity: quantity)?.cost
+    }
+
+    func shipBuildDuration(for kind: ShipKind, quantity: Int) -> TimeInterval? {
+        guard let rule = universe.ruleSet.shipRules[kind] else {
+            return nil
+        }
+
+        return unitTerms(baseCost: rule.baseCost, baseDuration: rule.baseDuration, quantity: quantity)?.duration
+    }
+
+    func defenseBuildCost(for kind: DefenseKind, quantity: Int) -> ResourceBundle? {
+        guard let rule = universe.ruleSet.defenseRules[kind] else {
+            return nil
+        }
+
+        return unitTerms(baseCost: rule.baseCost, baseDuration: rule.baseDuration, quantity: quantity)?.cost
+    }
+
+    func defenseBuildDuration(for kind: DefenseKind, quantity: Int) -> TimeInterval? {
+        guard let rule = universe.ruleSet.defenseRules[kind] else {
+            return nil
+        }
+
+        return unitTerms(baseCost: rule.baseCost, baseDuration: rule.baseDuration, quantity: quantity)?.duration
+    }
+
+    func canStartShipBuild(planet: Planet, kind: ShipKind, quantity: Int) -> Bool {
+        guard
+            canSave,
+            quantity > 0,
+            planet.shipBuildQueue.isEmpty,
+            let cost = shipBuildCost(for: kind, quantity: quantity)
+        else {
+            return false
+        }
+
+        return planet.resources.canAfford(cost)
+    }
+
+    func canStartDefenseBuild(planet: Planet, kind: DefenseKind, quantity: Int) -> Bool {
+        guard
+            canSave,
+            quantity > 0,
+            planet.defenseBuildQueue.isEmpty,
+            let cost = defenseBuildCost(for: kind, quantity: quantity)
+        else {
+            return false
+        }
+
+        return planet.resources.canAfford(cost)
+    }
+
+    func unitQueueStatus(_ item: UnitBuildQueueItem) -> String {
+        "\(unitQueueTitle(item)) x\(item.quantity) - \(queueRemainingText(until: item.finishTime))"
+    }
+
+    func unitQueueTitle(_ item: UnitBuildQueueItem) -> String {
+        switch item.unitKind {
+        case .ship(let kind):
+            return kind.rawValue.displayName
+        case .defense(let kind):
+            return kind.rawValue.displayName
+        }
+    }
+
+    func defaultOriginPlanetID() -> PlanetID? {
+        playerPlanets.first?.id
+    }
+
+    func defaultTargetPlanetID(excluding originID: PlanetID?) -> PlanetID? {
+        fleetTargetPlanets.first { planet in
+            Optional(planet.id) != originID
+        }?.id
+    }
+
+    func planet(for planetID: PlanetID?) -> Planet? {
+        guard let planetID else {
+            return nil
+        }
+
+        return universe.planets.first { $0.id == planetID }
+    }
+
+    func targetPlanets(excluding originID: PlanetID?) -> [Planet] {
+        fleetTargetPlanets.filter { planet in
+            Optional(planet.id) != originID
+        }
+    }
+
+    func isMissionAvailable(_ mission: Fleet.Mission, originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int]) -> Bool {
+        guard
+            let origin = planet(for: originID),
+            let target = planet(for: targetID),
+            originID != targetID
+        else {
+            return false
+        }
+
+        let normalizedShips = normalizedShips(ships)
+        switch mission {
+        case .transport:
+            return isPlayerOwned(target)
+        case .attack, .espionage:
+            return !isPlayerOwned(target) && target.ownerID != nil
+        case .explore:
+            return origin.id != target.id
+        case .recycle:
+            return (normalizedShips[.recycler] ?? 0) > 0 && target.debrisField.totalAmountForDisplay > 0
+        case .colonize:
+            return target.ownerID == nil && (normalizedShips[.colonyShip] ?? 0) > 0
+        case .returning:
+            return false
+        }
+    }
+
+    func firstAvailableMission(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int]) -> Fleet.Mission? {
+        fleetMissionKinds.first { mission in
+            isMissionAvailable(mission, originID: originID, targetID: targetID, ships: ships)
+        }
+    }
+
+    func canLaunchFleet(
+        originID: PlanetID?,
+        targetID: PlanetID?,
+        mission: Fleet.Mission,
+        ships: [ShipKind: Int],
+        cargo: ResourceBundle
+    ) -> Bool {
+        fleetLaunchValidationFailure(
+            originID: originID,
+            targetID: targetID,
+            mission: mission,
+            ships: ships,
+            cargo: cargo
+        ) == nil
+    }
+
+    func fleetCargoCapacity(for ships: [ShipKind: Int]) -> Double {
+        normalizedShips(ships).reduce(0) { partialResult, element in
+            guard let rule = universe.ruleSet.shipRules[element.key], rule.cargoCapacity.isFinite else {
+                return partialResult
+            }
+
+            return partialResult + max(0, rule.cargoCapacity) * Double(element.value)
+        }
+    }
+
+    func fleetFuelCost(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int]) -> Double? {
+        guard
+            let origin = planet(for: originID),
+            let target = planet(for: targetID)
+        else {
+            return nil
+        }
+
+        let fuel = FleetEngine.fuelCost(
+            from: origin.coordinate,
+            to: target.coordinate,
+            ships: normalizedShips(ships),
+            ruleSet: universe.ruleSet
+        )
+        return fuel.isFinite ? fuel : nil
+    }
+
+    func canAffordFleetFuel(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int], cargo: ResourceBundle) -> Bool {
+        guard
+            let origin = planet(for: originID),
+            let fuel = fleetFuelCost(originID: originID, targetID: targetID, ships: ships),
+            fuel >= 0
+        else {
+            return false
+        }
+
+        let resourcesAfterCargo = origin.resources.subtracting(cargo)
+        return resourcesAfterCargo.canAfford(ResourceBundle(deuterium: fuel))
+    }
+
+    func fleetFuelStatusText(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int], cargo: ResourceBundle) -> String {
+        guard let fuel = fleetFuelCost(originID: originID, targetID: targetID, ships: ships) else {
+            return "unknown"
+        }
+
+        guard let origin = planet(for: originID) else {
+            return Self.formattedWholeNumber(fuel)
+        }
+
+        let deuteriumAfterCargo = origin.resources.subtracting(cargo).deuterium
+        guard deuteriumAfterCargo < fuel else {
+            return Self.formattedWholeNumber(fuel)
+        }
+
+        return "\(Self.formattedWholeNumber(fuel)) needed; \(Self.formattedWholeNumber(max(0, deuteriumAfterCargo))) available"
+    }
+
+    func fleetTravelDuration(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int]) -> TimeInterval? {
+        guard
+            let origin = planet(for: originID),
+            let target = planet(for: targetID)
+        else {
+            return nil
+        }
+
+        let duration = FleetEngine.travelDuration(
+            from: origin.coordinate,
+            to: target.coordinate,
+            ships: normalizedShips(ships),
+            ruleSet: universe.ruleSet
+        )
+        return duration.isFinite && duration > 0 ? duration : nil
+    }
+
+    func fleetShipsSummary(_ ships: [ShipKind: Int]) -> String {
+        let parts = normalizedShips(ships)
+            .sorted { lhs, rhs in lhs.key.rawValue < rhs.key.rawValue }
+            .map { "\($0.key.rawValue.displayName) x\($0.value)" }
+        return parts.isEmpty ? "No ships" : parts.joined(separator: ", ")
+    }
+
+    func fleetCargoSummary(_ cargo: ResourceBundle) -> String {
+        guard cargo.totalAmountForDisplay > 0 else {
+            return "No cargo"
+        }
+
+        return "M \(Self.formattedWholeNumber(cargo.metal)) / C \(Self.formattedWholeNumber(cargo.crystal)) / D \(Self.formattedWholeNumber(cargo.deuterium))"
+    }
+
+    func fleetPhaseText(_ fleet: Fleet) -> String {
+        "\(fleet.phase.rawValue.displayName) - \(fleetRemainingText(fleet))"
+    }
+
+    func fleetRemainingText(_ fleet: Fleet) -> String {
+        let nextTime = fleetNextTime(fleet)
+        guard nextTime.isFinite, universe.gameTime.isFinite else {
+            return "unknown remaining"
+        }
+
+        let remaining = max(0, nextTime - universe.gameTime)
+        guard remaining > 0 else {
+            return "ready"
+        }
+
+        return "\(Self.formattedDuration(remaining)) remaining"
+    }
+
+    func reportDetailSummary(_ report: Report) -> String {
+        let loot = fleetCargoSummary(report.loot)
+        let debris = fleetCargoSummary(report.debris)
+        let losses = fleetCargoSummary(report.losses)
+        return "Loot \(loot) - Debris \(debris) - Losses \(losses)"
     }
 
     func queueRemainingText(until finishTime: TimeInterval) -> String {
@@ -417,6 +806,26 @@ final class AppModel: ObservableObject {
         )
     }
 
+    private func unitTerms(baseCost: ResourceBundle, baseDuration: TimeInterval, quantity: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+        guard
+            quantity > 0,
+            Self.isValidCost(baseCost),
+            baseDuration.isFinite,
+            baseDuration > 0
+        else {
+            return nil
+        }
+
+        let multiplier = Double(quantity)
+        let cost = baseCost.scaled(by: multiplier)
+        let duration = baseDuration * multiplier
+        guard Self.isValidCost(cost), duration.isFinite, duration > 0 else {
+            return nil
+        }
+
+        return (cost, duration)
+    }
+
     private func researchTerms(for technology: TechnologyKind) -> (cost: ResourceBundle, duration: TimeInterval)? {
         guard let rule = universe.ruleSet.researchRules[technology] else {
             return nil
@@ -495,12 +904,24 @@ final class AppModel: ObservableObject {
         return "Queued \(technology.rawValue.displayName)\(levelText)."
     }
 
+    private func fleetLaunchStatus(for fleet: Fleet) -> String {
+        "Launched \(fleet.mission.rawValue.displayName) fleet to \(fleet.target.displayText)."
+    }
+
     private static func buildingQueueFailureStatus(_ result: QueueResult, kind: BuildingKind) -> String {
         "Could not queue \(kind.rawValue.displayName): \(queueFailureDescription(result))."
     }
 
     private static func researchQueueFailureStatus(_ result: QueueResult, technology: TechnologyKind) -> String {
         "Could not queue \(technology.rawValue.displayName): \(queueFailureDescription(result))."
+    }
+
+    private static func shipQueueFailureStatus(_ result: QueueResult, kind: ShipKind) -> String {
+        "Could not queue \(kind.rawValue.displayName): \(queueFailureDescription(result))."
+    }
+
+    private static func defenseQueueFailureStatus(_ result: QueueResult, kind: DefenseKind) -> String {
+        "Could not queue \(kind.rawValue.displayName): \(queueFailureDescription(result))."
     }
 
     private static func queueFailureDescription(_ result: QueueResult) -> String {
@@ -517,6 +938,159 @@ final class AppModel: ObservableObject {
             return "queue busy"
         case .missingRule:
             return "missing or invalid economy rule"
+        }
+    }
+
+    private static func fleetFailureDescription(_ failure: FleetLaunchFailure) -> String {
+        switch failure {
+        case .missingOrigin:
+            return "missing origin"
+        case .missingTarget:
+            return "missing target"
+        case .missingOwner:
+            return "origin has no owner"
+        case .insufficientShips:
+            return "insufficient ships"
+        case .insufficientCargo:
+            return "insufficient cargo capacity or resources"
+        case .insufficientFuel:
+            return "insufficient deuterium for fuel"
+        case .invalidMission:
+            return "invalid mission for selected ships or target"
+        }
+    }
+
+    private enum FleetLaunchValidationFailure {
+        case saveUnavailable
+        case missingOrigin
+        case missingTarget
+        case samePlanet
+        case invalidMission
+        case noShips
+        case invalidCargo
+        case insufficientShips
+        case insufficientCargo
+        case insufficientCargoCapacity
+        case insufficientFuel
+
+        var description: String {
+            switch self {
+            case .saveUnavailable:
+                return "loading autosave failed. Start a new game before launching fleets"
+            case .missingOrigin:
+                return "select an origin colony"
+            case .missingTarget:
+                return "select a target"
+            case .samePlanet:
+                return "target must differ from origin"
+            case .invalidMission:
+                return "invalid mission for selected ships or target"
+            case .noShips:
+                return "select at least one ship"
+            case .invalidCargo:
+                return "cargo must be nonnegative"
+            case .insufficientShips:
+                return "insufficient ships"
+            case .insufficientCargo:
+                return "insufficient resources for cargo"
+            case .insufficientCargoCapacity:
+                return "insufficient cargo capacity"
+            case .insufficientFuel:
+                return "insufficient deuterium for fuel"
+            }
+        }
+    }
+
+    private func fleetLaunchValidationFailure(
+        originID: PlanetID?,
+        targetID: PlanetID?,
+        mission: Fleet.Mission,
+        ships: [ShipKind: Int],
+        cargo: ResourceBundle
+    ) -> FleetLaunchValidationFailure? {
+        guard canSave else {
+            return .saveUnavailable
+        }
+
+        guard let origin = planet(for: originID), isPlayerOwned(origin) else {
+            return .missingOrigin
+        }
+
+        guard planet(for: targetID) != nil else {
+            return .missingTarget
+        }
+
+        guard originID != targetID else {
+            return .samePlanet
+        }
+
+        let normalizedShips = normalizedShips(ships)
+        guard !normalizedShips.isEmpty else {
+            return .noShips
+        }
+
+        guard isMissionAvailable(mission, originID: originID, targetID: targetID, ships: normalizedShips) else {
+            return .invalidMission
+        }
+
+        guard cargo.metal.isFinite,
+              cargo.crystal.isFinite,
+              cargo.deuterium.isFinite,
+              cargo.metal >= 0,
+              cargo.crystal >= 0,
+              cargo.deuterium >= 0
+        else {
+            return .invalidCargo
+        }
+
+        guard normalizedShips.allSatisfy({ kind, quantity in
+            (origin.shipInventory[kind] ?? 0) >= quantity
+        }) else {
+            return .insufficientShips
+        }
+
+        guard origin.resources.canAfford(cargo) else {
+            return .insufficientCargo
+        }
+
+        guard cargo.totalAmountForDisplay <= fleetCargoCapacity(for: normalizedShips) else {
+            return .insufficientCargoCapacity
+        }
+
+        guard canAffordFleetFuel(originID: originID, targetID: targetID, ships: normalizedShips, cargo: cargo) else {
+            return .insufficientFuel
+        }
+
+        return nil
+    }
+
+    private func isPlayerOwned(_ planet: Planet) -> Bool {
+        planet.ownerID == universe.playerFactionID ||
+            playerFaction?.ownedPlanetIDs.contains(planet.id) == true
+    }
+
+    private func fleetNextTime(_ fleet: Fleet) -> TimeInterval {
+        switch fleet.phase {
+        case .outbound, .holding:
+            return fleet.arrivalTime
+        case .returning, .completed:
+            return fleet.returnTime
+        }
+    }
+
+    private func normalizedShips(_ ships: [ShipKind: Int]) -> [ShipKind: Int] {
+        ships.reduce(into: [:]) { result, element in
+            guard element.value > 0 else {
+                return
+            }
+
+            let current = result[element.key] ?? 0
+            let addition = current.addingReportingOverflow(element.value)
+            guard !addition.overflow else {
+                return
+            }
+
+            result[element.key] = addition.partialValue
         }
     }
 
@@ -566,6 +1140,16 @@ final class AppModel: ObservableObject {
         formatter.zeroFormattingBehavior = .dropAll
         return formatter
     }()
+}
+
+private extension ResourceBundle {
+    var totalAmountForDisplay: Double {
+        guard metal.isFinite, crystal.isFinite, deuterium.isFinite else {
+            return .infinity
+        }
+
+        return metal + crystal + deuterium
+    }
 }
 
 private extension String {
