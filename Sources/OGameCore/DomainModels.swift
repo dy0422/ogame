@@ -409,6 +409,7 @@ public struct UnitBuildQueueItem: Codable, Equatable, Sendable, Identifiable {
     public enum UnitKind: Equatable, Sendable {
         case ship(ShipKind)
         case defense(DefenseKind)
+        case missile(MissileKind)
     }
 
     public var id: UUID
@@ -440,6 +441,7 @@ public struct UnitBuildQueueItem: Codable, Equatable, Sendable, Identifiable {
     private enum UnitType: String, Codable {
         case ship
         case defense
+        case missile
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -468,6 +470,8 @@ public struct UnitBuildQueueItem: Codable, Equatable, Sendable, Identifiable {
             self.unitKind = .ship(try container.decode(ShipKind.self, forKey: .unitKind))
         case .defense:
             self.unitKind = .defense(try container.decode(DefenseKind.self, forKey: .unitKind))
+        case .missile:
+            self.unitKind = .missile(try container.decode(MissileKind.self, forKey: .unitKind))
         }
     }
 
@@ -483,6 +487,9 @@ public struct UnitBuildQueueItem: Codable, Equatable, Sendable, Identifiable {
         case .defense(let defenseKind):
             try container.encode(UnitType.defense, forKey: .unitType)
             try container.encode(defenseKind, forKey: .unitKind)
+        case .missile(let missileKind):
+            try container.encode(UnitType.missile, forKey: .unitType)
+            try container.encode(missileKind, forKey: .unitKind)
         }
         try container.encode(quantity, forKey: .quantity)
         try container.encode(startTime, forKey: .startTime)
@@ -718,6 +725,68 @@ public struct Coordinate: Codable, Equatable, Hashable, Sendable {
     }
 }
 
+public struct Moon: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var name: String
+    public var createdAt: TimeInterval
+    public var buildingLevels: [BuildingKind: Int]
+    public var debrisOriginReportID: UUID?
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        createdAt: TimeInterval,
+        buildingLevels: [BuildingKind: Int] = [:],
+        debrisOriginReportID: UUID? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt.isFinite ? max(createdAt, 0) : 0
+        self.buildingLevels = Self.normalizedBuildingLevels(buildingLevels)
+        self.debrisOriginReportID = debrisOriginReportID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case createdAt
+        case buildingLevels
+        case debrisOriginReportID
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.init(
+            id: try container.decode(UUID.self, forKey: .id),
+            name: try container.decode(String.self, forKey: .name),
+            createdAt: try container.decode(TimeInterval.self, forKey: .createdAt),
+            buildingLevels: try container.decodeRawValueDictionary(BuildingKind.self, forKey: .buildingLevels),
+            debrisOriginReportID: try container.decodeIfPresent(UUID.self, forKey: .debrisOriginReportID)
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeRawValueDictionary(buildingLevels, forKey: .buildingLevels)
+        try container.encodeIfPresent(debrisOriginReportID, forKey: .debrisOriginReportID)
+    }
+
+    private static func normalizedBuildingLevels(_ levels: [BuildingKind: Int]) -> [BuildingKind: Int] {
+        levels.reduce(into: [:]) { result, element in
+            guard element.value > 0 else {
+                return
+            }
+
+            result[element.key] = element.value
+        }
+    }
+}
+
 public struct Planet: Codable, Equatable, Sendable, Identifiable {
     public var id: PlanetID
     public var name: String
@@ -727,12 +796,15 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
     public var storage: ResourceStorage
     public var energy: EnergyState
     public var buildingLevels: [BuildingKind: Int]
+    public var productionSettings: [BuildingKind: Double]
     public var buildQueue: [BuildQueueItem]
     public var shipBuildQueue: [UnitBuildQueueItem]
     public var defenseBuildQueue: [UnitBuildQueueItem]
     public var shipInventory: [ShipKind: Int]
     public var defenseInventory: [DefenseKind: Int]
+    public var missileInventory: [MissileKind: Int]
     public var debrisField: ResourceBundle
+    public var moon: Moon?
 
     public init(
         id: PlanetID = PlanetID(),
@@ -743,12 +815,15 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         storage: ResourceStorage = ResourceStorage(metal: 10_000, crystal: 10_000, deuterium: 10_000),
         energy: EnergyState = EnergyState(),
         buildingLevels: [BuildingKind: Int] = [:],
+        productionSettings: [BuildingKind: Double] = [:],
         buildQueue: [BuildQueueItem] = [],
         shipBuildQueue: [UnitBuildQueueItem] = [],
         defenseBuildQueue: [UnitBuildQueueItem] = [],
         shipInventory: [ShipKind: Int] = [:],
         defenseInventory: [DefenseKind: Int] = [:],
-        debrisField: ResourceBundle = .zero
+        missileInventory: [MissileKind: Int] = [:],
+        debrisField: ResourceBundle = .zero,
+        moon: Moon? = nil
     ) {
         self.id = id
         self.name = name
@@ -758,12 +833,15 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         self.storage = storage
         self.energy = energy
         self.buildingLevels = buildingLevels
+        self.productionSettings = Self.normalizedProductionSettings(productionSettings)
         self.buildQueue = buildQueue
         self.shipBuildQueue = shipBuildQueue
         self.defenseBuildQueue = defenseBuildQueue
         self.shipInventory = shipInventory
         self.defenseInventory = defenseInventory
+        self.missileInventory = Self.normalizedMissileInventory(missileInventory)
         self.debrisField = debrisField
+        self.moon = moon
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -775,12 +853,15 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         case storage
         case energy
         case buildingLevels
+        case productionSettings
         case buildQueue
         case shipBuildQueue
         case defenseBuildQueue
         case shipInventory
         case defenseInventory
+        case missileInventory
         case debrisField
+        case moon
     }
 
     public init(from decoder: Decoder) throws {
@@ -794,12 +875,19 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         self.storage = try container.decode(ResourceStorage.self, forKey: .storage)
         self.energy = try container.decode(EnergyState.self, forKey: .energy)
         self.buildingLevels = try container.decodeRawValueDictionary(BuildingKind.self, forKey: .buildingLevels)
+        self.productionSettings = Self.normalizedProductionSettings(
+            try container.decodeRawValueDictionaryIfPresent(BuildingKind.self, forKey: .productionSettings) ?? [:]
+        )
         self.buildQueue = try container.decodeIfPresentStrict([BuildQueueItem].self, forKey: .buildQueue) ?? []
         self.shipBuildQueue = try container.decodeIfPresentStrict([UnitBuildQueueItem].self, forKey: .shipBuildQueue) ?? []
         self.defenseBuildQueue = try container.decodeIfPresentStrict([UnitBuildQueueItem].self, forKey: .defenseBuildQueue) ?? []
         self.shipInventory = try container.decodeRawValueDictionary(ShipKind.self, forKey: .shipInventory)
         self.defenseInventory = try container.decodeRawValueDictionary(DefenseKind.self, forKey: .defenseInventory)
+        self.missileInventory = Self.normalizedMissileInventory(
+            try container.decodeRawValueDictionaryIfPresent(MissileKind.self, forKey: .missileInventory) ?? [:]
+        )
         self.debrisField = try container.decodeIfPresentStrict(ResourceBundle.self, forKey: .debrisField) ?? .zero
+        self.moon = try container.decodeIfPresentStrict(Moon.self, forKey: .moon)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -813,12 +901,35 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         try container.encode(storage, forKey: .storage)
         try container.encode(energy, forKey: .energy)
         try container.encodeRawValueDictionary(buildingLevels, forKey: .buildingLevels)
+        try container.encodeRawValueDictionary(productionSettings, forKey: .productionSettings)
         try container.encode(buildQueue, forKey: .buildQueue)
         try container.encode(shipBuildQueue, forKey: .shipBuildQueue)
         try container.encode(defenseBuildQueue, forKey: .defenseBuildQueue)
         try container.encodeRawValueDictionary(shipInventory, forKey: .shipInventory)
         try container.encodeRawValueDictionary(defenseInventory, forKey: .defenseInventory)
+        try container.encodeRawValueDictionary(missileInventory, forKey: .missileInventory)
         try container.encode(debrisField, forKey: .debrisField)
+        try container.encodeIfPresent(moon, forKey: .moon)
+    }
+
+    private static func normalizedProductionSettings(_ settings: [BuildingKind: Double]) -> [BuildingKind: Double] {
+        Dictionary(uniqueKeysWithValues: settings.map { kind, value in
+            guard value.isFinite else {
+                return (kind, 1)
+            }
+
+            return (kind, min(max(value, 0), 1))
+        })
+    }
+
+    private static func normalizedMissileInventory(_ inventory: [MissileKind: Int]) -> [MissileKind: Int] {
+        inventory.reduce(into: [:]) { result, element in
+            guard element.value > 0 else {
+                return
+            }
+
+            result[element.key] = max((result[element.key] ?? 0) + element.value, 0)
+        }
     }
 }
 
@@ -1071,6 +1182,7 @@ public struct Report: Codable, Equatable, Sendable, Identifiable {
         case battle
         case espionage
         case exploration
+        case missile
     }
 
     public var id: UUID
@@ -1115,6 +1227,7 @@ public struct RuleSet: Codable, Equatable, Sendable {
     public var researchRules: [TechnologyKind: ResearchRule]
     public var shipRules: [ShipKind: ShipRule]
     public var defenseRules: [DefenseKind: DefenseRule]
+    public var missileRules: [MissileKind: MissileRule]
 
     public init(
         id: String,
@@ -1124,7 +1237,8 @@ public struct RuleSet: Codable, Equatable, Sendable {
         buildingRules: [BuildingKind: BuildingRule] = RuleSet.fastSkirmishBuildingRules,
         researchRules: [TechnologyKind: ResearchRule] = RuleSet.fastSkirmishResearchRules,
         shipRules: [ShipKind: ShipRule] = RuleSet.fastSkirmishShipRules,
-        defenseRules: [DefenseKind: DefenseRule] = RuleSet.fastSkirmishDefenseRules
+        defenseRules: [DefenseKind: DefenseRule] = RuleSet.fastSkirmishDefenseRules,
+        missileRules: [MissileKind: MissileRule] = RuleSet.fastSkirmishMissileRules
     ) {
         self.id = id
         self.displayName = displayName
@@ -1134,6 +1248,7 @@ public struct RuleSet: Codable, Equatable, Sendable {
         self.researchRules = researchRules
         self.shipRules = shipRules
         self.defenseRules = defenseRules
+        self.missileRules = missileRules
     }
 
     public static let fastSkirmish = RuleSet(
@@ -1152,6 +1267,7 @@ public struct RuleSet: Codable, Equatable, Sendable {
         case researchRules
         case shipRules
         case defenseRules
+        case missileRules
     }
 
     public init(from decoder: Decoder) throws {
@@ -1179,6 +1295,9 @@ public struct RuleSet: Codable, Equatable, Sendable {
             RuleSet.migrateDefenseRulesForCombatFields(decodedDefenseRules),
             ruleSetID: id
         )
+        let decodedMissileRules = try container.decodeRawValueDictionaryIfPresent(MissileKind.self, forKey: .missileRules)
+            ?? RuleSet.fastSkirmish.missileRules
+        self.missileRules = RuleSet.migrateMissileRulesForRequirements(decodedMissileRules, ruleSetID: id)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1192,6 +1311,7 @@ public struct RuleSet: Codable, Equatable, Sendable {
         try container.encodeRawValueDictionary(researchRules, forKey: .researchRules)
         try container.encodeRawValueDictionary(shipRules, forKey: .shipRules)
         try container.encodeRawValueDictionary(defenseRules, forKey: .defenseRules)
+        try container.encodeRawValueDictionary(missileRules, forKey: .missileRules)
     }
 }
 
@@ -1268,6 +1388,10 @@ public enum BuildingKind: String, Codable, CaseIterable, Sendable {
     case roboticsFactory
     case shipyard
     case researchLab
+    case metalStorage
+    case crystalStorage
+    case deuteriumTank
+    case naniteFactory
 }
 
 public enum TechnologyKind: String, Codable, CaseIterable, Sendable {
@@ -1301,6 +1425,10 @@ public enum DefenseKind: String, Codable, CaseIterable, Sendable {
     case gaussCannon
     case ionCannon
     case plasmaTurret
+}
+
+public enum MissileKind: String, Codable, CaseIterable, Sendable {
+    case interplanetaryMissile
 }
 
 private struct RawValueCodingKey: CodingKey {

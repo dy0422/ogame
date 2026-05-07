@@ -388,9 +388,19 @@ func testUnitBuildQueueItemRoundTripsThroughJSON() throws {
         finishTime: 184,
         paidCost: ResourceBundle(metal: 8_000)
     )
+    let missileItem = UnitBuildQueueItem(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000085")!,
+        planetID: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-000000000083")!),
+        unitKind: .missile(.interplanetaryMissile),
+        quantity: 2,
+        startTime: 170,
+        finishTime: 200,
+        paidCost: ResourceBundle(metal: 5_000, crystal: 2_000, deuterium: 4_000)
+    )
 
     let shipData = try JSONEncoder().encode(shipItem)
     let defenseData = try JSONEncoder().encode(defenseItem)
+    let missileData = try JSONEncoder().encode(missileItem)
 
     requireEqual(
         try JSONDecoder().decode(UnitBuildQueueItem.self, from: shipData),
@@ -402,13 +412,21 @@ func testUnitBuildQueueItemRoundTripsThroughJSON() throws {
         defenseItem,
         "Defense unit queue item should round-trip through JSON"
     )
+    requireEqual(
+        try JSONDecoder().decode(UnitBuildQueueItem.self, from: missileData),
+        missileItem,
+        "Missile unit queue item should round-trip through JSON"
+    )
 
     let shipJSON = requireDictionary(try JSONSerialization.jsonObject(with: shipData), "Ship unit queue item should encode as an object")
     let defenseJSON = requireDictionary(try JSONSerialization.jsonObject(with: defenseData), "Defense unit queue item should encode as an object")
+    let missileJSON = requireDictionary(try JSONSerialization.jsonObject(with: missileData), "Missile unit queue item should encode as an object")
     requireEqual(shipJSON["unitType"] as? String, "ship", "Ship queue unit type should encode by raw value")
     requireEqual(shipJSON["unitKind"] as? String, "smallCargo", "Ship queue unit kind should encode by raw value")
     requireEqual(defenseJSON["unitType"] as? String, "defense", "Defense queue unit type should encode by raw value")
     requireEqual(defenseJSON["unitKind"] as? String, "rocketLauncher", "Defense queue unit kind should encode by raw value")
+    requireEqual(missileJSON["unitType"] as? String, "missile", "Missile queue unit type should encode by raw value")
+    requireEqual(missileJSON["unitKind"] as? String, "interplanetaryMissile", "Missile queue unit kind should encode by raw value")
 }
 
 func testPlanetFactionAndUniverseQueuesRoundTripThroughJSON() throws {
@@ -1102,6 +1120,40 @@ func testStrategicVictoryRoutesTriggerForEconomyTechnologyDominationAndExplorati
     }
 }
 
+func testLateGameObjectiveContributesToTechnologyVictory() {
+    var universe = makeStrategicUniverse(
+        playerTechnology: [
+            .espionage: 3,
+            .computer: 3,
+            .weapons: 3,
+            .shielding: 3,
+            .armor: 3,
+            .energy: 3,
+            .combustionDrive: 2,
+            .impulseDrive: 2,
+            .hyperspaceDrive: 1
+        ],
+        playerResources: ResourceBundle(metal: 1_000, crystal: 1_000, deuterium: 1_000)
+    )
+    universe.planets[0].moon = Moon(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000005f0")!,
+        name: "Luna",
+        createdAt: universe.gameTime,
+        buildingLevels: [:],
+        debrisOriginReportID: UUID(uuidString: "00000000-0000-0000-0000-0000000005f1")!
+    )
+
+    StrategicEngine.updateStrategicState(in: &universe)
+
+    let technologyProgress = requireVictoryProgress(
+        universe.victoryState,
+        factionID: strategicPlayerID(),
+        route: .technology
+    )
+    requireEqual(technologyProgress.currentValue, 24, "Moon infrastructure should count as a late-game technology objective")
+    requireEqual(universe.victoryState.winningRoute, .technology, "Late-game objective should complete technology victory")
+}
+
 func testSimulationContinuesTickingAfterVictoryWithoutRepeatingVictoryEvent() {
     var universe = makeStrategicUniverse(playerResources: ResourceBundle(metal: 120_000, crystal: 80_000, deuterium: 40_000))
 
@@ -1441,7 +1493,9 @@ func queuePlanetID() -> PlanetID {
 func makeQueueUniverse(
     gameTime: TimeInterval = 0,
     resources: ResourceBundle = ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 10_000),
+    storage: ResourceStorage = ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
     buildingLevels: [BuildingKind: Int] = [:],
+    productionSettings: [BuildingKind: Double] = [:],
     researchLevels: [TechnologyKind: Int] = [:],
     buildQueue: [BuildQueueItem] = [],
     researchQueue: [ResearchQueueItem] = [],
@@ -1478,8 +1532,9 @@ func makeQueueUniverse(
                 coordinate: Coordinate(galaxy: 1, system: 1, position: 4),
                 ownerID: playerID,
                 resources: resources,
-                storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+                storage: storage,
                 buildingLevels: buildingLevels,
+                productionSettings: productionSettings,
                 buildQueue: buildQueue,
                 shipBuildQueue: shipBuildQueue,
                 defenseBuildQueue: defenseBuildQueue,
@@ -2595,6 +2650,130 @@ func testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense() {
     require((defenderAfter.defenseInventory[.rocketLauncher] ?? 0) > 0, "Some destroyed defenses should recover deterministically")
     require((defenderAfter.defenseInventory[.rocketLauncher] ?? 0) < (defenderBefore.defenseInventory[.rocketLauncher] ?? 0), "Recovered defenses should still reflect combat damage")
     requireEqual(universe.events.last?.kind, .combat, "Attack should record a combat event")
+}
+
+func testMoonChanceCanCreateMoonFromLargeDebrisBattle() {
+    var universe = makeCombatUniverse()
+    universe.planets[0].shipInventory = [.battleship: 36]
+    universe.planets[1].shipInventory = [.battleship: 18, .cruiser: 12, .lightFighter: 40]
+    universe.planets[1].defenseInventory = [.rocketLauncher: 60, .lightLaser: 20, .heavyLaser: 6]
+    let fleet = Fleet(
+        id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-0000000006a0")!),
+        ownerID: fleetPlayerID(),
+        mission: .attack,
+        origin: universe.planets[0].coordinate,
+        target: universe.planets[1].coordinate,
+        ships: [.battleship: 36],
+        launchTime: universe.gameTime,
+        arrivalTime: universe.gameTime + 120,
+        returnTime: universe.gameTime + 240,
+        originPlanetID: fleetPlanetID(1),
+        targetPlanetID: fleetPlanetID(2)
+    )
+
+    _ = CombatEngine.resolveAttack(fleet, in: &universe)
+    guard let report = universe.reports.last else {
+        fatalError("Large debris battle should create a report")
+    }
+    let defenderAfter = requirePlanet(fleetPlanetID(2), in: universe, "Combat target should exist after moon chance battle")
+    guard let moon = defenderAfter.moon else {
+        fatalError("Large debris battle should create a moon")
+    }
+    require(resourceTotal(report.debris) >= 50_000, "Moon fixture should generate enough new debris")
+    requireEqual(moon.name, "Shield Moon", "Generated moon should inherit a readable target name")
+    requireEqual(moon.createdAt, fleet.arrivalTime, "Generated moon should preserve battle time")
+    requireEqual(moon.buildingLevels, [BuildingKind: Int](), "Generated moon should start without moon buildings")
+    requireEqual(moon.debrisOriginReportID, report.id, "Generated moon should link back to the battle report")
+}
+
+func testMissileStrikeDamagesDefensesWithoutLoot() {
+    var universe = makeCombatUniverse()
+    universe.planets[0].missileInventory = [.interplanetaryMissile: 3]
+    universe.planets[1].resources = ResourceBundle(metal: 9_000, crystal: 4_500, deuterium: 1_500)
+    universe.planets[1].defenseInventory = [.rocketLauncher: 8, .lightLaser: 4, .heavyLaser: 2]
+    let targetBefore = requirePlanet(fleetPlanetID(2), in: universe, "Missile target should exist before strike")
+
+    let result = CombatEngine.launchMissileStrike(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        missileCount: 2
+    )
+
+    guard case .resolved(let report) = result else {
+        fatalError("Missile strike should resolve")
+    }
+    let originAfter = requirePlanet(fleetPlanetID(1), in: universe, "Missile origin should exist after strike")
+    let targetAfter = requirePlanet(fleetPlanetID(2), in: universe, "Missile target should exist after strike")
+
+    requireEqual(originAfter.missileInventory[.interplanetaryMissile], 1, "Missile strike should consume launched missiles")
+    require(targetBefore.defenseInventory.values.reduce(0, +) > targetAfter.defenseInventory.values.reduce(0, +),
+        "Missile strike should damage target defenses")
+    requireEqual(targetAfter.resources, targetBefore.resources, "Missile strike should not loot target resources")
+    requireEqual(report.kind, .missile, "Missile strike should create a missile report")
+    requireEqual(report.loot, .zero, "Missile report should never include loot")
+    requireEqual(report.debris, .zero, "Missile strike should not create recoverable debris")
+    requireEqual(report.participants[1].beforeDefenses, targetBefore.defenseInventory, "Missile report should include starting defenses")
+    requireEqual(report.participants[1].afterDefenses, targetAfter.defenseInventory, "Missile report should include damaged defenses")
+    requireEqual(universe.events.last?.kind, .combat, "Missile strike should record a combat event")
+}
+
+func testMissileStrikeRejectsInvalidCoreTargets() {
+    var samePlanetUniverse = makeCombatUniverse()
+    samePlanetUniverse.planets[0].missileInventory = [.interplanetaryMissile: 1]
+    samePlanetUniverse.planets[0].defenseInventory = [.rocketLauncher: 1]
+    requireEqual(
+        CombatEngine.launchMissileStrike(
+            from: fleetPlanetID(1),
+            to: fleetPlanetID(1),
+            in: &samePlanetUniverse,
+            missileCount: 1
+        ),
+        .failed(.samePlanet),
+        "Core missile strikes should reject same-planet targets"
+    )
+
+    var friendlyUniverse = makeCombatUniverse()
+    friendlyUniverse.planets[0].missileInventory = [.interplanetaryMissile: 1]
+    friendlyUniverse.planets[1].ownerID = fleetPlayerID()
+    requireEqual(
+        CombatEngine.launchMissileStrike(
+            from: fleetPlanetID(1),
+            to: fleetPlanetID(2),
+            in: &friendlyUniverse,
+            missileCount: 1
+        ),
+        .failed(.invalidTarget),
+        "Core missile strikes should reject friendly targets"
+    )
+
+    var neutralUniverse = makeCombatUniverse()
+    neutralUniverse.planets[0].missileInventory = [.interplanetaryMissile: 1]
+    neutralUniverse.planets[1].ownerID = nil
+    requireEqual(
+        CombatEngine.launchMissileStrike(
+            from: fleetPlanetID(1),
+            to: fleetPlanetID(2),
+            in: &neutralUniverse,
+            missileCount: 1
+        ),
+        .failed(.invalidTarget),
+        "Core missile strikes should reject neutral targets"
+    )
+
+    var unownedOriginUniverse = makeCombatUniverse()
+    unownedOriginUniverse.planets[0].ownerID = nil
+    unownedOriginUniverse.planets[0].missileInventory = [.interplanetaryMissile: 1]
+    requireEqual(
+        CombatEngine.launchMissileStrike(
+            from: fleetPlanetID(1),
+            to: fleetPlanetID(2),
+            in: &unownedOriginUniverse,
+            missileCount: 1
+        ),
+        .failed(.missingOriginOwner),
+        "Core missile strikes should require an owned origin"
+    )
 }
 
 func testAttackReturnCargoIsCappedAfterCargoShipLosses() {
@@ -4001,6 +4180,39 @@ func testQueueEngineStartsDefenseBuildAndCompletesIntoInventory() {
     )
 }
 
+func testQueueEngineStartsMissileBuildAndCompletesIntoInventory() {
+    var universe = makeQueueUniverse(
+        resources: ResourceBundle(metal: 40_000, crystal: 20_000, deuterium: 20_000),
+        buildingLevels: [.shipyard: 4],
+        researchLevels: [.impulseDrive: 2]
+    )
+
+    let result = QueueEngine.startMissileBuild(
+        on: queuePlanetID(),
+        in: &universe,
+        kind: .interplanetaryMissile,
+        quantity: 2
+    )
+
+    requireEqual(result, QueueResult.queued, "Missile build should queue when requirements and resources are met")
+    requireEqual(universe.planets[0].defenseBuildQueue.count, 1, "Missile build should use the defensive production queue")
+
+    let item = universe.planets[0].defenseBuildQueue[0]
+    let expectedCost = ResourceBundle(metal: 5_000, crystal: 2_000, deuterium: 4_000)
+    requireEqual(item.planetID, queuePlanetID(), "Missile queue item should target the requested planet")
+    requireEqual(item.unitKind, .missile(.interplanetaryMissile), "Missile queue item should store the missile kind")
+    requireEqual(item.quantity, 2, "Missile queue item should store the requested quantity")
+    requireEqual(item.startTime, 0, "Missile queue item should start at current game time")
+    requireEqual(item.finishTime, 60, "Missile queue item should finish after quantity-scaled duration")
+    requireEqual(item.paidCost, expectedCost, "Missile queue item should store the paid cost")
+
+    SimulationEngine.tick(universe: &universe, delta: 60)
+
+    requireEqual(universe.planets[0].missileInventory[.interplanetaryMissile], 2, "Completed missile build should increment missile inventory")
+    requireEqual(universe.planets[0].defenseBuildQueue, [], "Completed missile build should leave the defensive production queue")
+    requireEqual(universe.events.filter { $0.title == "Missile Construction Complete" }.count, 1, "Completing a missile build should record an event")
+}
+
 func testQueueEngineRejectsBusyUnitQueuesWithoutMutation() {
     let shipItem = UnitBuildQueueItem(
         id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d3")!,
@@ -4333,6 +4545,108 @@ func testEconomyEnergyShortageReducesMineOutput() {
         ResourceBundle(metal: 322.56, crystal: 215.04, deuterium: 0),
         "Energy shortage should reduce mine output by the produced-over-used energy ratio"
     )
+}
+
+func testPlanetProductionSettingsScaleMineOutputAndEnergyUse() {
+    var planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000ba")!),
+        name: "Throttled Mines",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 11),
+        ownerID: queuePlayerID(),
+        resources: .zero,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [
+            .metalMine: 2,
+            .crystalMine: 1,
+            .deuteriumSynthesizer: 1,
+            .solarPlant: 4
+        ],
+        productionSettings: [
+            .metalMine: 0.5,
+            .crystalMine: 0,
+            .deuteriumSynthesizer: 0.25
+        ]
+    )
+
+    EconomyEngine.recomputeEnergy(for: &planet, ruleSet: .fastSkirmish)
+    let production = EconomyEngine.productionPerHour(for: planet, ruleSet: .fastSkirmish)
+
+    requireEqual(planet.energy, EnergyState(produced: 128, used: 14), "Production settings should scale mine energy usage")
+    requireApproxEqual(
+        production,
+        ResourceBundle(metal: 201.6, crystal: 0, deuterium: 18),
+        "Production settings should scale each mine output independently"
+    )
+}
+
+func testStorageBuildingsIncreaseStorageCaps() {
+    let planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000bb")!),
+        name: "Expanded Vaults",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 12),
+        ownerID: queuePlayerID(),
+        resources: .zero,
+        storage: ResourceStorage(metal: 500, crystal: 600, deuterium: 700),
+        buildingLevels: [
+            .metalStorage: 2,
+            .crystalStorage: 1,
+            .deuteriumTank: 1
+        ]
+    )
+
+    let storage = EconomyEngine.storageCapacity(for: planet, ruleSet: .fastSkirmish)
+
+    requireEqual(
+        storage,
+        ResourceStorage(metal: 20_500, crystal: 10_600, deuterium: 10_700),
+        "Storage buildings should add lane-specific storage caps"
+    )
+}
+
+func testRoboticsAndNaniteStyleAccelerationShortensBuildDurations() {
+    var unaccelerated = makeQueueUniverse(
+        resources: ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.shipyard: 1],
+        researchLevels: [.espionage: 1]
+    )
+    var accelerated = makeQueueUniverse(
+        resources: ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.roboticsFactory: 2, .naniteFactory: 1, .shipyard: 1],
+        researchLevels: [.espionage: 1]
+    )
+
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &unaccelerated, kind: .solarPlant),
+        .queued,
+        "Unaccelerated building should queue"
+    )
+    requireEqual(
+        QueueEngine.startShipBuild(on: queuePlanetID(), in: &unaccelerated, kind: .espionageProbe, quantity: 4),
+        .queued,
+        "Unaccelerated ship build should queue"
+    )
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &accelerated, kind: .solarPlant),
+        .queued,
+        "Accelerated building should queue"
+    )
+    requireEqual(
+        QueueEngine.startShipBuild(on: queuePlanetID(), in: &accelerated, kind: .espionageProbe, quantity: 4),
+        .queued,
+        "Accelerated ship build should queue"
+    )
+
+    let baseBuildingDuration = unaccelerated.planets[0].buildQueue[0].finishTime -
+        unaccelerated.planets[0].buildQueue[0].startTime
+    let acceleratedBuildingDuration = accelerated.planets[0].buildQueue[0].finishTime -
+        accelerated.planets[0].buildQueue[0].startTime
+    let baseShipDuration = unaccelerated.planets[0].shipBuildQueue[0].finishTime -
+        unaccelerated.planets[0].shipBuildQueue[0].startTime
+    let acceleratedShipDuration = accelerated.planets[0].shipBuildQueue[0].finishTime -
+        accelerated.planets[0].shipBuildQueue[0].startTime
+
+    require(acceleratedBuildingDuration < baseBuildingDuration, "Robotics and nanite should shorten building durations")
+    require(acceleratedShipDuration < baseShipDuration, "Robotics and nanite should shorten shipyard durations")
 }
 
 func testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed() {
@@ -4761,6 +5075,7 @@ testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
 testStrategicRankingsScoreFactionStrengthsAndVictoryProgress()
 testStrategicVictoryRoutesTriggerForEconomyTechnologyDominationAndExploration()
+testLateGameObjectiveContributesToTechnologyVictory()
 testSimulationContinuesTickingAfterVictoryWithoutRepeatingVictoryEvent()
 try testStrategicStateRoundTripsThroughJSONAndDefaultsWhenMissing()
 try testExplorationAndRelationStateRoundTripsAndDefaultsWhenMissing()
@@ -4770,6 +5085,9 @@ testEconomyProductionPerHourUsesMineLevelsAndEnergyRatio()
 testEconomyOneHourTickIncreasesOwnedPlanetResources()
 testEconomyProductionClampsToStorageCaps()
 testEconomyEnergyShortageReducesMineOutput()
+testPlanetProductionSettingsScaleMineOutputAndEnergyUse()
+testStorageBuildingsIncreaseStorageCaps()
+testRoboticsAndNaniteStyleAccelerationShortensBuildDurations()
 testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed()
 testEconomyUniverseTickDoesNotProduceOnNonOwnedPlanets()
 testQueueEngineStartsBuildingUpgradeAndPaysCost()
@@ -4804,6 +5122,7 @@ testSimulationTickCompletesAlreadyDueConstructionBeforeProduction()
 testQueueEngineStartsResearchAndPaysFromOwnedPlanet()
 testQueueEngineStartsShipBuildAndCompletesIntoInventory()
 testQueueEngineStartsDefenseBuildAndCompletesIntoInventory()
+testQueueEngineStartsMissileBuildAndCompletesIntoInventory()
 testQueueEngineRejectsBusyUnitQueuesWithoutMutation()
 testQueueEngineRejectsInvalidUnitRulesWithoutMutation()
 testQueueCompletionPreservesMismatchedUnitQueueItemsWithoutMutation()
@@ -4829,6 +5148,9 @@ testAttackShiftsFactionRelationsWithoutHiddenTargetDetails()
 testRepeatedAttacksIncrementThreatWithoutDuplicateRelations()
 try testFactionRelationsNormalizeDuplicatesOnDecodeAndAttackUpdate()
 testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense()
+testMoonChanceCanCreateMoonFromLargeDebrisBattle()
+testMissileStrikeDamagesDefensesWithoutLoot()
+testMissileStrikeRejectsInvalidCoreTargets()
 testAttackReturnCargoIsCappedAfterCargoShipLosses()
 testAttackWithMissingCombatRulesDoesNotMutateTargetOrCreateUnbalancedReport()
 try testAttackMissionIsDeterministicAcrossSaveLoadAndUsesDistinctReportIDs()

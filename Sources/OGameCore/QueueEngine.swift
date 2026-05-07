@@ -68,7 +68,12 @@ public enum QueueEngine {
         }
 
         let targetLevel = currentLevel + 1
-        guard let terms = buildingTerms(rule: rule, targetLevel: targetLevel) else {
+        guard let terms = buildingTerms(
+            rule: rule,
+            targetLevel: targetLevel,
+            planet: universe.planets[planetIndex],
+            ruleSet: universe.ruleSet
+        ) else {
             return .missingRule
         }
 
@@ -206,7 +211,12 @@ public enum QueueEngine {
         }
 
         guard let rule = universe.ruleSet.shipRules[kind],
-              let terms = shipTerms(rule: rule, quantity: quantity)
+              let terms = shipTerms(
+                rule: rule,
+                quantity: quantity,
+                planet: universe.planets[planetIndex],
+                ruleSet: universe.ruleSet
+              )
         else {
             return .missingRule
         }
@@ -278,7 +288,12 @@ public enum QueueEngine {
         }
 
         guard let rule = universe.ruleSet.defenseRules[kind],
-              let terms = defenseTerms(rule: rule, quantity: quantity)
+              let terms = defenseTerms(
+                rule: rule,
+                quantity: quantity,
+                planet: universe.planets[planetIndex],
+                ruleSet: universe.ruleSet
+              )
         else {
             return .missingRule
         }
@@ -323,6 +338,83 @@ public enum QueueEngine {
             ),
             planetID: planetID,
             unitKind: .defense(kind),
+            quantity: quantity,
+            startTime: startTime,
+            finishTime: finishTime,
+            paidCost: paidCost
+        )
+
+        universe.planets[planetIndex].resources = universe.planets[planetIndex].resources.subtracting(paidCost)
+        universe.planets[planetIndex].defenseBuildQueue = [item]
+
+        return .queued
+    }
+
+    public static func startMissileBuild(
+        on planetID: PlanetID,
+        in universe: inout Universe,
+        kind: MissileKind,
+        quantity: Int
+    ) -> QueueResult {
+        guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }) else {
+            return .missingPlanet
+        }
+
+        guard universe.planets[planetIndex].defenseBuildQueue.isEmpty else {
+            return .queueBusy
+        }
+
+        guard let rule = universe.ruleSet.missileRules[kind],
+              let terms = missileTerms(
+                rule: rule,
+                quantity: quantity,
+                planet: universe.planets[planetIndex],
+                ruleSet: universe.ruleSet
+              )
+        else {
+            return .missingRule
+        }
+
+        guard let owningFaction = faction(for: universe.planets[planetIndex].ownerID, in: universe) else {
+            return .missingFaction
+        }
+
+        if let missingRequirement = missingRequirement(
+            for: rule.requirements,
+            planet: universe.planets[planetIndex],
+            faction: owningFaction
+        ) {
+            return .missingRequirement(missingRequirement)
+        }
+
+        let paidCost = terms.cost
+
+        guard universe.planets[planetIndex].resources.canAfford(paidCost) else {
+            return .insufficientResources
+        }
+
+        let startTime = universe.gameTime
+        let finishTime = startTime + terms.duration
+        guard startTime.isFinite, finishTime.isFinite else {
+            return .missingRule
+        }
+
+        let item = UnitBuildQueueItem(
+            id: queueItemID(
+                namespace: "0013",
+                payload: [
+                    "missile",
+                    universe.id.rawValue.uuidString,
+                    planetID.rawValue.uuidString,
+                    kind.rawValue,
+                    String(quantity),
+                    String(startTime),
+                    String(finishTime),
+                    resourcePayload(paidCost)
+                ].joined(separator: "|")
+            ),
+            planetID: planetID,
+            unitKind: .missile(kind),
             quantity: quantity,
             startTime: startTime,
             finishTime: finishTime,
@@ -415,30 +507,48 @@ public enum QueueEngine {
             var completedIDs = Set<UUID>()
 
             for item in dueItems {
-                guard case .defense(let defenseKind) = item.unitKind else {
-                    continue
-                }
-
                 guard item.quantity > 0 else {
                     continue
                 }
 
-                let currentQuantity = normalizedLevel(universe.planets[planetIndex].defenseInventory[defenseKind] ?? 0)
-                let additionResult = currentQuantity.addingReportingOverflow(item.quantity)
-                guard !additionResult.overflow else {
+                switch item.unitKind {
+                case .defense(let defenseKind):
+                    let currentQuantity = normalizedLevel(universe.planets[planetIndex].defenseInventory[defenseKind] ?? 0)
+                    let additionResult = currentQuantity.addingReportingOverflow(item.quantity)
+                    guard !additionResult.overflow else {
+                        continue
+                    }
+
+                    universe.planets[planetIndex].defenseInventory[defenseKind] = additionResult.partialValue
+                    completedIDs.insert(item.id)
+                    universe.events.append(
+                        defenseConstructionCompletionEvent(
+                            for: item,
+                            defenseKind: defenseKind,
+                            planet: universe.planets[planetIndex],
+                            time: item.finishTime
+                        )
+                    )
+                case .missile(let missileKind):
+                    let currentQuantity = normalizedLevel(universe.planets[planetIndex].missileInventory[missileKind] ?? 0)
+                    let additionResult = currentQuantity.addingReportingOverflow(item.quantity)
+                    guard !additionResult.overflow else {
+                        continue
+                    }
+
+                    universe.planets[planetIndex].missileInventory[missileKind] = additionResult.partialValue
+                    completedIDs.insert(item.id)
+                    universe.events.append(
+                        missileConstructionCompletionEvent(
+                            for: item,
+                            missileKind: missileKind,
+                            planet: universe.planets[planetIndex],
+                            time: item.finishTime
+                        )
+                    )
+                case .ship:
                     continue
                 }
-
-                universe.planets[planetIndex].defenseInventory[defenseKind] = additionResult.partialValue
-                completedIDs.insert(item.id)
-                universe.events.append(
-                    defenseConstructionCompletionEvent(
-                        for: item,
-                        defenseKind: defenseKind,
-                        planet: universe.planets[planetIndex],
-                        time: item.finishTime
-                    )
-                )
             }
 
             universe.planets[planetIndex].defenseBuildQueue.removeAll { completedIDs.contains($0.id) }
@@ -482,7 +592,12 @@ public enum QueueEngine {
         return universe.factions.first { $0.id == factionID }
     }
 
-    private static func buildingTerms(rule: BuildingRule, targetLevel: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+    private static func buildingTerms(
+        rule: BuildingRule,
+        targetLevel: Int,
+        planet: Planet,
+        ruleSet: RuleSet
+    ) -> (cost: ResourceBundle, duration: TimeInterval)? {
         guard
             isValidCost(rule.baseCost),
             rule.costMultiplier.isFinite,
@@ -503,7 +618,10 @@ public enum QueueEngine {
         }
 
         let cost = rule.baseCost.scaled(by: costMultiplier)
-        let duration = rule.baseDuration * durationMultiplier
+        let duration = acceleratedDuration(
+            rule.baseDuration * durationMultiplier,
+            speedFactor: constructionSpeedFactor(for: planet, ruleSet: ruleSet)
+        )
         guard isValidCost(cost), duration.isFinite, duration > 0 else {
             return nil
         }
@@ -540,7 +658,12 @@ public enum QueueEngine {
         return (cost, duration)
     }
 
-    private static func shipTerms(rule: ShipRule, quantity: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+    private static func shipTerms(
+        rule: ShipRule,
+        quantity: Int,
+        planet: Planet,
+        ruleSet: RuleSet
+    ) -> (cost: ResourceBundle, duration: TimeInterval)? {
         guard
             quantity > 0,
             isValidCost(rule.baseCost),
@@ -552,7 +675,10 @@ public enum QueueEngine {
 
         let multiplier = Double(quantity)
         let cost = rule.baseCost.scaled(by: multiplier)
-        let duration = rule.baseDuration * multiplier
+        let duration = acceleratedDuration(
+            rule.baseDuration * multiplier,
+            speedFactor: shipyardSpeedFactor(for: planet, ruleSet: ruleSet)
+        )
         guard isValidCost(cost), duration.isFinite, duration > 0 else {
             return nil
         }
@@ -560,7 +686,12 @@ public enum QueueEngine {
         return (cost, duration)
     }
 
-    private static func defenseTerms(rule: DefenseRule, quantity: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+    private static func defenseTerms(
+        rule: DefenseRule,
+        quantity: Int,
+        planet: Planet,
+        ruleSet: RuleSet
+    ) -> (cost: ResourceBundle, duration: TimeInterval)? {
         guard
             quantity > 0,
             isValidCost(rule.baseCost),
@@ -572,7 +703,38 @@ public enum QueueEngine {
 
         let multiplier = Double(quantity)
         let cost = rule.baseCost.scaled(by: multiplier)
-        let duration = rule.baseDuration * multiplier
+        let duration = acceleratedDuration(
+            rule.baseDuration * multiplier,
+            speedFactor: shipyardSpeedFactor(for: planet, ruleSet: ruleSet)
+        )
+        guard isValidCost(cost), duration.isFinite, duration > 0 else {
+            return nil
+        }
+
+        return (cost, duration)
+    }
+
+    private static func missileTerms(
+        rule: MissileRule,
+        quantity: Int,
+        planet: Planet,
+        ruleSet: RuleSet
+    ) -> (cost: ResourceBundle, duration: TimeInterval)? {
+        guard
+            quantity > 0,
+            isValidCost(rule.baseCost),
+            rule.baseDuration.isFinite,
+            rule.baseDuration > 0
+        else {
+            return nil
+        }
+
+        let multiplier = Double(quantity)
+        let cost = rule.baseCost.scaled(by: multiplier)
+        let duration = acceleratedDuration(
+            rule.baseDuration * multiplier,
+            speedFactor: shipyardSpeedFactor(for: planet, ruleSet: ruleSet)
+        )
         guard isValidCost(cost), duration.isFinite, duration > 0 else {
             return nil
         }
@@ -591,6 +753,48 @@ public enum QueueEngine {
 
     private static func normalizedLevel(_ level: Int) -> Int {
         max(level, 0)
+    }
+
+    private static func acceleratedDuration(_ duration: TimeInterval, speedFactor: Double) -> TimeInterval {
+        guard duration.isFinite, duration > 0, speedFactor.isFinite, speedFactor > 0 else {
+            return duration
+        }
+
+        return max(1, ceil(duration / speedFactor))
+    }
+
+    private static func constructionSpeedFactor(for planet: Planet, ruleSet: RuleSet) -> Double {
+        speedFactor(for: planet, ruleSet: ruleSet, keyPath: \.constructionSpeedBonus)
+    }
+
+    private static func shipyardSpeedFactor(for planet: Planet, ruleSet: RuleSet) -> Double {
+        speedFactor(for: planet, ruleSet: ruleSet, keyPath: \.shipyardSpeedBonus)
+    }
+
+    private static func speedFactor(
+        for planet: Planet,
+        ruleSet: RuleSet,
+        keyPath: KeyPath<BuildingRule, Double>
+    ) -> Double {
+        var factor = 1.0
+
+        for (building, level) in planet.buildingLevels {
+            let normalizedLevel = normalizedLevel(level)
+            guard normalizedLevel > 0,
+                  let rule = ruleSet.buildingRules[building]
+            else {
+                continue
+            }
+
+            let bonus = rule[keyPath: keyPath]
+            guard bonus.isFinite, bonus > 0 else {
+                continue
+            }
+
+            factor += bonus * Double(normalizedLevel)
+        }
+
+        return max(factor, 1)
     }
 
     private static func requirementLevel(_ level: Int) -> Int {
@@ -695,6 +899,33 @@ public enum QueueEngine {
         )
     }
 
+    private static func missileConstructionCompletionEvent(
+        for item: UnitBuildQueueItem,
+        missileKind: MissileKind,
+        planet: Planet,
+        time: TimeInterval
+    ) -> GameEvent {
+        return GameEvent(
+            id: EventID(
+                queueItemID(
+                    namespace: "0014",
+                    payload: [
+                        "missile-construction-complete",
+                        item.id.uuidString,
+                        planet.id.rawValue.uuidString,
+                        missileKind.rawValue,
+                        String(item.quantity),
+                        String(time)
+                    ].joined(separator: "|")
+                )
+            ),
+            time: time,
+            kind: .economy,
+            title: "Missile Construction Complete",
+            message: "\(planet.name) completed \(item.quantity) \(missileKind.rawValue)."
+        )
+    }
+
     private static func compareBuildQueueItems(_ lhs: BuildQueueItem, _ rhs: BuildQueueItem) -> Bool {
         if lhs.finishTime != rhs.finishTime {
             return lhs.finishTime < rhs.finishTime
@@ -741,6 +972,8 @@ public enum QueueEngine {
             return "ship:\(kind.rawValue)"
         case .defense(let kind):
             return "defense:\(kind.rawValue)"
+        case .missile(let kind):
+            return "missile:\(kind.rawValue)"
         }
     }
 

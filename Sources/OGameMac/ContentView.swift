@@ -218,6 +218,14 @@ private struct PlanetSummaryCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                if let moon = planet.moon {
+                    Label(moon.name, systemImage: "moon.stars")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
             }
 
             ResourceGrid(resources: planet.resources)
@@ -893,12 +901,19 @@ private struct PlanetDetailView: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    if let moon = planet.moon {
+                        MoonSummaryCard(moon: moon)
+                    }
+
                     PlanetEconomyView(planet: planet, model: model)
                     ConstructionQueueView(planet: planet, model: model)
                     BuildingControlsView(planet: planet, model: model)
                     ShipyardControlsView(planet: planet, model: model)
                     InventoryCard(title: "Ships", values: planet.shipInventory)
                     InventoryCard(title: "Defense", values: planet.defenseInventory)
+                    if !planet.missileInventory.isEmpty {
+                        InventoryCard(title: "Missiles", values: planet.missileInventory)
+                    }
                     ResourceCard(title: "Debris Field", resources: planet.debrisField)
                 }
                 .padding(24)
@@ -910,6 +925,28 @@ private struct PlanetDetailView: View {
             ActivityPanel(model: model)
         }
         .navigationTitle(planet.name)
+    }
+}
+
+private struct MoonSummaryCard: View {
+    let moon: Moon
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: "Moon", detail: moon.name)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 160), alignment: .topLeading)],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    DispatchMetric(title: "Created", value: "T+\(Formatters.wholeSeconds(moon.createdAt))")
+                    DispatchMetric(title: "Facilities", value: Formatters.wholeNumber(Double(moon.buildingLevels.values.reduce(0, +))))
+                }
+            }
+        }
+        .frame(maxWidth: 760, alignment: .leading)
     }
 }
 
@@ -936,14 +973,53 @@ private struct PlanetEconomyView: View {
                     }
 
                     EconomyColumn(title: "Storage") {
-                        ResourceGrid(resources: planet.storage.resourceBundle)
+                        ResourceGrid(resources: model.storageCapacity(for: planet).resourceBundle)
                     }
                 }
 
+                ProductionControlsView(planet: planet, model: model)
                 EnergyMeterView(planet: planet, model: model)
             }
         }
         .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private struct ProductionControlsView: View {
+    let planet: Planet
+    @ObservedObject var model: AppModel
+
+    private let mineKinds: [BuildingKind] = [.metalMine, .crystalMine, .deuteriumSynthesizer]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(mineKinds, id: \.self) { kind in
+                HStack(spacing: 10) {
+                    Image(systemName: kind.systemImage)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18)
+
+                    Text(kind.rawValue.displayName)
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 128, alignment: .leading)
+
+                    Slider(
+                        value: Binding(
+                            get: { model.productionSetting(for: kind, on: planet) },
+                            set: { model.updateProductionSetting(planetID: planet.id, kind: kind, value: $0) }
+                        ),
+                        in: 0...1,
+                        step: 0.05
+                    )
+                    .disabled(!model.canSave)
+
+                    Text(Formatters.percent(model.productionSetting(for: kind, on: planet)))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, alignment: .trailing)
+                }
+            }
+        }
     }
 }
 
@@ -1255,6 +1331,20 @@ private struct ShipyardControlsView: View {
                         }
                     }
                 }
+
+                UnitBuildSection(
+                    title: "Missiles",
+                    systemImage: "scope",
+                    isEmpty: model.availableMissileKinds.isEmpty
+                ) {
+                    ForEach(model.availableMissileKinds, id: \.self) { kind in
+                        MissileBuildRow(planet: planet, kind: kind, model: model)
+
+                        if kind != model.availableMissileKinds.last {
+                            Divider()
+                        }
+                    }
+                }
             }
         }
         .frame(maxWidth: 760, alignment: .leading)
@@ -1331,7 +1421,7 @@ private struct ShipBuildRow: View {
 
                 ResourceCostLine(
                     cost: cost,
-                    durationText: model.durationText(model.shipBuildDuration(for: kind, quantity: quantity)),
+                    durationText: model.durationText(model.shipBuildDuration(for: kind, quantity: quantity, on: planet)),
                     canAfford: canAfford
                 )
 
@@ -1393,7 +1483,7 @@ private struct DefenseBuildRow: View {
 
                 ResourceCostLine(
                     cost: cost,
-                    durationText: model.durationText(model.defenseBuildDuration(for: kind, quantity: quantity)),
+                    durationText: model.durationText(model.defenseBuildDuration(for: kind, quantity: quantity, on: planet)),
                     canAfford: canAfford
                 )
 
@@ -1418,6 +1508,68 @@ private struct DefenseBuildRow: View {
             .buttonStyle(.bordered)
             .disabled(!model.canStartDefenseBuild(planet: planet, kind: kind, quantity: quantity))
             .help(model.defenseBuildLockedReason(planet: planet, kind: kind, quantity: quantity) ?? "Queue defense production")
+        }
+        .padding(.vertical, 10)
+    }
+}
+
+private struct MissileBuildRow: View {
+    let planet: Planet
+    let kind: MissileKind
+    @ObservedObject var model: AppModel
+    @State private var quantity = 1
+
+    private var cost: ResourceBundle? {
+        model.missileBuildCost(for: kind, quantity: quantity)
+    }
+
+    private var canAfford: Bool {
+        cost.map { planet.resources.canAfford($0) } ?? false
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: kind.systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(kind.rawValue.displayName)
+                    .font(.headline)
+                    .lineLimit(1)
+
+                Text("Owned \(planet.missileInventory[kind, default: 0])")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                ResourceCostLine(
+                    cost: cost,
+                    durationText: model.durationText(model.missileBuildDuration(for: kind, quantity: quantity, on: planet)),
+                    canAfford: canAfford
+                )
+
+                if let lockedReason = model.missileBuildLockedReason(planet: planet, kind: kind, quantity: quantity) {
+                    Text(lockedReason)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            QuantityStepper(value: $quantity, range: 1...99)
+
+            Button {
+                model.startMissileBuild(planetID: planet.id, kind: kind, quantity: quantity)
+            } label: {
+                Label("Build", systemImage: "plus.circle")
+            }
+            .controlSize(.small)
+            .buttonStyle(.bordered)
+            .disabled(!model.canStartMissileBuild(planet: planet, kind: kind, quantity: quantity))
+            .help(model.missileBuildLockedReason(planet: planet, kind: kind, quantity: quantity) ?? "Queue missile production")
         }
         .padding(.vertical, 10)
     }
@@ -1462,9 +1614,10 @@ private struct FleetOverviewView: View {
             return "missing"
         }
 
-        return model.availableShipKinds
-            .map { "\($0.rawValue):\(origin.shipInventory[$0, default: 0])" }
-            .joined(separator: "|")
+        let shipCounts = model.availableShipKinds
+            .map { "\($0.rawValue):\(origin.shipInventory[$0, default: 0])" } +
+            ["interplanetaryMissile:\(origin.missileInventory[.interplanetaryMissile, default: 0])"]
+        return shipCounts.joined(separator: "|")
     }
 
     private var targetStateSignature: String {
@@ -1588,6 +1741,7 @@ private struct FleetDispatchPanel: View {
     @Binding var metalCargo: Double
     @Binding var crystalCargo: Double
     @Binding var deuteriumCargo: Double
+    @State private var missileCount = 1
     let launchCargo: ResourceBundle
 
     private var origin: Planet? {
@@ -1604,6 +1758,10 @@ private struct FleetDispatchPanel: View {
 
     private var cargoUsed: Double {
         max(0, metalCargo) + max(0, crystalCargo) + max(0, deuteriumCargo)
+    }
+
+    private var originMissileCount: Int {
+        model.interplanetaryMissileCount(on: originID)
     }
 
     var body: some View {
@@ -1660,6 +1818,16 @@ private struct FleetDispatchPanel: View {
                     cargoCapacity: cargoCapacity
                 )
 
+                if model.canShowMissileStrikeControls(originID: originID) {
+                    MissileStrikeControls(
+                        model: model,
+                        originID: originID,
+                        targetID: targetID,
+                        missileCount: $missileCount,
+                        availableMissiles: originMissileCount
+                    )
+                }
+
                 HStack {
                     Spacer()
 
@@ -1686,6 +1854,59 @@ private struct FleetDispatchPanel: View {
             }
         }
         .frame(maxWidth: 860, alignment: .leading)
+        .onChange(of: originMissileCount) { available in
+            missileCount = min(max(1, missileCount), max(1, available))
+        }
+    }
+}
+
+private struct MissileStrikeControls: View {
+    @ObservedObject var model: AppModel
+    let originID: PlanetID?
+    let targetID: PlanetID?
+    @Binding var missileCount: Int
+    let availableMissiles: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionTitle(title: "Missile Strike", detail: "\(availableMissiles) ready")
+
+            HStack(alignment: .center, spacing: 14) {
+                Stepper(value: $missileCount, in: 1...max(1, availableMissiles)) {
+                    Label("\(missileCount)", systemImage: MissileKind.interplanetaryMissile.systemImage)
+                        .font(.callout.monospacedDigit())
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: 180, alignment: .leading)
+
+                Spacer()
+
+                Button {
+                    model.launchMissileStrike(
+                        originID: originID,
+                        targetID: targetID,
+                        missileCount: missileCount
+                    )
+                } label: {
+                    Label("Strike", systemImage: "scope")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!model.canLaunchMissileStrike(
+                    originID: originID,
+                    targetID: targetID,
+                    missileCount: missileCount
+                ))
+            }
+        }
+        .padding(.top, 2)
+        .onAppear(perform: clampMissileCount)
+        .onChange(of: availableMissiles) { _ in
+            clampMissileCount()
+        }
+    }
+
+    private func clampMissileCount() {
+        missileCount = min(max(1, missileCount), max(1, availableMissiles))
     }
 }
 
@@ -2024,6 +2245,10 @@ private struct ReportsPanel: View {
         model.recentReports.filter { $0.kind == .exploration }
     }
 
+    private var missileReports: [Report] {
+        model.recentReports.filter { $0.kind == .missile }
+    }
+
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
@@ -2039,7 +2264,15 @@ private struct ReportsPanel: View {
                             reports: battleReports,
                             model: model
                         )
-                        SectionDivider(isVisible: !battleReports.isEmpty && (!espionageReports.isEmpty || !explorationReports.isEmpty || !model.recentExplorationEvents.isEmpty))
+                        SectionDivider(isVisible: !battleReports.isEmpty && (!missileReports.isEmpty || !espionageReports.isEmpty || !explorationReports.isEmpty || !model.recentExplorationEvents.isEmpty))
+
+                        ReportRowsSection(
+                            title: "Missile",
+                            systemImage: "scope",
+                            reports: missileReports,
+                            model: model
+                        )
+                        SectionDivider(isVisible: !missileReports.isEmpty && (!espionageReports.isEmpty || !explorationReports.isEmpty || !model.recentExplorationEvents.isEmpty))
 
                         ReportRowsSection(
                             title: "Espionage",
@@ -3385,6 +3618,14 @@ private extension BuildingKind {
             return "wrench.and.screwdriver"
         case .researchLab:
             return "testtube.2"
+        case .metalStorage:
+            return "shippingbox"
+        case .crystalStorage:
+            return "shippingbox.fill"
+        case .deuteriumTank:
+            return "cylinder"
+        case .naniteFactory:
+            return "cpu"
         }
     }
 }
@@ -3420,6 +3661,8 @@ private extension UnitBuildQueueItem {
         case .ship(let kind):
             return kind.systemImage
         case .defense(let kind):
+            return kind.systemImage
+        case .missile(let kind):
             return kind.systemImage
         }
     }
@@ -3459,6 +3702,15 @@ private extension DefenseKind {
             return "bolt"
         case .plasmaTurret:
             return "shield.lefthalf.filled"
+        }
+    }
+}
+
+private extension MissileKind {
+    var systemImage: String {
+        switch self {
+        case .interplanetaryMissile:
+            return "scope"
         }
     }
 }
@@ -3536,6 +3788,8 @@ private extension Report.Kind {
             return "eye"
         case .exploration:
             return "sparkles"
+        case .missile:
+            return "scope"
         }
     }
 }

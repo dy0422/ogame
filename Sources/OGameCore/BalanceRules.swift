@@ -9,6 +9,8 @@ public struct BuildingRule: Codable, Equatable, Sendable {
     public var energyProduced: Double
     public var energyUsed: Double
     public var storageBonus: ResourceStorage
+    public var constructionSpeedBonus: Double
+    public var shipyardSpeedBonus: Double
     public var aiPriorityWeight: Double
     public var requirements: [RuleRequirement]
 
@@ -21,6 +23,8 @@ public struct BuildingRule: Codable, Equatable, Sendable {
         energyProduced: Double = 0,
         energyUsed: Double = 0,
         storageBonus: ResourceStorage = ResourceStorage(),
+        constructionSpeedBonus: Double = 0,
+        shipyardSpeedBonus: Double = 0,
         aiPriorityWeight: Double,
         requirements: [RuleRequirement] = []
     ) {
@@ -32,6 +36,8 @@ public struct BuildingRule: Codable, Equatable, Sendable {
         self.energyProduced = energyProduced
         self.energyUsed = energyUsed
         self.storageBonus = storageBonus
+        self.constructionSpeedBonus = constructionSpeedBonus
+        self.shipyardSpeedBonus = shipyardSpeedBonus
         self.aiPriorityWeight = aiPriorityWeight
         self.requirements = requirements
     }
@@ -45,6 +51,8 @@ public struct BuildingRule: Codable, Equatable, Sendable {
         case energyProduced
         case energyUsed
         case storageBonus
+        case constructionSpeedBonus
+        case shipyardSpeedBonus
         case aiPriorityWeight
         case requirements
     }
@@ -61,6 +69,8 @@ public struct BuildingRule: Codable, Equatable, Sendable {
             energyProduced: try container.decodeIfPresent(Double.self, forKey: .energyProduced) ?? 0,
             energyUsed: try container.decodeIfPresent(Double.self, forKey: .energyUsed) ?? 0,
             storageBonus: try container.decodeIfPresent(ResourceStorage.self, forKey: .storageBonus) ?? ResourceStorage(),
+            constructionSpeedBonus: try container.decodeIfPresent(Double.self, forKey: .constructionSpeedBonus) ?? 0,
+            shipyardSpeedBonus: try container.decodeIfPresent(Double.self, forKey: .shipyardSpeedBonus) ?? 0,
             aiPriorityWeight: try container.decode(Double.self, forKey: .aiPriorityWeight),
             requirements: try container.decodeIfPresent([RuleRequirement].self, forKey: .requirements) ?? []
         )
@@ -381,6 +391,38 @@ public struct DefenseRule: Codable, Equatable, Sendable {
         hullCombatField
 }
 
+public struct MissileRule: Codable, Equatable, Sendable {
+    public var baseCost: ResourceBundle
+    public var baseDuration: TimeInterval
+    public var requirements: [RuleRequirement]
+
+    public init(
+        baseCost: ResourceBundle,
+        baseDuration: TimeInterval,
+        requirements: [RuleRequirement] = []
+    ) {
+        self.baseCost = baseCost
+        self.baseDuration = baseDuration
+        self.requirements = requirements
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case baseCost
+        case baseDuration
+        case requirements
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.init(
+            baseCost: try container.decode(ResourceBundle.self, forKey: .baseCost),
+            baseDuration: try container.decode(TimeInterval.self, forKey: .baseDuration),
+            requirements: try container.decodeIfPresent([RuleRequirement].self, forKey: .requirements) ?? []
+        )
+    }
+}
+
 extension RuleSet {
     static func migrateBuildingRulesForRequirements(
         _ buildingRules: [BuildingKind: BuildingRule],
@@ -478,6 +520,30 @@ extension RuleSet {
         return migratedRules
     }
 
+    static func migrateMissileRulesForRequirements(
+        _ missileRules: [MissileKind: MissileRule],
+        ruleSetID: String
+    ) -> [MissileKind: MissileRule] {
+        guard ruleSetID == RuleSet.fastSkirmish.id else {
+            return missileRules
+        }
+
+        var migratedRules = missileRules
+
+        for (missileKind, defaultRule) in RuleSet.fastSkirmishMissileRules {
+            if var decodedRule = migratedRules[missileKind] {
+                if decodedRule.requirements.isEmpty, !defaultRule.requirements.isEmpty {
+                    decodedRule.requirements = defaultRule.requirements
+                    migratedRules[missileKind] = decodedRule
+                }
+            } else {
+                migratedRules[missileKind] = defaultRule
+            }
+        }
+
+        return migratedRules
+    }
+
     static func migrateShipRulesForFleetFields(_ shipRules: [ShipKind: ShipRule]) -> [ShipKind: ShipRule] {
         var migratedRules = shipRules
 
@@ -550,6 +616,8 @@ public extension RuleSet {
                 costMultiplier: 1.70,
                 baseDuration: 60,
                 durationMultiplier: 1.40,
+                constructionSpeedBonus: 0.20,
+                shipyardSpeedBonus: 0.10,
                 aiPriorityWeight: 0.55
             ),
             .shipyard: BuildingRule(
@@ -566,6 +634,40 @@ public extension RuleSet {
                 baseDuration: 70,
                 durationMultiplier: 1.40,
                 aiPriorityWeight: 0.60
+            ),
+            .metalStorage: BuildingRule(
+                baseCost: ResourceBundle(metal: 1_000),
+                costMultiplier: 1.65,
+                baseDuration: 35,
+                durationMultiplier: 1.35,
+                storageBonus: ResourceStorage(metal: 10_000),
+                aiPriorityWeight: 0.18
+            ),
+            .crystalStorage: BuildingRule(
+                baseCost: ResourceBundle(metal: 1_000, crystal: 500),
+                costMultiplier: 1.65,
+                baseDuration: 35,
+                durationMultiplier: 1.35,
+                storageBonus: ResourceStorage(crystal: 10_000),
+                aiPriorityWeight: 0.18
+            ),
+            .deuteriumTank: BuildingRule(
+                baseCost: ResourceBundle(metal: 1_000, crystal: 1_000),
+                costMultiplier: 1.65,
+                baseDuration: 35,
+                durationMultiplier: 1.35,
+                storageBonus: ResourceStorage(deuterium: 10_000),
+                aiPriorityWeight: 0.16
+            ),
+            .naniteFactory: BuildingRule(
+                baseCost: ResourceBundle(metal: 30_000, crystal: 15_000, deuterium: 5_000),
+                costMultiplier: 2.00,
+                baseDuration: 120,
+                durationMultiplier: 1.55,
+                constructionSpeedBonus: 1.00,
+                shipyardSpeedBonus: 1.00,
+                aiPriorityWeight: 0.12,
+                requirements: [.building(.roboticsFactory, level: 2), .technology(.computer, level: 2)]
             )
         ]
     }
@@ -805,6 +907,16 @@ public extension RuleSet {
                 shield: 300,
                 hull: 100_000,
                 requirements: [.building(.shipyard, level: 6), .technology(.energy, level: 4)]
+            )
+        ]
+    }
+
+    static var fastSkirmishMissileRules: [MissileKind: MissileRule] {
+        [
+            .interplanetaryMissile: MissileRule(
+                baseCost: ResourceBundle(metal: 2_500, crystal: 1_000, deuterium: 2_000),
+                baseDuration: 30,
+                requirements: [.building(.shipyard, level: 4), .technology(.impulseDrive, level: 2)]
             )
         ]
     }

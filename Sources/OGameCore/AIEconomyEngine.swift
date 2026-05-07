@@ -205,6 +205,10 @@ public enum AIEconomyEngine {
                 return 0.2
             case .researchLab:
                 return 0.3
+            case .metalStorage, .crystalStorage, .deuteriumTank:
+                return 0.4
+            case .naniteFactory:
+                return 0.1
             }
         case .technologist:
             switch kind {
@@ -218,6 +222,10 @@ public enum AIEconomyEngine {
                 return 0.6
             case .shipyard:
                 return 0.3
+            case .metalStorage, .crystalStorage, .deuteriumTank:
+                return 0.2
+            case .naniteFactory:
+                return levels[.roboticsFactory, default: 0] >= 2 ? 1.0 : 0.1
             }
         case .expansionist:
             switch kind {
@@ -231,6 +239,10 @@ public enum AIEconomyEngine {
                 return 1.1
             case .researchLab:
                 return 0.8
+            case .metalStorage, .crystalStorage, .deuteriumTank:
+                return 0.3
+            case .naniteFactory:
+                return levels[.roboticsFactory, default: 0] >= 2 ? 1.2 : 0.1
             }
         case .balanced:
             switch kind {
@@ -244,6 +256,10 @@ public enum AIEconomyEngine {
                 return 1.0
             case .shipyard:
                 return 0.8
+            case .metalStorage, .crystalStorage, .deuteriumTank:
+                return 0.35
+            case .naniteFactory:
+                return levels[.roboticsFactory, default: 0] >= 2 ? 0.8 : 0.1
             }
         case .raider:
             switch kind {
@@ -257,6 +273,10 @@ public enum AIEconomyEngine {
                 return energy.available < 10 ? 1.8 : 1.2
             case .metalMine, .crystalMine, .deuteriumSynthesizer:
                 return 1.1
+            case .metalStorage, .crystalStorage, .deuteriumTank:
+                return 0.25
+            case .naniteFactory:
+                return levels[.roboticsFactory, default: 0] >= 2 ? 1.1 : 0.1
             }
         }
     }

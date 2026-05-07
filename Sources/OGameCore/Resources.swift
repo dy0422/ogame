@@ -75,6 +75,22 @@ public struct ResourceStorage: Codable, Equatable, Sendable {
         self.deuterium = deuterium
     }
 
+    public func adding(_ other: ResourceStorage) -> ResourceStorage {
+        ResourceStorage(
+            metal: metal + other.metal,
+            crystal: crystal + other.crystal,
+            deuterium: deuterium + other.deuterium
+        )
+    }
+
+    public func scaled(by multiplier: Double) -> ResourceStorage {
+        ResourceStorage(
+            metal: metal * multiplier,
+            crystal: crystal * multiplier,
+            deuterium: deuterium * multiplier
+        )
+    }
+
     public var asResourceBundle: ResourceBundle {
         ResourceBundle(metal: metal, crystal: crystal, deuterium: deuterium)
     }

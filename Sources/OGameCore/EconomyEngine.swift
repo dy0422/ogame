@@ -5,6 +5,21 @@ public enum EconomyEngine {
         planet.energy = energyState(for: planet, ruleSet: ruleSet)
     }
 
+    public static func storageCapacity(for planet: Planet, ruleSet: RuleSet) -> ResourceStorage {
+        var storage = planet.storage
+
+        for building in BuildingKind.allCases {
+            let level = normalizedLevel(planet.buildingLevels[building] ?? 0)
+            guard level > 0, let rule = ruleSet.buildingRules[building] else {
+                continue
+            }
+
+            storage = storage.adding(rule.storageBonus.scaled(by: Double(level)))
+        }
+
+        return storage
+    }
+
     public static func productionPerHour(for planet: Planet, ruleSet: RuleSet) -> ResourceBundle {
         let energy = energyState(for: planet, ruleSet: ruleSet)
         let ratio = energyRatio(for: energy)
@@ -16,7 +31,10 @@ public enum EconomyEngine {
                 continue
             }
 
-            production = production.adding(scaledProduction(rule.productionPerHour, level: level))
+            production = production.adding(
+                scaledProduction(rule.productionPerHour, level: level)
+                    .scaled(by: productionScale(for: building, on: planet))
+            )
         }
 
         return production.scaled(by: ratio)
@@ -31,7 +49,7 @@ public enum EconomyEngine {
 
         let produced = productionPerHour(for: planet, ruleSet: ruleSet)
             .scaled(by: delta / 3_600)
-        planet.resources = planet.resources.adding(produced).clamped(to: planet.storage)
+        planet.resources = planet.resources.adding(produced).clamped(to: storageCapacity(for: planet, ruleSet: ruleSet))
     }
 
     public static func tick(universe: inout Universe, delta: TimeInterval) {
@@ -74,8 +92,9 @@ public enum EconomyEngine {
                 continue
             }
 
+            let productionScale = productionScale(for: building, on: planet)
             produced += rule.energyProduced * Double(level)
-            used += rule.energyUsed * Double(level)
+            used += rule.energyUsed * Double(level) * productionScale
         }
 
         return EnergyState(produced: produced, used: used)
@@ -92,6 +111,14 @@ public enum EconomyEngine {
 
         let multiplier = Double(level) * pow(1.12, Double(level - 1))
         return baseProduction.scaled(by: multiplier)
+    }
+
+    private static func productionScale(for building: BuildingKind, on planet: Planet) -> Double {
+        guard let value = planet.productionSettings[building], value.isFinite else {
+            return 1
+        }
+
+        return min(max(value, 0), 1)
     }
 
     private static func normalizedLevel(_ level: Int) -> Int {
