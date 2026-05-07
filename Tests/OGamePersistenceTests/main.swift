@@ -202,6 +202,165 @@ func testRepositoryRejectsInvalidFileNamesBeforeLoading() {
     }
 }
 
+func testRepositoryListsSaveSlots() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    let autosave = StarterUniverseFactory.makeNewGame(seed: 16, playerName: "Commander")
+    let campaign = StarterUniverseFactory.makeNewGame(seed: 17, playerName: "Commander")
+
+    try repository.save(autosave, wallClockDate: Date(timeIntervalSince1970: 7_000))
+    try repository.saveSlot(named: "campaign-a.json", universe: campaign, wallClockDate: Date(timeIntervalSince1970: 7_100))
+    try repository.saveSlot(named: "backup-19700101-020000.json", universe: campaign, wallClockDate: Date(timeIntervalSince1970: 7_200))
+
+    let slots = try repository.listSaveSlots()
+
+    requireEqual(
+        slots.map(\.name),
+        ["autosave.json", "backup-19700101-020000.json"],
+        "Repository should only list autosave and backup save slots"
+    )
+    requireEqual(slots.map(\.isAutosave), [true, false], "Repository should identify the autosave slot")
+}
+
+func testRepositoryRejectsInvalidSaveSlotNames() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    let universe = StarterUniverseFactory.makeNewGame(seed: 18, playerName: "Commander")
+
+    for slotName in ["../escape.json", "nested/escape.json", "..", "."] {
+        requireRepositoryError(.invalidFileName(slotName), "Repository should reject invalid save slot names") {
+            try repository.saveSlot(named: slotName, universe: universe, wallClockDate: Date(timeIntervalSince1970: 7_200))
+        }
+
+        requireRepositoryError(.invalidFileName(slotName), "Repository should reject invalid load slot names") {
+            _ = try repository.loadSlot(named: slotName)
+        }
+
+        requireRepositoryError(.invalidFileName(slotName), "Repository should reject invalid delete slot names") {
+            try repository.deleteSlot(named: slotName)
+        }
+    }
+}
+
+func testRepositoryCreatesBackupWithoutReplacingAutosave() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    let universe = StarterUniverseFactory.makeNewGame(seed: 19, playerName: "Commander")
+    let savedAt = Date(timeIntervalSince1970: 7_300)
+
+    try repository.save(universe, wallClockDate: savedAt)
+    let backup = try repository.createBackup(wallClockDate: Date(timeIntervalSince1970: 7_400))
+    let autosaveAfterBackup = try repository.load()
+    let backupEnvelope = try repository.loadSlot(named: backup.name)
+
+    require(backup.name != "autosave.json", "Backup should not use the autosave file name")
+    requireEqual(autosaveAfterBackup.universe, universe, "Creating a backup should preserve the autosave universe")
+    requireEqual(autosaveAfterBackup.lastSavedAt, savedAt, "Creating a backup should preserve the autosave timestamp")
+    requireEqual(backupEnvelope.universe, universe, "Backup should contain the current autosave universe")
+    requireEqual(backupEnvelope.lastSavedAt, savedAt, "Backup should contain the current autosave timestamp")
+}
+
+func testRepositoryDeleteBackupIgnoresNonBackupJSON() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    let universe = StarterUniverseFactory.makeNewGame(seed: 21, playerName: "Commander")
+
+    try repository.save(universe, wallClockDate: Date(timeIntervalSince1970: 7_600))
+    try repository.saveSlot(named: "metadata.json", universe: universe, wallClockDate: Date(timeIntervalSince1970: 7_700))
+    try repository.saveSlot(named: "backup-19700101-021000.json", universe: universe, wallClockDate: Date(timeIntervalSince1970: 7_800))
+
+    requireRepositoryError(.invalidFileName("metadata.json"), "Repository should reject deleting non-backup JSON through backup deletion") {
+        try repository.deleteBackup(named: "metadata.json")
+    }
+
+    try repository.deleteBackup(named: "backup-19700101-021000.json")
+    let remainingSlots = try repository.listSaveSlots()
+
+    require(
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent("metadata.json").path),
+        "Backup deletion should not remove non-backup JSON files"
+    )
+    requireEqual(remainingSlots.map(\.name), ["autosave.json"], "Deleted backups should disappear from listed slots")
+}
+
+func testSaveEnvelopeRoundTripsSettingsAndDefaultsMissingSettings() throws {
+    let universe = StarterUniverseFactory.makeNewGame(seed: 20, playerName: "Commander")
+    let settings = GameSettings(
+        offlineIntensity: .reduced,
+        gameSpeed: 4,
+        isAutosaveEnabled: false,
+        difficulty: .hard
+    )
+    let envelope = SaveEnvelope(
+        lastSavedAt: Date(timeIntervalSince1970: 7_500),
+        universe: universe,
+        settings: settings
+    )
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.dateEncodingStrategy = .iso8601
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+
+    let encoded = try encoder.encode(envelope)
+    let decoded = try decoder.decode(SaveEnvelope.self, from: encoded)
+    let legacyJSON = """
+    {
+      "appVersion": "0.1.0",
+      "lastSavedAt": "1970-01-01T02:05:00Z",
+      "schemaVersion": \(SaveEnvelope.currentSchemaVersion),
+      "universe": \(String(data: try encoder.encode(universe), encoding: .utf8)!)
+    }
+    """
+    let legacyDecoded = try decoder.decode(SaveEnvelope.self, from: Data(legacyJSON.utf8))
+
+    requireEqual(decoded.settings, settings, "Save envelope should preserve settings")
+    requireEqual(legacyDecoded.settings, GameSettings(), "Save envelope should default missing settings from older saves")
+}
+
+func testGameSettingsDecodesPartialSettingsWithDefaults() throws {
+    let decoder = JSONDecoder()
+    let partialJSON = """
+    {
+      "gameSpeed": 2,
+      "offlineIntensity": "not-a-mode"
+    }
+    """
+
+    let settings = try decoder.decode(GameSettings.self, from: Data(partialJSON.utf8))
+
+    requireEqual(settings.gameSpeed, 2, "Settings should preserve valid partial speed")
+    requireEqual(settings.offlineIntensity, .normal, "Settings should default invalid offline intensity")
+    requireEqual(settings.isAutosaveEnabled, true, "Settings should default missing autosave flag")
+    requireEqual(settings.difficulty, .standard, "Settings should default missing difficulty")
+}
+
+func testGameSettingsClampsOutOfRangeSpeed() throws {
+    let decoder = JSONDecoder()
+    let fastJSON = """
+    {
+      "gameSpeed": 99,
+      "offlineIntensity": "intense",
+      "isAutosaveEnabled": false,
+      "difficulty": "hard"
+    }
+    """
+    let slowJSON = """
+    {
+      "gameSpeed": -4
+    }
+    """
+
+    let fastSettings = try decoder.decode(GameSettings.self, from: Data(fastJSON.utf8))
+    let slowSettings = try decoder.decode(GameSettings.self, from: Data(slowJSON.utf8))
+
+    requireEqual(fastSettings.gameSpeed, 8, "Settings should clamp high game speed")
+    requireEqual(fastSettings.offlineIntensity, .intense, "Settings should decode valid offline intensity")
+    requireEqual(fastSettings.isAutosaveEnabled, false, "Settings should decode valid autosave flag")
+    requireEqual(fastSettings.difficulty, .hard, "Settings should decode valid difficulty")
+    requireEqual(slowSettings.gameSpeed, 0.25, "Settings should clamp low game speed")
+}
+
 func testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode() throws {
     let directory = uniqueTemporaryDirectory()
     let repository = JSONSaveRepository(saveDirectory: directory)
@@ -230,5 +389,12 @@ testRepositoryReportsMissingSave()
 try testRepositoryRejectsUnsupportedSchema()
 try testRepositoryRejectsInvalidFileNamesBeforeSaving()
 testRepositoryRejectsInvalidFileNamesBeforeLoading()
+try testRepositoryListsSaveSlots()
+try testRepositoryRejectsInvalidSaveSlotNames()
+try testRepositoryCreatesBackupWithoutReplacingAutosave()
+try testRepositoryDeleteBackupIgnoresNonBackupJSON()
+try testSaveEnvelopeRoundTripsSettingsAndDefaultsMissingSettings()
+try testGameSettingsDecodesPartialSettingsWithDefaults()
+try testGameSettingsClampsOutOfRangeSpeed()
 try testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode()
 print("OGamePersistenceTests passed")

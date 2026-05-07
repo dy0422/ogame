@@ -1,4 +1,6 @@
+import Foundation
 import OGameCore
+import OGamePersistence
 import SwiftUI
 
 struct ContentView: View {
@@ -23,6 +25,7 @@ private enum SidebarDestination: Hashable {
     case victory
     case relations
     case research
+    case settings
     case planet(PlanetID)
 }
 
@@ -55,6 +58,11 @@ private struct SidebarView: View {
 
                 Label("Relations", systemImage: "person.2.wave.2")
                     .tag(SidebarDestination.relations)
+            }
+
+            Section("System") {
+                Label("Settings", systemImage: "gearshape")
+                    .tag(SidebarDestination.settings)
             }
 
             Section("Planets") {
@@ -117,6 +125,8 @@ private struct DetailView: View {
             FactionRelationsView(model: model)
         case .research:
             ResearchOverviewView(model: model)
+        case .settings:
+            SettingsAndSavesView(model: model)
         }
     }
 }
@@ -128,6 +138,10 @@ private struct DashboardView: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if model.isOnboardingVisible {
+                        OnboardingPanel(model: model)
+                    }
+
                     HeaderView(universe: model.universe, faction: model.playerFaction)
                     PlanetSummaryView(planets: model.playerPlanets, model: model)
                     RecentEventsView(events: Array(model.universe.events.suffix(6).reversed()))
@@ -398,7 +412,7 @@ private struct ActivityPanel: View {
                 Button {
                     model.advanceOneMinute()
                 } label: {
-                    Label("Advance 1 Minute", systemImage: "clock.arrow.circlepath")
+                    Label(model.advanceActionTitle, systemImage: "clock.arrow.circlepath")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -427,12 +441,312 @@ private struct ActivityPanel: View {
             StatusMetric(title: "Game Time", value: "T+\(Formatters.wholeSeconds(model.universe.gameTime))")
             StatusMetric(title: "Factions", value: Formatters.wholeNumber(Double(model.universe.factions.count)))
             StatusMetric(title: "Fleets", value: Formatters.wholeNumber(Double(model.universe.fleets.count)))
-            StatusMetric(title: "Save", value: model.canSave ? "Ready" : "Protected")
+            StatusMetric(title: "Save", value: model.canSave ? model.autosaveStatusText : "Protected")
+            StatusMetric(title: "Settings", value: model.settingsStatusText)
 
             Spacer()
         }
         .padding(20)
         .frame(width: 280, alignment: .topLeading)
+    }
+}
+
+private struct OnboardingPanel: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: "First Launch", detail: "Quick setup")
+
+                Text("A new commander profile is ready. Review autosave and simulation speed, then save when you want this universe to become the current autosave.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button {
+                        model.dismissOnboarding()
+                    } label: {
+                        Label("Start Playing", systemImage: "checkmark.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button {
+                        model.save()
+                        model.dismissOnboarding()
+                    } label: {
+                        Label("Save Now", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(!model.canSave)
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct SettingsAndSavesView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Settings")
+                        .font(.largeTitle.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    SettingsPanel(model: model)
+                    SaveManagementPanel(model: model)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+
+            ActivityPanel(model: model)
+        }
+        .navigationTitle("Settings")
+        .onAppear {
+            model.refreshSaveSlots()
+        }
+    }
+}
+
+private struct SettingsPanel: View {
+    @ObservedObject var model: AppModel
+
+    private var gameSpeedBinding: Binding<Double> {
+        Binding(
+            get: { model.settings.gameSpeed },
+            set: { model.updateGameSpeed($0) }
+        )
+    }
+
+    private var autosaveBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.isAutosaveEnabled },
+            set: { model.updateAutosaveEnabled($0) }
+        )
+    }
+
+    private var offlineIntensityBinding: Binding<GameSettings.OfflineIntensity> {
+        Binding(
+            get: { model.settings.offlineIntensity },
+            set: { model.updateOfflineIntensity($0) }
+        )
+    }
+
+    private var difficultyBinding: Binding<GameSettings.Difficulty> {
+        Binding(
+            get: { model.settings.difficulty },
+            set: { model.updateDifficulty($0) }
+        )
+    }
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 16) {
+                SectionTitle(title: "Simulation", detail: model.settingsStatusText)
+
+                Toggle(isOn: autosaveBinding) {
+                    Label("Autosave queue and fleet actions", systemImage: "externaldrive.badge.checkmark")
+                }
+                .toggleStyle(.checkbox)
+                .disabled(!model.canSave)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Label("Game Speed", systemImage: "speedometer")
+                            .font(.callout.weight(.semibold))
+
+                        Spacer(minLength: 12)
+
+                        Text("\(model.settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x")
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Slider(value: gameSpeedBinding, in: 0.25...8, step: 0.25)
+                        .disabled(!model.canSave)
+                }
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 220), alignment: .topLeading)],
+                    alignment: .leading,
+                    spacing: 12
+                ) {
+                    SettingPicker(
+                        title: "Offline Intensity",
+                        systemImage: "moon.zzz",
+                        selection: offlineIntensityBinding,
+                        options: GameSettings.OfflineIntensity.allCases
+                    ) { option in
+                        option.displayName
+                    }
+
+                    SettingPicker(
+                        title: "Difficulty",
+                        systemImage: "dial.medium",
+                        selection: difficultyBinding,
+                        options: GameSettings.Difficulty.allCases
+                    ) { option in
+                        option.displayName
+                    }
+                }
+
+                HStack {
+                    Spacer()
+
+                    Button {
+                        model.save()
+                    } label: {
+                        Label("Save Settings", systemImage: "square.and.arrow.down")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.canSave)
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct SettingPicker<Option: Hashable, LabelContent: StringProtocol>: View {
+    let title: String
+    let systemImage: String
+    @Binding var selection: Option
+    let options: [Option]
+    let label: (Option) -> LabelContent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(title, systemImage: systemImage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Picker(title, selection: $selection) {
+                ForEach(options, id: \.self) { option in
+                    Text(String(label(option)))
+                        .tag(option)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+private struct SaveManagementPanel: View {
+    @ObservedObject var model: AppModel
+
+    private var canCreateBackup: Bool {
+        model.canSave && model.saveSlots.contains { $0.isAutosave }
+    }
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionTitle(title: "Save Management", detail: "\(model.saveSlots.count) slots")
+
+                HStack(spacing: 10) {
+                    Button {
+                        model.createBackup()
+                    } label: {
+                        Label("Create Backup", systemImage: "archivebox")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canCreateBackup)
+
+                    Button {
+                        model.refreshSaveSlots()
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                }
+
+                if model.saveSlots.isEmpty {
+                    QueueEmptyLine(title: "Save autosave before creating backups", systemImage: "externaldrive.badge.plus")
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.saveSlots) { slot in
+                            SaveSlotRow(slot: slot, model: model)
+
+                            if slot.id != model.saveSlots.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct SaveSlotRow: View {
+    let slot: JSONSaveRepository.SaveSlot
+    @ObservedObject var model: AppModel
+    @State private var isConfirmingDelete = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: slot.isAutosave ? "externaldrive.badge.checkmark" : "doc.badge.clock")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(slot.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+
+                Text(slotDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+
+            Button(role: .destructive) {
+                isConfirmingDelete = true
+            } label: {
+                Label(slot.isAutosave ? "Autosave Protected" : "Delete Backup", systemImage: "trash")
+            }
+            .controlSize(.small)
+            .disabled(slot.isAutosave)
+        }
+        .padding(.vertical, 10)
+        .confirmationDialog(
+            "Delete Backup",
+            isPresented: $isConfirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete \(slot.name)", role: .destructive) {
+                model.deleteSaveSlot(named: slot.name)
+            }
+
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Delete backup \(slot.name)? This cannot be undone.")
+        }
+    }
+
+    private var slotDetail: String {
+        let kind = slot.isAutosave ? "Autosave" : "Backup"
+        let size = ByteCountFormatter.string(fromByteCount: slot.byteCount, countStyle: .file)
+        guard let lastModifiedAt = slot.lastModifiedAt else {
+            return "\(kind) - \(size)"
+        }
+
+        return "\(kind) - \(size) - \(lastModifiedAt.formatted(date: .abbreviated, time: .shortened))"
     }
 }
 

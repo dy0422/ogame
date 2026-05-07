@@ -10,6 +10,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var canSave: Bool
     @Published private(set) var offlineSummary: OfflineCatchUpSummary? = nil
     @Published private(set) var hasPendingOfflineCatchUpSave = false
+    @Published var settings: GameSettings
+    @Published private(set) var saveSlots: [JSONSaveRepository.SaveSlot] = []
+    @Published private(set) var isOnboardingVisible: Bool
 
     private let repository: JSONSaveRepository
     private let currentDate: () -> Date
@@ -39,8 +42,10 @@ final class AppModel: ObservableObject {
             let loadedAt = currentDate()
             let catchUpResult = envelope.offlineCatchUp(until: loadedAt)
             universe = Self.refreshedStrategicUniverse(catchUpResult.universe)
+            settings = envelope.settings
             offlineSummary = catchUpResult.summary.didMutate ? catchUpResult.summary : nil
             hasPendingOfflineCatchUpSave = catchUpResult.summary.didMutate
+            isOnboardingVisible = false
             canSave = true
 
             if catchUpResult.summary.didMutate {
@@ -52,19 +57,25 @@ final class AppModel: ObservableObject {
             universe = Self.refreshedStrategicUniverse(
                 StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
             )
+            settings = GameSettings()
             offlineSummary = nil
             hasPendingOfflineCatchUpSave = false
+            isOnboardingVisible = true
             statusMessage = "New fast skirmish initialized."
             canSave = true
         } catch {
             universe = Self.refreshedStrategicUniverse(
                 StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
             )
+            settings = GameSettings()
             offlineSummary = nil
             hasPendingOfflineCatchUpSave = false
+            isOnboardingVisible = true
             statusMessage = Self.loadFailureStatus(for: error)
             canSave = false
         }
+
+        refreshSaveSlots()
     }
 
     var playerFaction: Faction? {
@@ -347,6 +358,18 @@ final class AppModel: ObservableObject {
             for: offlineSummary,
             hasPendingSave: hasPendingOfflineCatchUpSave
         )
+    }
+
+    var advanceActionTitle: String {
+        "Advance \(Self.formattedDuration(advanceDelta))"
+    }
+
+    var settingsStatusText: String {
+        "Speed \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x - Offline \(settings.offlineIntensity.displayName) - \(settings.difficulty.displayName)"
+    }
+
+    var autosaveStatusText: String {
+        settings.isAutosaveEnabled ? "Autosave On" : "Autosave Off"
     }
 
     func startBuildingUpgrade(planetID: PlanetID, kind: BuildingKind) {
@@ -886,9 +909,9 @@ final class AppModel: ObservableObject {
             return
         }
 
-        SimulationEngine.tick(universe: &universe, delta: 60)
+        SimulationEngine.tick(universe: &universe, delta: advanceDelta)
         refreshStrategicState()
-        statusMessage = "Advanced to T+\(Self.formattedWholeSeconds(universe.gameTime))."
+        statusMessage = "Advanced \(Self.formattedDuration(advanceDelta)) at \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x speed to T+\(Self.formattedWholeSeconds(universe.gameTime))."
     }
 
     func save() {
@@ -900,11 +923,12 @@ final class AppModel: ObservableObject {
         do {
             refreshStrategicState()
             let savedPendingOfflineCatchUp = hasPendingOfflineCatchUpSave
-            try repository.save(universe, wallClockDate: currentDate())
+            try repository.save(universe, wallClockDate: currentDate(), settings: settings)
             hasPendingOfflineCatchUpSave = false
             statusMessage = savedPendingOfflineCatchUp
                 ? "Saved universe. Offline progress is now saved."
                 : "Saved universe."
+            refreshSaveSlots()
         } catch {
             statusMessage = "Save failed: \(error.localizedDescription)"
         }
@@ -916,7 +940,68 @@ final class AppModel: ObservableObject {
         offlineSummary = nil
         hasPendingOfflineCatchUpSave = false
         canSave = true
+        isOnboardingVisible = true
         statusMessage = "New game started. Saving will replace the current autosave."
+    }
+
+    func dismissOnboarding() {
+        isOnboardingVisible = false
+        statusMessage = "Onboarding dismissed. Use Settings to tune saves and simulation speed."
+    }
+
+    func updateGameSpeed(_ gameSpeed: Double) {
+        settings.gameSpeed = GameSettings.clampedGameSpeed(gameSpeed)
+        statusMessage = "Game speed set to \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x. Manual advance uses this speed."
+    }
+
+    func updateOfflineIntensity(_ offlineIntensity: GameSettings.OfflineIntensity) {
+        settings.offlineIntensity = offlineIntensity
+        statusMessage = "Offline simulation set to \(offlineIntensity.displayName). Save to keep this setting."
+    }
+
+    func updateAutosaveEnabled(_ isEnabled: Bool) {
+        settings.isAutosaveEnabled = isEnabled
+        statusMessage = isEnabled
+            ? "Autosave enabled for queue and fleet actions."
+            : "Autosave disabled. Queue and fleet actions will wait for manual save."
+    }
+
+    func updateDifficulty(_ difficulty: GameSettings.Difficulty) {
+        settings.difficulty = difficulty
+        statusMessage = "Difficulty set to \(difficulty.displayName). Save to keep this setting."
+    }
+
+    func refreshSaveSlots() {
+        do {
+            saveSlots = try repository.listSaveSlots()
+        } catch {
+            saveSlots = []
+        }
+    }
+
+    func createBackup() {
+        do {
+            let slot = try repository.createBackup(wallClockDate: currentDate())
+            refreshSaveSlots()
+            statusMessage = "Created backup \(slot.name). Autosave was not modified."
+        } catch {
+            statusMessage = "Backup failed: \(Self.loadFailureDescription(for: error))"
+        }
+    }
+
+    func deleteSaveSlot(named slotName: String) {
+        guard slotName != repository.fileName else {
+            statusMessage = "Autosave is protected here. Create a backup before removing saves manually."
+            return
+        }
+
+        do {
+            try repository.deleteBackup(named: slotName)
+            refreshSaveSlots()
+            statusMessage = "Deleted backup \(slotName)."
+        } catch {
+            statusMessage = "Delete failed: \(Self.loadFailureDescription(for: error))"
+        }
     }
 
     private static func loadFailureStatus(for error: Error) -> String {
@@ -975,6 +1060,10 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    private var advanceDelta: TimeInterval {
+        60 * GameSettings.clampedGameSpeed(settings.gameSpeed)
+    }
+
     private func autosaveAfterQueueing(successStatus: String) {
         refreshStrategicState()
 
@@ -983,8 +1072,14 @@ final class AppModel: ObservableObject {
             return
         }
 
+        guard settings.isAutosaveEnabled else {
+            statusMessage = "\(successStatus) Autosave is off; use Save when ready."
+            return
+        }
+
         do {
-            try repository.save(universe, wallClockDate: currentDate())
+            try repository.save(universe, wallClockDate: currentDate(), settings: settings)
+            refreshSaveSlots()
             statusMessage = "\(successStatus) Autosaved."
         } catch {
             statusMessage = "\(successStatus) Autosave failed: \(error.localizedDescription)"
@@ -1416,6 +1511,34 @@ struct StarMapPlanetSection: Identifiable {
     let planets: [StarMapPlanetSummary]
 
     var id: Kind { kind }
+}
+
+extension GameSettings.OfflineIntensity {
+    var displayName: String {
+        switch self {
+        case .paused:
+            return "Paused"
+        case .reduced:
+            return "Reduced"
+        case .normal:
+            return "Normal"
+        case .intense:
+            return "Intense"
+        }
+    }
+}
+
+extension GameSettings.Difficulty {
+    var displayName: String {
+        switch self {
+        case .easy:
+            return "Easy"
+        case .standard:
+            return "Standard"
+        case .hard:
+            return "Hard"
+        }
+    }
 }
 
 struct StarMapPlanetSummary: Identifiable {

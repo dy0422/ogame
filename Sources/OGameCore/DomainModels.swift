@@ -1,5 +1,80 @@
 import Foundation
 
+public struct GameSettings: Codable, Equatable, Sendable {
+    public enum OfflineIntensity: String, Codable, CaseIterable, Sendable {
+        case paused
+        case reduced
+        case normal
+        case intense
+
+        public var multiplier: Double {
+            switch self {
+            case .paused:
+                return 0
+            case .reduced:
+                return 0.5
+            case .normal:
+                return 1
+            case .intense:
+                return 2
+            }
+        }
+    }
+
+    public enum Difficulty: String, Codable, CaseIterable, Sendable {
+        case easy
+        case standard
+        case hard
+    }
+
+    public var offlineIntensity: OfflineIntensity
+    public var gameSpeed: Double
+    public var isAutosaveEnabled: Bool
+    public var difficulty: Difficulty
+
+    public init(
+        offlineIntensity: OfflineIntensity = .normal,
+        gameSpeed: Double = 1,
+        isAutosaveEnabled: Bool = true,
+        difficulty: Difficulty = .standard
+    ) {
+        self.offlineIntensity = offlineIntensity
+        self.gameSpeed = Self.clampedGameSpeed(gameSpeed)
+        self.isAutosaveEnabled = isAutosaveEnabled
+        self.difficulty = difficulty
+    }
+
+    public static func clampedGameSpeed(_ value: Double) -> Double {
+        guard value.isFinite else {
+            return 1
+        }
+
+        return min(max(value, 0.25), 8)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case offlineIntensity
+        case gameSpeed
+        case isAutosaveEnabled
+        case difficulty
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = GameSettings()
+        let offlineIntensityValue = try? container.decodeIfPresent(String.self, forKey: .offlineIntensity)
+        let difficultyValue = try? container.decodeIfPresent(String.self, forKey: .difficulty)
+        let gameSpeedValue = try? container.decodeIfPresent(Double.self, forKey: .gameSpeed)
+        let autosaveValue = try? container.decodeIfPresent(Bool.self, forKey: .isAutosaveEnabled)
+
+        self.offlineIntensity = offlineIntensityValue
+            .flatMap(OfflineIntensity.init(rawValue:)) ?? defaults.offlineIntensity
+        self.gameSpeed = Self.clampedGameSpeed(gameSpeedValue ?? defaults.gameSpeed)
+        self.isAutosaveEnabled = autosaveValue ?? defaults.isAutosaveEnabled
+        self.difficulty = difficultyValue.flatMap(Difficulty.init(rawValue:)) ?? defaults.difficulty
+    }
+}
+
 public struct Universe: Codable, Equatable, Sendable, Identifiable {
     public var id: UniverseID
     public var name: String
