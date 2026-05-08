@@ -3899,40 +3899,66 @@ func testQueueEngineRejectsUnaffordableBuildingAndResearchWithoutMutation() {
     requireEqual(researchUniverse, originalResearchUniverse, "Unaffordable research should not mutate the universe")
 }
 
-func testQueueEngineRejectsBusyBuildingAndResearchQueuesWithoutMutation() {
+func testQueueEngineAppendsBuildingAndResearchQueues() {
     let buildItem = BuildQueueItem(
         id: UUID(uuidString: "00000000-0000-0000-0000-0000000000c3")!,
         planetID: queuePlanetID(),
-        buildingKind: .solarPlant,
-        targetLevel: 1,
+        buildingKind: .metalMine,
+        targetLevel: 2,
         startTime: 0,
-        finishTime: 18,
-        paidCost: ResourceBundle(metal: 75, crystal: 30)
+        finishTime: 26,
+        paidCost: ResourceBundle(metal: 90, crystal: 22.5)
     )
-    var buildingUniverse = makeQueueUniverse(buildQueue: [buildItem])
-    let originalBuildingUniverse = buildingUniverse
+    var buildingUniverse = makeQueueUniverse(
+        resources: ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 10_000),
+        buildingLevels: [.metalMine: 1],
+        buildQueue: [buildItem]
+    )
 
     let buildingResult = QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &buildingUniverse, kind: .metalMine)
 
-    requireEqual(buildingResult, QueueResult.queueBusy, "Planet with an active building queue should reject another building")
-    requireEqual(buildingUniverse, originalBuildingUniverse, "Busy building queue rejection should not mutate the universe")
+    requireEqual(buildingResult, QueueResult.queued, "Planet with an active building queue should append another building")
+    requireEqual(buildingUniverse.planets[0].buildQueue.count, 2, "Building queue should keep the existing item and append the new item")
+    let appendedBuilding = buildingUniverse.planets[0].buildQueue[1]
+    requireEqual(appendedBuilding.buildingKind, .metalMine, "Appended building should keep the requested kind")
+    requireEqual(appendedBuilding.targetLevel, 3, "Appended building should target the next queued level")
+    requireEqual(appendedBuilding.startTime, 26, "Appended building should start after the current queue tail")
+    requireEqual(appendedBuilding.finishTime, 60, "Appended building should finish after its own level-scaled duration")
+    requireEqual(
+        buildingUniverse.planets[0].resources,
+        ResourceBundle(metal: 9_865, crystal: 9_966.25, deuterium: 10_000),
+        "Appending a building should pay only the newly queued level cost"
+    )
 
     let researchItem = ResearchQueueItem(
         id: UUID(uuidString: "00000000-0000-0000-0000-0000000000c4")!,
         factionID: queuePlayerID(),
-        technologyKind: .energy,
-        targetLevel: 1,
+        technologyKind: .computer,
+        targetLevel: 2,
         startTime: 0,
-        finishTime: 50,
-        paidCost: ResourceBundle(crystal: 800, deuterium: 400)
+        finishTime: 75,
+        paidCost: ResourceBundle(crystal: 800, deuterium: 1_200)
     )
-    var researchUniverse = makeQueueUniverse(researchQueue: [researchItem])
-    let originalResearchUniverse = researchUniverse
+    var researchUniverse = makeQueueUniverse(
+        resources: ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 10_000),
+        researchLevels: [.computer: 1],
+        researchQueue: [researchItem]
+    )
 
     let researchResult = QueueEngine.startResearch(for: queuePlayerID(), in: &researchUniverse, technology: .computer)
 
-    requireEqual(researchResult, QueueResult.queueBusy, "Faction with an active research queue should reject another research")
-    requireEqual(researchUniverse, originalResearchUniverse, "Busy research queue rejection should not mutate the universe")
+    requireEqual(researchResult, QueueResult.queued, "Faction with an active research queue should append another research")
+    requireEqual(researchUniverse.factions[0].researchQueue.count, 2, "Research queue should keep the existing item and append the new item")
+    let appendedResearch = researchUniverse.factions[0].researchQueue[1]
+    requireEqual(appendedResearch.technologyKind, .computer, "Appended research should keep the requested technology")
+    requireEqual(appendedResearch.targetLevel, 3, "Appended research should target the next queued level")
+    requireEqual(appendedResearch.startTime, 75, "Appended research should start after the current queue tail")
+    requireEqual(appendedResearch.finishTime, 187.5, "Appended research should finish after its own level-scaled duration")
+    requireEqual(
+        researchUniverse.planets[0].resources,
+        ResourceBundle(metal: 10_000, crystal: 8_400, deuterium: 7_600),
+        "Appending research should pay only the newly queued level cost"
+    )
 }
 
 func testQueueEngineReportsMissingEntitiesAndRulesWithoutMutation() {
@@ -4309,7 +4335,7 @@ func testQueueEngineStartsMissileBuildAndCompletesIntoInventory() {
     requireEqual(universe.events.filter { $0.title == "Missile Construction Complete" }.count, 1, "Completing a missile build should record an event")
 }
 
-func testQueueEngineRejectsBusyUnitQueuesWithoutMutation() {
+func testQueueEngineAppendsUnitQueues() {
     let shipItem = UnitBuildQueueItem(
         id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d3")!,
         planetID: queuePlanetID(),
@@ -4319,13 +4345,24 @@ func testQueueEngineRejectsBusyUnitQueuesWithoutMutation() {
         finishTime: 10,
         paidCost: ResourceBundle(metal: 2_000, crystal: 2_000)
     )
-    var shipUniverse = makeQueueUniverse(shipBuildQueue: [shipItem])
-    let originalShipUniverse = shipUniverse
+    var shipUniverse = makeQueueUniverse(
+        resources: ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 10_000),
+        shipBuildQueue: [shipItem]
+    )
 
-    let shipResult = QueueEngine.startShipBuild(on: queuePlanetID(), in: &shipUniverse, kind: .lightFighter, quantity: 1)
+    let shipResult = QueueEngine.startShipBuild(on: queuePlanetID(), in: &shipUniverse, kind: .smallCargo, quantity: 1)
 
-    requireEqual(shipResult, QueueResult.queueBusy, "Planet with an active ship queue should reject another ship build")
-    requireEqual(shipUniverse, originalShipUniverse, "Busy ship queue rejection should not mutate the universe")
+    requireEqual(shipResult, QueueResult.queued, "Planet with an active ship queue should append another ship build")
+    requireEqual(shipUniverse.planets[0].shipBuildQueue.count, 2, "Ship queue should keep the existing item and append the new item")
+    let appendedShip = shipUniverse.planets[0].shipBuildQueue[1]
+    requireEqual(appendedShip.unitKind, .ship(.smallCargo), "Appended ship order should keep the requested ship kind")
+    requireEqual(appendedShip.startTime, 10, "Appended ship order should start after the ship queue tail")
+    requireEqual(appendedShip.finishTime, 20, "Appended ship order should finish after its own duration")
+    requireEqual(
+        shipUniverse.planets[0].resources,
+        ResourceBundle(metal: 8_000, crystal: 8_000, deuterium: 10_000),
+        "Appending a ship order should pay only the newly queued order cost"
+    )
 
     let defenseItem = UnitBuildQueueItem(
         id: UUID(uuidString: "00000000-0000-0000-0000-0000000000d4")!,
@@ -4336,18 +4373,40 @@ func testQueueEngineRejectsBusyUnitQueuesWithoutMutation() {
         finishTime: 6,
         paidCost: ResourceBundle(metal: 2_000)
     )
-    var defenseUniverse = makeQueueUniverse(defenseBuildQueue: [defenseItem])
-    let originalDefenseUniverse = defenseUniverse
+    var defenseUniverse = makeQueueUniverse(
+        resources: ResourceBundle(metal: 40_000, crystal: 20_000, deuterium: 20_000),
+        buildingLevels: [.shipyard: 4],
+        researchLevels: [.impulseDrive: 2],
+        defenseBuildQueue: [defenseItem]
+    )
 
     let defenseResult = QueueEngine.startDefenseBuild(
         on: queuePlanetID(),
         in: &defenseUniverse,
-        kind: .lightLaser,
+        kind: .rocketLauncher,
         quantity: 1
     )
 
-    requireEqual(defenseResult, QueueResult.queueBusy, "Planet with an active defense queue should reject another defense build")
-    requireEqual(defenseUniverse, originalDefenseUniverse, "Busy defense queue rejection should not mutate the universe")
+    requireEqual(defenseResult, QueueResult.queued, "Planet with an active defense queue should append another defense build")
+    requireEqual(defenseUniverse.planets[0].defenseBuildQueue.count, 2, "Defense queue should keep the existing item and append the new item")
+    let appendedDefense = defenseUniverse.planets[0].defenseBuildQueue[1]
+    requireEqual(appendedDefense.unitKind, .defense(.rocketLauncher), "Appended defense order should keep the requested defense kind")
+    requireEqual(appendedDefense.startTime, 6, "Appended defense order should start after the defensive queue tail")
+    requireEqual(appendedDefense.finishTime, 12, "Appended defense order should finish after its own duration")
+
+    let missileResult = QueueEngine.startMissileBuild(
+        on: queuePlanetID(),
+        in: &defenseUniverse,
+        kind: .interplanetaryMissile,
+        quantity: 1
+    )
+
+    requireEqual(missileResult, QueueResult.queued, "Planet with an active defensive queue should append missile builds too")
+    requireEqual(defenseUniverse.planets[0].defenseBuildQueue.count, 3, "Missile build should append to the defensive production queue")
+    let appendedMissile = defenseUniverse.planets[0].defenseBuildQueue[2]
+    requireEqual(appendedMissile.unitKind, .missile(.interplanetaryMissile), "Appended missile order should keep the requested missile kind")
+    requireEqual(appendedMissile.startTime, 12, "Appended missile order should start after the defensive queue tail")
+    requireEqual(appendedMissile.finishTime, 42, "Appended missile order should finish after its own duration")
 }
 
 func testQueueEngineRejectsInvalidUnitRulesWithoutMutation() {
@@ -5425,7 +5484,7 @@ testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed()
 testEconomyUniverseTickDoesNotProduceOnNonOwnedPlanets()
 testQueueEngineStartsBuildingUpgradeAndPaysCost()
 testQueueEngineRejectsUnaffordableBuildingAndResearchWithoutMutation()
-testQueueEngineRejectsBusyBuildingAndResearchQueuesWithoutMutation()
+testQueueEngineAppendsBuildingAndResearchQueues()
 testQueueEngineReportsMissingEntitiesAndRulesWithoutMutation()
 testQueueEngineRejectsInvalidBuildingRuleValuesWithoutMutation()
 testQueueEngineRejectsInvalidResearchDurationWithoutMutation()
@@ -5456,7 +5515,7 @@ testQueueEngineStartsResearchAndPaysFromOwnedPlanet()
 testQueueEngineStartsShipBuildAndCompletesIntoInventory()
 testQueueEngineStartsDefenseBuildAndCompletesIntoInventory()
 testQueueEngineStartsMissileBuildAndCompletesIntoInventory()
-testQueueEngineRejectsBusyUnitQueuesWithoutMutation()
+testQueueEngineAppendsUnitQueues()
 testQueueEngineRejectsInvalidUnitRulesWithoutMutation()
 testQueueCompletionPreservesMismatchedUnitQueueItemsWithoutMutation()
 testQueueCompletionPreservesInvalidUnitQuantitiesWithoutMutation()

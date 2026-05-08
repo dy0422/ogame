@@ -1183,6 +1183,24 @@ private enum ConstructionQueueEntry: Identifiable {
             return "unit-\(item.id.uuidString)"
         }
     }
+
+    var startTime: TimeInterval {
+        switch self {
+        case .building(let item):
+            return item.startTime
+        case .unit(let item):
+            return item.startTime
+        }
+    }
+
+    var finishTime: TimeInterval {
+        switch self {
+        case .building(let item):
+            return item.finishTime
+        case .unit(let item):
+            return item.finishTime
+        }
+    }
 }
 
 private struct ConstructionQueueView: View {
@@ -1190,9 +1208,18 @@ private struct ConstructionQueueView: View {
     @ObservedObject var model: AppModel
 
     private var entries: [ConstructionQueueEntry] {
-        planet.buildQueue.map(ConstructionQueueEntry.building) +
-            planet.shipBuildQueue.map(ConstructionQueueEntry.unit) +
-            planet.defenseBuildQueue.map(ConstructionQueueEntry.unit)
+        (
+            planet.buildQueue.map(ConstructionQueueEntry.building) +
+                planet.shipBuildQueue.map(ConstructionQueueEntry.unit) +
+                planet.defenseBuildQueue.map(ConstructionQueueEntry.unit)
+        )
+        .sorted { lhs, rhs in
+            if lhs.startTime != rhs.startTime {
+                return lhs.startTime < rhs.startTime
+            }
+
+            return lhs.finishTime < rhs.finishTime
+        }
     }
 
     var body: some View {
@@ -1200,7 +1227,7 @@ private struct ConstructionQueueView: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
                     title: "队列",
-                    detail: entries.isEmpty ? "空闲" : "\(entries.count) 个进行中"
+                    detail: entries.isEmpty ? "空闲" : "\(entries.count) 个已排队"
                 )
 
                 if entries.isEmpty {
@@ -1322,7 +1349,7 @@ private struct BuildingControlsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
                     title: "建筑",
-                    detail: planet.buildQueue.isEmpty ? "就绪" : "队列忙碌"
+                    detail: planet.buildQueue.isEmpty ? "可排队" : "\(planet.buildQueue.count) 个已排队，可继续加入"
                 )
 
                 VStack(alignment: .leading, spacing: 0) {
@@ -1463,10 +1490,10 @@ private struct ShipyardControlsView: View {
 
     private var shipyardDetail: String {
         if !planet.shipBuildQueue.isEmpty || !planet.defenseBuildQueue.isEmpty {
-            return "队列进行中"
+            return "\(planet.shipBuildQueue.count + planet.defenseBuildQueue.count) 个已排队，可继续加入"
         }
 
-        return "就绪"
+        return "可排队"
     }
 }
 
@@ -3217,7 +3244,7 @@ private struct ResearchQueueView: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
                     title: "研究队列",
-                    detail: queue.isEmpty ? "空闲" : "\(queue.count) 个进行中"
+                    detail: queue.isEmpty ? "空闲" : "\(queue.count) 个已排队"
                 )
 
                 if queue.isEmpty {
@@ -3286,7 +3313,7 @@ private struct ResearchControlsView: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
                     title: "科技",
-                    detail: model.playerFaction?.researchQueue.isEmpty == false ? "队列忙碌" : "就绪"
+                    detail: model.playerFaction?.researchQueue.isEmpty == false ? "\(model.playerFaction?.researchQueue.count ?? 0) 个已排队，可继续加入" : "可排队"
                 )
 
                 VStack(alignment: .leading, spacing: 0) {

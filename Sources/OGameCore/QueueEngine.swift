@@ -45,10 +45,6 @@ public enum QueueEngine {
             return .missingPlanet
         }
 
-        guard universe.planets[planetIndex].buildQueue.isEmpty else {
-            return .queueBusy
-        }
-
         guard let rule = universe.ruleSet.buildingRules[kind] else {
             return .missingRule
         }
@@ -62,12 +58,13 @@ public enum QueueEngine {
             return .missingRequirement(missingRequirement)
         }
 
-        let currentLevel = normalizedLevel(universe.planets[planetIndex].buildingLevels[kind] ?? 0)
-        guard currentLevel < Int.max else {
+        guard let targetLevel = nextBuildingTargetLevel(
+            for: kind,
+            on: universe.planets[planetIndex]
+        ) else {
             return .missingRule
         }
 
-        let targetLevel = currentLevel + 1
         guard let terms = buildingTerms(
             rule: rule,
             targetLevel: targetLevel,
@@ -83,9 +80,15 @@ public enum QueueEngine {
             return .insufficientResources
         }
 
-        let startTime = universe.gameTime
+        guard let startTime = queueStartTime(
+            currentTime: universe.gameTime,
+            queue: universe.planets[planetIndex].buildQueue,
+            finishTime: \.finishTime
+        ) else {
+            return .missingRule
+        }
         let finishTime = startTime + terms.duration
-        guard startTime.isFinite, finishTime.isFinite else {
+        guard finishTime.isFinite else {
             return .missingRule
         }
 
@@ -112,7 +115,7 @@ public enum QueueEngine {
         )
 
         universe.planets[planetIndex].resources = universe.planets[planetIndex].resources.subtracting(paidCost)
-        universe.planets[planetIndex].buildQueue = [item]
+        universe.planets[planetIndex].buildQueue.append(item)
 
         return .queued
     }
@@ -124,10 +127,6 @@ public enum QueueEngine {
     ) -> QueueResult {
         guard let factionIndex = universe.factions.firstIndex(where: { $0.id == factionID }) else {
             return .missingFaction
-        }
-
-        guard universe.factions[factionIndex].researchQueue.isEmpty else {
-            return .queueBusy
         }
 
         guard let rule = universe.ruleSet.researchRules[technology] else {
@@ -146,12 +145,13 @@ public enum QueueEngine {
             return .missingRequirement(missingRequirement)
         }
 
-        let currentLevel = normalizedLevel(universe.factions[factionIndex].technology.levels[technology] ?? 0)
-        guard currentLevel < Int.max else {
+        guard let targetLevel = nextResearchTargetLevel(
+            for: technology,
+            on: universe.factions[factionIndex]
+        ) else {
             return .missingRule
         }
 
-        let targetLevel = currentLevel + 1
         guard let terms = researchTerms(rule: rule, targetLevel: targetLevel) else {
             return .missingRule
         }
@@ -162,9 +162,15 @@ public enum QueueEngine {
             return .insufficientResources
         }
 
-        let startTime = universe.gameTime
+        guard let startTime = queueStartTime(
+            currentTime: universe.gameTime,
+            queue: universe.factions[factionIndex].researchQueue,
+            finishTime: \.finishTime
+        ) else {
+            return .missingRule
+        }
         let finishTime = startTime + terms.duration
-        guard startTime.isFinite, finishTime.isFinite else {
+        guard finishTime.isFinite else {
             return .missingRule
         }
 
@@ -191,7 +197,7 @@ public enum QueueEngine {
         )
 
         universe.planets[planetIndex].resources = universe.planets[planetIndex].resources.subtracting(paidCost)
-        universe.factions[factionIndex].researchQueue = [item]
+        universe.factions[factionIndex].researchQueue.append(item)
 
         return .queued
     }
@@ -204,10 +210,6 @@ public enum QueueEngine {
     ) -> QueueResult {
         guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }) else {
             return .missingPlanet
-        }
-
-        guard universe.planets[planetIndex].shipBuildQueue.isEmpty else {
-            return .queueBusy
         }
 
         guard let rule = universe.ruleSet.shipRules[kind],
@@ -239,9 +241,15 @@ public enum QueueEngine {
             return .insufficientResources
         }
 
-        let startTime = universe.gameTime
+        guard let startTime = queueStartTime(
+            currentTime: universe.gameTime,
+            queue: universe.planets[planetIndex].shipBuildQueue,
+            finishTime: \.finishTime
+        ) else {
+            return .missingRule
+        }
         let finishTime = startTime + terms.duration
-        guard startTime.isFinite, finishTime.isFinite else {
+        guard finishTime.isFinite else {
             return .missingRule
         }
 
@@ -268,7 +276,7 @@ public enum QueueEngine {
         )
 
         universe.planets[planetIndex].resources = universe.planets[planetIndex].resources.subtracting(paidCost)
-        universe.planets[planetIndex].shipBuildQueue = [item]
+        universe.planets[planetIndex].shipBuildQueue.append(item)
 
         return .queued
     }
@@ -281,10 +289,6 @@ public enum QueueEngine {
     ) -> QueueResult {
         guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }) else {
             return .missingPlanet
-        }
-
-        guard universe.planets[planetIndex].defenseBuildQueue.isEmpty else {
-            return .queueBusy
         }
 
         guard let rule = universe.ruleSet.defenseRules[kind],
@@ -316,9 +320,15 @@ public enum QueueEngine {
             return .insufficientResources
         }
 
-        let startTime = universe.gameTime
+        guard let startTime = queueStartTime(
+            currentTime: universe.gameTime,
+            queue: universe.planets[planetIndex].defenseBuildQueue,
+            finishTime: \.finishTime
+        ) else {
+            return .missingRule
+        }
         let finishTime = startTime + terms.duration
-        guard startTime.isFinite, finishTime.isFinite else {
+        guard finishTime.isFinite else {
             return .missingRule
         }
 
@@ -345,7 +355,7 @@ public enum QueueEngine {
         )
 
         universe.planets[planetIndex].resources = universe.planets[planetIndex].resources.subtracting(paidCost)
-        universe.planets[planetIndex].defenseBuildQueue = [item]
+        universe.planets[planetIndex].defenseBuildQueue.append(item)
 
         return .queued
     }
@@ -358,10 +368,6 @@ public enum QueueEngine {
     ) -> QueueResult {
         guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }) else {
             return .missingPlanet
-        }
-
-        guard universe.planets[planetIndex].defenseBuildQueue.isEmpty else {
-            return .queueBusy
         }
 
         guard let rule = universe.ruleSet.missileRules[kind],
@@ -393,9 +399,15 @@ public enum QueueEngine {
             return .insufficientResources
         }
 
-        let startTime = universe.gameTime
+        guard let startTime = queueStartTime(
+            currentTime: universe.gameTime,
+            queue: universe.planets[planetIndex].defenseBuildQueue,
+            finishTime: \.finishTime
+        ) else {
+            return .missingRule
+        }
         let finishTime = startTime + terms.duration
-        guard startTime.isFinite, finishTime.isFinite else {
+        guard finishTime.isFinite else {
             return .missingRule
         }
 
@@ -422,7 +434,7 @@ public enum QueueEngine {
         )
 
         universe.planets[planetIndex].resources = universe.planets[planetIndex].resources.subtracting(paidCost)
-        universe.planets[planetIndex].defenseBuildQueue = [item]
+        universe.planets[planetIndex].defenseBuildQueue.append(item)
 
         return .queued
     }
@@ -590,6 +602,53 @@ public enum QueueEngine {
         }
 
         return universe.factions.first { $0.id == factionID }
+    }
+
+    private static func nextBuildingTargetLevel(for kind: BuildingKind, on planet: Planet) -> Int? {
+        let currentLevel = normalizedLevel(planet.buildingLevels[kind] ?? 0)
+        let queuedLevel = planet.buildQueue
+            .filter { $0.buildingKind == kind }
+            .map { normalizedLevel($0.targetLevel) }
+            .max() ?? currentLevel
+        let baseLevel = max(currentLevel, queuedLevel)
+        guard baseLevel < Int.max else {
+            return nil
+        }
+
+        return baseLevel + 1
+    }
+
+    private static func nextResearchTargetLevel(for technology: TechnologyKind, on faction: Faction) -> Int? {
+        let currentLevel = normalizedLevel(faction.technology.levels[technology] ?? 0)
+        let queuedLevel = faction.researchQueue
+            .filter { $0.technologyKind == technology }
+            .map { normalizedLevel($0.targetLevel) }
+            .max() ?? currentLevel
+        let baseLevel = max(currentLevel, queuedLevel)
+        guard baseLevel < Int.max else {
+            return nil
+        }
+
+        return baseLevel + 1
+    }
+
+    private static func queueStartTime<Item>(
+        currentTime: TimeInterval,
+        queue: [Item],
+        finishTime: KeyPath<Item, TimeInterval>
+    ) -> TimeInterval? {
+        guard currentTime.isFinite else {
+            return nil
+        }
+
+        return queue.reduce(currentTime) { result, item in
+            let candidate = item[keyPath: finishTime]
+            guard candidate.isFinite else {
+                return result
+            }
+
+            return max(result, candidate)
+        }
     }
 
     private static func buildingTerms(

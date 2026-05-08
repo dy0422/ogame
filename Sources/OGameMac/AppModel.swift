@@ -511,7 +511,7 @@ final class AppModel: ObservableObject {
         }
 
         let planet = universe.planets.first { $0.id == planetID }
-        let targetLevel = planet?.buildQueue.first { $0.buildingKind == kind }?.targetLevel
+        let targetLevel = planet?.buildQueue.last { $0.buildingKind == kind }?.targetLevel
         let status = Self.buildingQueuedStatus(
             planetName: planet?.name,
             kind: kind,
@@ -532,7 +532,7 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let targetLevel = playerFaction?.researchQueue.first { $0.technologyKind == technology }?.targetLevel
+        let targetLevel = playerFaction?.researchQueue.last { $0.technologyKind == technology }?.targetLevel
         let status = Self.researchQueuedStatus(technology: technology, targetLevel: targetLevel)
         autosaveAfterQueueing(successStatus: status)
     }
@@ -700,7 +700,7 @@ final class AppModel: ObservableObject {
     }
 
     func nextBuildingLevel(for kind: BuildingKind, on planet: Planet) -> Int {
-        let level = buildingLevel(for: kind, on: planet)
+        let level = queuedBuildingLevel(for: kind, on: planet)
         guard level < Int.max else {
             return level
         }
@@ -723,10 +723,6 @@ final class AppModel: ObservableObject {
     func buildingUpgradeLockedReason(planet: Planet, kind: BuildingKind) -> String? {
         guard canSave else {
             return "请先开始或载入有效存档"
-        }
-
-        guard planet.buildQueue.isEmpty else {
-            return "建造队列忙碌"
         }
 
         guard let rule = universe.ruleSet.buildingRules[kind],
@@ -755,7 +751,7 @@ final class AppModel: ObservableObject {
     }
 
     func nextResearchLevel(for technology: TechnologyKind) -> Int {
-        let level = researchLevel(for: technology)
+        let level = queuedResearchLevel(for: technology)
         guard level < Int.max else {
             return level
         }
@@ -789,10 +785,6 @@ final class AppModel: ObservableObject {
     func researchLockedReason(_ technology: TechnologyKind) -> String? {
         guard canSave else {
             return "请先开始或载入有效存档"
-        }
-
-        guard playerFaction?.researchQueue.isEmpty == true else {
-            return "研究队列忙碌"
         }
 
         guard let rule = universe.ruleSet.researchRules[technology],
@@ -878,10 +870,6 @@ final class AppModel: ObservableObject {
             return "数量无效"
         }
 
-        guard planet.shipBuildQueue.isEmpty else {
-            return "造船厂队列忙碌"
-        }
-
         guard let rule = universe.ruleSet.shipRules[kind],
               let cost = shipBuildCost(for: kind, quantity: quantity)
         else {
@@ -916,10 +904,6 @@ final class AppModel: ObservableObject {
             return "数量无效"
         }
 
-        guard planet.defenseBuildQueue.isEmpty else {
-            return "防御队列忙碌"
-        }
-
         guard let rule = universe.ruleSet.defenseRules[kind],
               let cost = defenseBuildCost(for: kind, quantity: quantity)
         else {
@@ -952,10 +936,6 @@ final class AppModel: ObservableObject {
 
         guard quantity > 0 else {
             return "数量无效"
-        }
-
-        guard planet.defenseBuildQueue.isEmpty else {
-            return "防御队列忙碌"
         }
 
         guard let rule = universe.ruleSet.missileRules[kind],
@@ -1484,7 +1464,7 @@ final class AppModel: ObservableObject {
         if !planet.buildQueue.isEmpty {
             return CommanderBriefingItem(
                 title: "建筑建议",
-                detail: "建造队列正在运行，完成后优先补经济建筑与电力。",
+                detail: "已排 \(planet.buildQueue.count) 个建筑项目，资源足够时可继续追加经济建筑与电力。",
                 systemImage: "timer",
                 urgency: .info
             )
@@ -1516,10 +1496,10 @@ final class AppModel: ObservableObject {
             return nil
         }
 
-        if playerFaction?.researchQueue.isEmpty == false {
+        if let researchQueue = playerFaction?.researchQueue, !researchQueue.isEmpty {
             return CommanderBriefingItem(
                 title: "科研建议",
-                detail: "研究队列正在运行，完成后再评估驱动和战斗科技。",
+                detail: "已排 \(researchQueue.count) 个研究项目，资源足够时可继续追加驱动和战斗科技。",
                 systemImage: "timer",
                 urgency: .info
             )
@@ -1702,8 +1682,8 @@ final class AppModel: ObservableObject {
             return nil
         }
 
-        let currentLevel = buildingLevel(for: kind, on: planet)
-        guard currentLevel < Int.max else {
+        let targetLevel = nextBuildingLevel(for: kind, on: planet)
+        guard targetLevel > buildingLevel(for: kind, on: planet) else {
             return nil
         }
 
@@ -1712,7 +1692,7 @@ final class AppModel: ObservableObject {
             costMultiplier: rule.costMultiplier,
             baseDuration: rule.baseDuration,
             durationMultiplier: rule.durationMultiplier,
-            targetLevel: currentLevel + 1,
+            targetLevel: targetLevel,
             speedFactor: constructionSpeedFactor(for: planet)
         )
     }
@@ -1750,8 +1730,8 @@ final class AppModel: ObservableObject {
             return nil
         }
 
-        let currentLevel = researchLevel(for: technology)
-        guard currentLevel < Int.max else {
+        let targetLevel = nextResearchLevel(for: technology)
+        guard targetLevel > researchLevel(for: technology) else {
             return nil
         }
 
@@ -1760,8 +1740,28 @@ final class AppModel: ObservableObject {
             costMultiplier: rule.costMultiplier,
             baseDuration: rule.baseDuration,
             durationMultiplier: rule.durationMultiplier,
-            targetLevel: currentLevel + 1
+            targetLevel: targetLevel
         )
+    }
+
+    private func queuedBuildingLevel(for kind: BuildingKind, on planet: Planet) -> Int {
+        let currentLevel = buildingLevel(for: kind, on: planet)
+        let queuedLevel = planet.buildQueue
+            .filter { $0.buildingKind == kind }
+            .map { max($0.targetLevel, 0) }
+            .max() ?? currentLevel
+
+        return max(currentLevel, queuedLevel)
+    }
+
+    private func queuedResearchLevel(for technology: TechnologyKind) -> Int {
+        let currentLevel = researchLevel(for: technology)
+        let queuedLevel = playerFaction?.researchQueue
+            .filter { $0.technologyKind == technology }
+            .map { max($0.targetLevel, 0) }
+            .max() ?? currentLevel
+
+        return max(currentLevel, queuedLevel)
     }
 
     private static func terms(
@@ -1897,7 +1897,7 @@ final class AppModel: ObservableObject {
         case .missingFaction:
             return "找不到阵营"
         case .queueBusy:
-            return "队列忙碌"
+            return "队列暂不可用"
         case .missingRule:
             return "规则缺失或无效"
         case .missingRequirement(let requirement):
