@@ -144,7 +144,7 @@ public enum AIStrategyEngine {
         policy: AIDifficultyPolicy,
         in universe: inout Universe
     ) {
-        guard !hasActiveFleet(for: faction.id, in: universe) else {
+        guard hasAvailableFleetSlot(for: faction, in: universe) else {
             return
         }
 
@@ -233,6 +233,16 @@ public enum AIStrategyEngine {
             let ships = attackShips(from: origin)
             guard !ships.isEmpty else {
                 return false
+            }
+            guard canRiskAttack(
+                from: origin,
+                target: target,
+                faction: faction,
+                ships: ships,
+                policy: policy,
+                in: universe
+            ) else {
+                continue
             }
 
             if case .launched = FleetEngine.launchFleet(
@@ -336,6 +346,7 @@ public enum AIStrategyEngine {
         in universe: Universe
     ) -> Bool {
         guard let report = latestEspionageReport(for: factionID, targetPlanetID: targetPlanetID, in: universe),
+              report.intelTier >= 3,
               let defender = report.participants.first(where: { $0.role == .defender && $0.planetID == targetPlanetID })
         else {
             return false
@@ -344,6 +355,41 @@ public enum AIStrategyEngine {
         let survivingShips = defender.afterShips.reduce(0) { $0 + max($1.value, 0) }
         let survivingDefenses = defender.afterDefenses.reduce(0) { $0 + max($1.value, 0) }
         return survivingShips + survivingDefenses <= 2
+    }
+
+    private static func canRiskAttack(
+        from origin: Planet,
+        target: Planet,
+        faction: Faction,
+        ships: [ShipKind: Int],
+        policy: AIDifficultyPolicy,
+        in universe: Universe
+    ) -> Bool {
+        guard let report = latestEspionageReport(for: faction.id, targetPlanetID: target.id, in: universe) else {
+            return policy.allowsRankingBasedAttacks
+        }
+        guard report.intelTier >= 3,
+              let defender = report.participants.first(where: { $0.role == .defender && $0.planetID == target.id })
+        else {
+            return false
+        }
+
+        let defenderFaction = target.ownerID.flatMap { ownerID in
+            universe.factions.first { $0.id == ownerID }
+        }
+        let preview = BattleSimulationEngine.resolve(
+            BattleSimulationInput(
+                attackerShips: ships,
+                defenderShips: defender.afterShips,
+                defenderDefenses: defender.afterDefenses,
+                attackerResearch: faction.technology,
+                defenderResearch: defenderFaction?.technology ?? ResearchState(),
+                ruleSet: universe.ruleSet,
+                seed: stableHash("\(origin.id.rawValue.uuidString)|\(target.id.rawValue.uuidString)|ai-preview")
+            )
+        )
+
+        return preview.attackerWon && preview.remainingAttackerShips.isEmpty == false
     }
 
     private static func latestEspionageReport(
@@ -404,10 +450,11 @@ public enum AIStrategyEngine {
             }
     }
 
-    private static func hasActiveFleet(for factionID: FactionID, in universe: Universe) -> Bool {
-        universe.fleets.contains { fleet in
-            fleet.ownerID == factionID && fleet.phase != .completed
-        }
+    private static func hasAvailableFleetSlot(for faction: Faction, in universe: Universe) -> Bool {
+        let activeFleetCount = universe.fleets.filter { fleet in
+            fleet.ownerID == faction.id && fleet.phase != .completed
+        }.count
+        return activeFleetCount < TechnologyEffects.maxFleetSlots(for: faction.technology)
     }
 
     private static func canAffordShip(
@@ -466,5 +513,16 @@ public enum AIStrategyEngine {
         }
 
         return lhs.targetPlanetID.rawValue.uuidString < rhs.targetPlanetID.rawValue.uuidString
+    }
+
+    private static func stableHash(_ value: String) -> UInt64 {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+
+        return hash
     }
 }

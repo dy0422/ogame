@@ -15,7 +15,8 @@ public enum StarterUniverseFactory {
             storage: startingStorage,
             temperatureCelsius: temperatureCelsius(for: Coordinate(galaxy: 1, system: 1, position: 4)),
             energy: startingEnergy,
-            buildingLevels: startingBuildingLevels
+            buildingLevels: startingBuildingLevels,
+            maxFields: maxFields(for: Coordinate(galaxy: 1, system: 1, position: 4), seedOffset: 0)
         )
 
         let aiStrategies: [Faction.Strategy] = [.miner, .raider, .technologist, .expansionist, .balanced]
@@ -61,7 +62,8 @@ public enum StarterUniverseFactory {
                     storage: startingStorage,
                     temperatureCelsius: temperatureCelsius(for: coordinate),
                     energy: startingEnergy,
-                    buildingLevels: startingBuildingLevels
+                    buildingLevels: startingBuildingLevels,
+                    maxFields: maxFields(for: coordinate, seedOffset: index)
                 )
             )
         }
@@ -81,7 +83,8 @@ public enum StarterUniverseFactory {
                     resources: ResourceBundle(metal: 100 + Double(offset * 50), crystal: 50, deuterium: 20),
                     storage: startingStorage,
                     temperatureCelsius: temperatureCelsius(for: coordinate),
-                    debrisField: ResourceBundle(metal: 25 + Double(offset * 10), crystal: 10)
+                    debrisField: ResourceBundle(metal: 25 + Double(offset * 10), crystal: 10),
+                    maxFields: maxFields(for: coordinate, seedOffset: 6 + offset)
                 )
             )
         }
@@ -127,5 +130,11 @@ public enum StarterUniverseFactory {
 
     private static func temperatureCelsius(for coordinate: Coordinate) -> Double {
         100 - Double(coordinate.position) * 15
+    }
+
+    private static func maxFields(for coordinate: Coordinate, seedOffset: Int) -> Int {
+        let centerBonus = max(0, 9 - abs(coordinate.position - 8)) * 6
+        let variation = abs((coordinate.system * 17 + coordinate.position * 31 + seedOffset * 13) % 24)
+        return 140 + centerBonus + variation
     }
 }

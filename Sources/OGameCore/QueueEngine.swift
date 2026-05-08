@@ -8,9 +8,133 @@ public enum QueueResult: Equatable, Sendable {
     case queueBusy
     case missingRule
     case missingRequirement(RuleRequirement)
+    case noAvailableFields
 }
 
 public enum QueueEngine {
+    public static func buildingUpgradeCost(
+        on planetID: PlanetID,
+        in universe: Universe,
+        kind: BuildingKind
+    ) -> ResourceBundle? {
+        guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }),
+              let rule = universe.ruleSet.buildingRules[kind]
+        else {
+            return nil
+        }
+
+        let owningFaction = faction(for: universe.planets[planetIndex].ownerID, in: universe)
+        guard missingRequirement(for: rule.requirements, planet: universe.planets[planetIndex], faction: owningFaction) == nil,
+              let targetLevel = nextBuildingTargetLevel(for: kind, on: universe.planets[planetIndex]),
+              hasFieldCapacity(for: kind, on: universe.planets[planetIndex]),
+              let terms = buildingTerms(
+                rule: rule,
+                targetLevel: targetLevel,
+                planet: universe.planets[planetIndex],
+                ruleSet: universe.ruleSet
+              )
+        else {
+            return nil
+        }
+
+        return terms.cost
+    }
+
+    public static func researchCost(
+        for factionID: FactionID,
+        in universe: Universe,
+        technology: TechnologyKind
+    ) -> ResourceBundle? {
+        guard let factionIndex = universe.factions.firstIndex(where: { $0.id == factionID }),
+              let rule = universe.ruleSet.researchRules[technology],
+              let planetIndex = paymentPlanetIndex(for: universe.factions[factionIndex], in: universe)
+        else {
+            return nil
+        }
+
+        guard missingRequirement(
+            for: rule.requirements,
+            planet: universe.planets[planetIndex],
+            faction: universe.factions[factionIndex]
+        ) == nil,
+            let targetLevel = nextResearchTargetLevel(for: technology, on: universe.factions[factionIndex])
+        else {
+            return nil
+        }
+
+        let labLevel = normalizedLevel(universe.planets[planetIndex].buildingLevels[.researchLab] ?? 0)
+        return researchTerms(rule: rule, targetLevel: targetLevel, labLevel: labLevel)?.cost
+    }
+
+    public static func shipBuildCost(
+        on planetID: PlanetID,
+        in universe: Universe,
+        kind: ShipKind,
+        quantity: Int
+    ) -> ResourceBundle? {
+        guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }),
+              let rule = universe.ruleSet.shipRules[kind],
+              let terms = shipTerms(
+                rule: rule,
+                quantity: quantity,
+                planet: universe.planets[planetIndex],
+                ruleSet: universe.ruleSet
+              ),
+              let owningFaction = faction(for: universe.planets[planetIndex].ownerID, in: universe),
+              missingRequirement(for: rule.requirements, planet: universe.planets[planetIndex], faction: owningFaction) == nil
+        else {
+            return nil
+        }
+
+        return terms.cost
+    }
+
+    public static func defenseBuildCost(
+        on planetID: PlanetID,
+        in universe: Universe,
+        kind: DefenseKind,
+        quantity: Int
+    ) -> ResourceBundle? {
+        guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }),
+              let rule = universe.ruleSet.defenseRules[kind],
+              let terms = defenseTerms(
+                rule: rule,
+                quantity: quantity,
+                planet: universe.planets[planetIndex],
+                ruleSet: universe.ruleSet
+              ),
+              let owningFaction = faction(for: universe.planets[planetIndex].ownerID, in: universe),
+              missingRequirement(for: rule.requirements, planet: universe.planets[planetIndex], faction: owningFaction) == nil
+        else {
+            return nil
+        }
+
+        return terms.cost
+    }
+
+    public static func missileBuildCost(
+        on planetID: PlanetID,
+        in universe: Universe,
+        kind: MissileKind,
+        quantity: Int
+    ) -> ResourceBundle? {
+        guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }),
+              let rule = universe.ruleSet.missileRules[kind],
+              let terms = missileTerms(
+                rule: rule,
+                quantity: quantity,
+                planet: universe.planets[planetIndex],
+                ruleSet: universe.ruleSet
+              ),
+              let owningFaction = faction(for: universe.planets[planetIndex].ownerID, in: universe),
+              missingRequirement(for: rule.requirements, planet: universe.planets[planetIndex], faction: owningFaction) == nil
+        else {
+            return nil
+        }
+
+        return terms.cost
+    }
+
     public static func missingRequirement(
         for requirements: [RuleRequirement],
         planet: Planet,
@@ -19,7 +143,10 @@ public enum QueueEngine {
         for requirement in requirements {
             switch requirement {
             case let .building(kind, level):
-                if normalizedLevel(planet.buildingLevels[kind] ?? 0) < requirementLevel(level) {
+                let currentLevel = kind.isMoonFacility
+                    ? normalizedLevel(planet.moon?.buildingLevels[kind] ?? 0)
+                    : normalizedLevel(planet.buildingLevels[kind] ?? 0)
+                if currentLevel < requirementLevel(level) {
                     return .building(kind, level: requirementLevel(level))
                 }
             case let .technology(kind, level):
@@ -63,6 +190,10 @@ public enum QueueEngine {
             on: universe.planets[planetIndex]
         ) else {
             return .missingRule
+        }
+
+        guard hasFieldCapacity(for: kind, on: universe.planets[planetIndex]) else {
+            return .noAvailableFields
         }
 
         guard let terms = buildingTerms(
@@ -152,7 +283,8 @@ public enum QueueEngine {
             return .missingRule
         }
 
-        guard let terms = researchTerms(rule: rule, targetLevel: targetLevel) else {
+        let labLevel = normalizedLevel(universe.planets[planetIndex].buildingLevels[.researchLab] ?? 0)
+        guard let terms = researchTerms(rule: rule, targetLevel: targetLevel, labLevel: labLevel) else {
             return .missingRule
         }
 
@@ -456,8 +588,13 @@ public enum QueueEngine {
             }
 
             for item in dueItems {
-                let currentLevel = normalizedLevel(universe.planets[planetIndex].buildingLevels[item.buildingKind] ?? 0)
-                universe.planets[planetIndex].buildingLevels[item.buildingKind] = max(currentLevel, item.targetLevel)
+                if item.buildingKind.isMoonFacility, universe.planets[planetIndex].moon != nil {
+                    let currentLevel = normalizedLevel(universe.planets[planetIndex].moon?.buildingLevels[item.buildingKind] ?? 0)
+                    universe.planets[planetIndex].moon?.buildingLevels[item.buildingKind] = max(currentLevel, item.targetLevel)
+                } else {
+                    let currentLevel = normalizedLevel(universe.planets[planetIndex].buildingLevels[item.buildingKind] ?? 0)
+                    universe.planets[planetIndex].buildingLevels[item.buildingKind] = max(currentLevel, item.targetLevel)
+                }
                 universe.events.append(constructionCompletionEvent(for: item, planet: universe.planets[planetIndex], time: item.finishTime))
             }
 
@@ -629,7 +766,9 @@ public enum QueueEngine {
     }
 
     private static func nextBuildingTargetLevel(for kind: BuildingKind, on planet: Planet) -> Int? {
-        let currentLevel = normalizedLevel(planet.buildingLevels[kind] ?? 0)
+        let currentLevel = kind.isMoonFacility
+            ? normalizedLevel(planet.moon?.buildingLevels[kind] ?? 0)
+            : normalizedLevel(planet.buildingLevels[kind] ?? 0)
         let queuedLevel = planet.buildQueue
             .filter { $0.buildingKind == kind }
             .map { normalizedLevel($0.targetLevel) }
@@ -712,7 +851,11 @@ public enum QueueEngine {
         return (cost, duration)
     }
 
-    private static func researchTerms(rule: ResearchRule, targetLevel: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {
+    private static func researchTerms(
+        rule: ResearchRule,
+        targetLevel: Int,
+        labLevel: Int = 0
+    ) -> (cost: ResourceBundle, duration: TimeInterval)? {
         guard
             isValidCost(rule.baseCost),
             rule.costMultiplier.isFinite,
@@ -733,7 +876,10 @@ public enum QueueEngine {
         }
 
         let cost = rule.baseCost.scaled(by: costMultiplier)
-        let duration = rule.baseDuration * durationMultiplier
+        let baseDuration = rule.baseDuration * durationMultiplier
+        let duration = labLevel > 0
+            ? acceleratedDuration(baseDuration, speedFactor: TechnologyEffects.researchSpeedFactor(for: labLevel))
+            : baseDuration
         guard isValidCost(cost), duration.isFinite, duration > 0 else {
             return nil
         }
@@ -836,6 +982,18 @@ public enum QueueEngine {
 
     private static func normalizedLevel(_ level: Int) -> Int {
         max(level, 0)
+    }
+
+    private static func hasFieldCapacity(for kind: BuildingKind, on planet: Planet) -> Bool {
+        if normalizedLevel(planet.buildingLevels[kind] ?? 0) > 0 || planet.buildQueue.contains(where: { $0.buildingKind == kind }) {
+            return true
+        }
+
+        let usedFields = Set(planet.buildingLevels.filter { normalizedLevel($0.value) > 0 }.map(\.key))
+            .union(planet.buildQueue.map(\.buildingKind))
+            .filter { !$0.isMoonFacility }
+            .count
+        return usedFields < max(planet.maxFields, 1)
     }
 
     private static func acceleratedDuration(_ duration: TimeInterval, speedFactor: Double) -> TimeInterval {

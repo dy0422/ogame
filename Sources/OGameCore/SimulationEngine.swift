@@ -16,6 +16,7 @@ public enum SimulationEngine {
         allowAggressiveAIStrategy: Bool = true,
         aiDifficulty: GameSettings.Difficulty = .standard,
         isPlayerAutoUpgradeEnabled: Bool = false,
+        autoUpgradePolicy: AutoUpgradePolicy = AutoUpgradePolicy(maxBuildQueueDepthPerPlanet: 1, maxResearchQueueDepth: 1),
         eventPolicy: SimulationEventPolicy = .full
     ) {
         guard delta.isFinite, delta > 0 else {
@@ -31,7 +32,7 @@ public enum SimulationEngine {
         universe.gameTime += delta
         QueueEngine.completeDueItems(in: &universe)
         if isPlayerAutoUpgradeEnabled {
-            PlayerAutoUpgradeEngine.makeDecisions(in: &universe)
+            PlayerAutoUpgradeEngine.makeDecisions(in: &universe, policy: autoUpgradePolicy)
         }
         FleetEngine.resolveDueFleets(in: &universe)
         runAIEconomyDecisionsIfNeeded(in: &universe, from: initialGameTime)

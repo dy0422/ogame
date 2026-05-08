@@ -378,7 +378,8 @@ func testSaveEnvelopeRoundTripsSettingsAndDefaultsMissingSettings() throws {
         gameSpeed: 4,
         isAutosaveEnabled: false,
         difficulty: .hard,
-        isAutoUpgradeEnabled: true
+        isAutoUpgradeEnabled: true,
+        autoUpgradePolicy: AutoUpgradePolicy(strategy: .economy, resourceReserveRatio: 0.25)
     )
     let envelope = SaveEnvelope(
         lastSavedAt: Date(timeIntervalSince1970: 7_500),
@@ -423,6 +424,24 @@ func testGameSettingsDecodesPartialSettingsWithDefaults() throws {
     requireEqual(settings.isAutosaveEnabled, true, "Settings should default missing autosave flag")
     requireEqual(settings.difficulty, .standard, "Settings should default missing difficulty")
     requireEqual(settings.isAutoUpgradeEnabled, false, "Settings should default missing auto upgrade flag")
+    requireEqual(settings.autoUpgradePolicy, AutoUpgradePolicy(), "Settings should default missing automation policy")
+}
+
+func testGameSettingsRoundTripsAutomationPolicy() throws {
+    let settings = GameSettings(
+        offlineIntensity: .normal,
+        gameSpeed: 2,
+        isAutosaveEnabled: true,
+        difficulty: .standard,
+        isAutoUpgradeEnabled: true,
+        autoUpgradePolicy: AutoUpgradePolicy(strategy: .research, resourceReserveRatio: 0.30, maxBuildQueueDepthPerPlanet: 5)
+    )
+
+    let decoded = try JSONDecoder().decode(GameSettings.self, from: try JSONEncoder().encode(settings))
+
+    requireEqual(decoded.autoUpgradePolicy.strategy, .research, "Automation strategy should round-trip")
+    require(abs(decoded.autoUpgradePolicy.resourceReserveRatio - 0.30) < 0.0001, "Reserve ratio should round-trip")
+    requireEqual(decoded.autoUpgradePolicy.maxBuildQueueDepthPerPlanet, 5, "Build depth should round-trip")
 }
 
 func testGameSettingsClampsOutOfRangeSpeed() throws {
@@ -539,6 +558,7 @@ try testRepositoryCreatesBackupWithoutReplacingAutosave()
 try testRepositoryDeleteBackupIgnoresNonBackupJSON()
 try testSaveEnvelopeRoundTripsSettingsAndDefaultsMissingSettings()
 try testGameSettingsDecodesPartialSettingsWithDefaults()
+try testGameSettingsRoundTripsAutomationPolicy()
 try testGameSettingsClampsOutOfRangeSpeed()
 try testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode()
 try testSaveMigratorPreservesCurrentSchemaEnvelope()

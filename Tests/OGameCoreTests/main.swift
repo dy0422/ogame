@@ -281,6 +281,98 @@ func testGameContentExplainsBuildingAndTechnologyEffects() {
     require(TechnologyKind.combustionDrive.effectDescription.contains("航速"), "Drive tech should explain travel speed")
 }
 
+func testTechnologyEffectsExposeFleetSlotsAndDriveSpeed() {
+    let research = ResearchState(levels: [.computer: 3, .combustionDrive: 4])
+    requireEqual(TechnologyEffects.maxFleetSlots(for: research), 4, "Computer level 3 should allow four active fleet slots")
+
+    let base = RuleSet.fastSkirmish.shipRules[.smallCargo]?.speed ?? 0
+    let speed = TechnologyEffects.effectiveSpeed(for: .smallCargo, baseSpeed: base, research: research)
+    require(speed > base, "Combustion drive should increase small cargo speed")
+}
+
+func testResearchLabSpeedsResearchDuration() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 101, playerName: "指挥官")
+    universe.planets[0].resources = ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000)
+    universe.planets[0].buildingLevels[.researchLab] = 4
+
+    let result = QueueEngine.startResearch(for: universe.playerFactionID, in: &universe, technology: .energy)
+
+    requireEqual(result, .queued, "Energy research should queue")
+    let queued = universe.factions[0].researchQueue[0]
+    let baseDuration = RuleSet.fastSkirmish.researchRules[.energy]?.baseDuration ?? 0
+    require(queued.finishTime - queued.startTime < baseDuration, "Research lab should reduce research duration")
+}
+
+func testFleetDecodesMissingSpeedPercentAsFullSpeed() throws {
+    let json = """
+    {
+      "id": { "rawValue": "00000000-0000-0000-0000-000000010001" },
+      "ownerID": { "rawValue": "00000000-0000-0000-0000-000000010002" },
+      "mission": "transport",
+      "origin": { "galaxy": 1, "system": 1, "position": 4 },
+      "target": { "galaxy": 1, "system": 2, "position": 4 },
+      "ships": { "smallCargo": 1 },
+      "cargo": { "metal": 0, "crystal": 0, "deuterium": 0 },
+      "launchTime": 0,
+      "arrivalTime": 10,
+      "returnTime": 20,
+      "phase": "outbound"
+    }
+    """.data(using: .utf8)!
+    let fleet = try JSONDecoder().decode(Fleet.self, from: json)
+
+    requireApproxEqual(fleet.speedPercent, 1, "Old fleets should default to full speed")
+    requireEqual(fleet.recalledAt, nil, "Old fleets should default to unrecalled")
+}
+
+func testAutomationPolicyDefaultsToBalancedEconomySafeMode() {
+    let policy = AutoUpgradePolicy()
+
+    requireEqual(policy.strategy, .balanced, "Default automation should be balanced")
+    requireApproxEqual(policy.resourceReserveRatio, 0.15, "Default automation should preserve a small reserve")
+    requireEqual(policy.allowShipConstruction, false, "Default automation should not unexpectedly build fleets")
+}
+
+func testAutoUpgradeEconomyStrategyFillsMultipleBuildQueueItems() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 201, playerName: "指挥官")
+    universe.planets[0].resources = ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000)
+    let policy = AutoUpgradePolicy(strategy: .economy, maxBuildQueueDepthPerPlanet: 3)
+
+    let result = PlayerAutoUpgradeEngine.makeDecisions(in: &universe, policy: policy)
+
+    require(result.queuedBuildings >= 2, "Economy automation should fill more than one building queue slot")
+    require(universe.planets[0].buildQueue.count <= 3, "Automation should respect build queue depth")
+}
+
+func testAutoUpgradeFleetStrategyCanBuildShipsWhenAllowed() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 202, playerName: "指挥官")
+    universe.planets[0].resources = ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000)
+    universe.planets[0].buildingLevels[.roboticsFactory] = 1
+    universe.planets[0].buildingLevels[.shipyard] = 1
+    let policy = AutoUpgradePolicy(strategy: .fleet, allowShipConstruction: true)
+
+    _ = PlayerAutoUpgradeEngine.makeDecisions(in: &universe, policy: policy)
+
+    require(universe.planets[0].shipBuildQueue.isEmpty == false, "Fleet automation should queue ships")
+}
+
+func testAutoUpgradeRespectsResourceReserveRatio() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 203, playerName: "指挥官")
+    let startingResources = ResourceBundle(metal: 100, crystal: 100, deuterium: 100)
+    universe.planets[0].resources = startingResources
+    let policy = AutoUpgradePolicy(
+        strategy: .economy,
+        resourceReserveRatio: 0.8,
+        maxBuildQueueDepthPerPlanet: 3,
+        maxResearchQueueDepth: 3
+    )
+
+    let result = PlayerAutoUpgradeEngine.makeDecisions(in: &universe, policy: policy)
+
+    requireEqual(result, PlayerAutoUpgradeResult(), "Automation should skip spending that would break the reserve")
+    requireEqual(universe.planets[0].resources, startingResources, "Automation should preserve reserved resources")
+}
+
 func testRuleSetBalanceRulesUseRawValueKeyedJSONObjects() throws {
     let data = try JSONEncoder().encode(RuleSet.fastSkirmish)
     let json = requireDictionary(try JSONSerialization.jsonObject(with: data), "RuleSet should encode as a JSON object")
@@ -1628,6 +1720,7 @@ func makeFleetUniverse(
                 name: "Fleet Player",
                 kind: .player,
                 strategy: .balanced,
+                technology: ResearchState(levels: [.computer: 3]),
                 ownedPlanetIDs: [originID]
             )
         ],
@@ -2156,6 +2249,85 @@ func testFleetTravelTimeIsDeterministicFromCoordinatesAndSpeedRules() {
     requireEqual(sameRoute, repeatedRoute, "Travel time should be deterministic for the same route and ships")
     require(sameRoute > nearerRoute, "Longer coordinate distances should take longer")
     require(sameRoute > fasterFleet, "Fleet travel should be limited by the slowest selected ship")
+}
+
+func testSlowerFleetTakesLongerAndUsesLessFuel() {
+    let origin = Coordinate(galaxy: 1, system: 1, position: 4)
+    let target = Coordinate(galaxy: 1, system: 2, position: 4)
+    let ships: [ShipKind: Int] = [.smallCargo: 1]
+
+    let fullDuration = FleetEngine.travelDuration(from: origin, to: target, ships: ships, ruleSet: .fastSkirmish, speedPercent: 1)
+    let halfDuration = FleetEngine.travelDuration(from: origin, to: target, ships: ships, ruleSet: .fastSkirmish, speedPercent: 0.5)
+    let fullFuel = FleetEngine.fuelCost(from: origin, to: target, ships: ships, ruleSet: .fastSkirmish, speedPercent: 1)
+    let halfFuel = FleetEngine.fuelCost(from: origin, to: target, ships: ships, ruleSet: .fastSkirmish, speedPercent: 0.5)
+
+    require(halfDuration > fullDuration, "Half speed should take longer")
+    require(halfFuel < fullFuel, "Half speed should spend less fuel")
+}
+
+func testBattleSimulationProducesAtMostSixRounds() {
+    let input = BattleSimulationInput(
+        attackerShips: [.lightFighter: 24, .smallCargo: 2],
+        defenderShips: [.lightFighter: 8],
+        defenderDefenses: [.rocketLauncher: 18, .lightLaser: 4],
+        attackerResearch: ResearchState(levels: [.weapons: 2, .shielding: 1, .armor: 1]),
+        defenderResearch: ResearchState(levels: [.weapons: 1, .shielding: 1, .armor: 1]),
+        ruleSet: .fastSkirmish,
+        seed: 404
+    )
+
+    let result = BattleSimulationEngine.resolve(input)
+
+    require(result.rounds.count >= 1, "Battle should produce at least one round")
+    require(result.rounds.count <= 6, "Battle should stop after six rounds")
+    requireEqual(result.rounds.map(\.round), Array(1...result.rounds.count), "Battle rounds should be sequential")
+    require(result.rounds.contains { $0.attackerLosses.isEmpty == false || $0.defenderShipLosses.isEmpty == false || $0.defenderDefenseLosses.isEmpty == false }, "Battle rounds should record losses")
+}
+
+func testFleetLaunchRespectsComputerFleetSlots() {
+    var universe = makeFleetUniverse(originShips: [.smallCargo: 3])
+    universe.factions[0].technology = ResearchState()
+
+    let first = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .transport,
+        ships: [.smallCargo: 1]
+    )
+    let second = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .transport,
+        ships: [.smallCargo: 1]
+    )
+
+    guard case .launched = first else {
+        fatalError("First fleet should launch")
+    }
+    requireEqual(second, .failure(.fleetSlotLimit), "Second fleet should fail at computer level 0")
+}
+
+func testOutboundFleetCanBeRecalled() {
+    var universe = makeFleetUniverse(originShips: [.smallCargo: 1])
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .transport,
+        ships: [.smallCargo: 1]
+    )
+    guard case .launched(let fleet) = launch else {
+        fatalError("Fleet should launch")
+    }
+    universe.gameTime = fleet.launchTime + 10
+
+    let recalled = FleetEngine.recallFleet(fleet.id, ownerID: universe.playerFactionID, in: &universe)
+
+    requireEqual(recalled, true, "Recall should succeed")
+    requireEqual(universe.fleets[0].phase, .returning, "Recalled fleet should return")
+    require(universe.fleets[0].returnTime < fleet.returnTime, "Recall should shorten return time")
 }
 
 func testTransportMissionDeliversCargoAndReturnsShips() {
@@ -2700,6 +2872,7 @@ func testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense() {
     }
 
     requireEqual(report.kind, .battle, "Attack should create a battle report")
+    require(report.battleRounds.count >= 1 && report.battleRounds.count <= 6, "Battle report should include bounded combat rounds")
     requireEqual(report.participants.count, 2, "Battle report should include attacker and defender")
     requireEqual(report.participants[0].role, .attacker, "Battle report should list attacker first")
     requireEqual(report.participants[1].role, .defender, "Battle report should list defender second")
@@ -5555,6 +5728,13 @@ testFastSkirmishLateGameRulesIncludeExpandedShipsAndInterceptors()
 testFastSkirmishMoonFacilityRulesExposeLateGameRequirements()
 testGameContentUsesChineseDisplayNames()
 testGameContentExplainsBuildingAndTechnologyEffects()
+testTechnologyEffectsExposeFleetSlotsAndDriveSpeed()
+testResearchLabSpeedsResearchDuration()
+try testFleetDecodesMissingSpeedPercentAsFullSpeed()
+testAutomationPolicyDefaultsToBalancedEconomySafeMode()
+testAutoUpgradeEconomyStrategyFillsMultipleBuildQueueItems()
+testAutoUpgradeFleetStrategyCanBuildShipsWhenAllowed()
+testAutoUpgradeRespectsResourceReserveRatio()
 try testRuleSetBalanceRulesUseRawValueKeyedJSONObjects()
 try testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults()
 try testBuildQueueItemRoundTripsThroughJSON()
@@ -5634,6 +5814,10 @@ testFleetLaunchRemovesShipsCargoAndFuelFromOrigin()
 testIdenticalFleetLaunchesInSameTickUseDistinctIDs()
 testInvalidFleetLaunchFailsWithoutMutation()
 testFleetTravelTimeIsDeterministicFromCoordinatesAndSpeedRules()
+testSlowerFleetTakesLongerAndUsesLessFuel()
+testBattleSimulationProducesAtMostSixRounds()
+testFleetLaunchRespectsComputerFleetSlots()
+testOutboundFleetCanBeRecalled()
 testTransportMissionDeliversCargoAndReturnsShips()
 testLargeSimulationTickCompletesOutboundArrivalAndReturnTogether()
 testTransportOverflowCargoStaysWithReturningFleet()

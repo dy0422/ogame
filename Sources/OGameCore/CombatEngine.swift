@@ -55,36 +55,20 @@ public enum CombatEngine {
             return returningFleet
         }
 
-        let attackerStats = shipStats(for: attackerBeforeShips, tech: attackerTech, ruleSet: universe.ruleSet)
-        let defenderShipStats = shipStats(for: defenderBeforeShips, tech: defenderTech, ruleSet: universe.ruleSet)
-        let defenderDefenseStats = defenseStats(for: defenderBeforeDefenses, tech: defenderTech, ruleSet: universe.ruleSet)
-        let defenderStats = defenderShipStats.adding(defenderDefenseStats)
-        let attackerVariation = deterministicVariation(
-            namespace: "attacker",
-            universe: universe,
-            fleet: fleet
+        let simulation = BattleSimulationEngine.resolve(
+            BattleSimulationInput(
+                attackerShips: attackerBeforeShips,
+                defenderShips: defenderBeforeShips,
+                defenderDefenses: defenderBeforeDefenses,
+                attackerResearch: attackerTech,
+                defenderResearch: defenderTech,
+                ruleSet: universe.ruleSet,
+                seed: stableHash(fleet.id.rawValue.uuidString)
+            )
         )
-        let defenderVariation = deterministicVariation(
-            namespace: "defender",
-            universe: universe,
-            fleet: fleet
-        )
-        let attackerStrength = attackerStats.strength * attackerVariation
-        let defenderStrength = defenderStats.strength * defenderVariation
-        let attackerLossFraction = lossFraction(
-            incomingStrength: defenderStrength,
-            ownStrength: attackerStrength,
-            winnerMultiplier: 0.55
-        )
-        let defenderLossFraction = lossFraction(
-            incomingStrength: attackerStrength,
-            ownStrength: defenderStrength,
-            winnerMultiplier: 0.70
-        )
-
-        let attackerAfterShips = reducedShips(attackerBeforeShips, by: attackerLossFraction)
-        let defenderAfterShips = reducedShips(defenderBeforeShips, by: defenderLossFraction)
-        let destroyedDefenses = destroyedDefenses(from: defenderBeforeDefenses, lossFraction: defenderLossFraction)
+        let attackerAfterShips = simulation.remainingAttackerShips
+        let defenderAfterShips = simulation.remainingDefenderShips
+        let destroyedDefenses = defenseDifference(before: defenderBeforeDefenses, after: simulation.remainingDefenderDefenses)
         let recoveredDefenses = recoveredDefenses(
             from: destroyedDefenses,
             universe: universe,
@@ -103,7 +87,7 @@ public enum CombatEngine {
         let defenderDefenseLosses = defenseCost(defenderLostDefenses, ruleSet: universe.ruleSet)
         let defenderLosses = safeAdding(defenderShipLosses, defenderDefenseLosses)
         let debris = debrisFromLosses(safeAdding(attackerLosses, defenderLosses))
-        let attackerWon = attackerStrength >= defenderStrength && !attackerAfterShips.isEmpty
+        let attackerWon = simulation.attackerWon && !attackerAfterShips.isEmpty
         let survivingCapacity = cargoCapacity(for: attackerAfterShips, ruleSet: universe.ruleSet)
         let cappedExistingCargo = collectCargo(from: fleet.cargo, limit: survivingCapacity)
         let loot = attackerWon
@@ -152,7 +136,8 @@ public enum CombatEngine {
             ],
             loot: loot,
             debris: debris,
-            losses: safeAdding(attackerLosses, defenderLosses)
+            losses: safeAdding(attackerLosses, defenderLosses),
+            battleRounds: simulation.rounds
         )
         universe.reports.append(report)
         createMoonIfEligible(
@@ -176,9 +161,24 @@ public enum CombatEngine {
 
         let attackerFaction = faction(for: fleet.ownerID, in: universe)
         let defenderFaction = universe.planets[targetIndex].ownerID.flatMap { faction(for: $0, in: universe) }
+        let attackerTech = attackerFaction?.technology ?? ResearchState()
+        let defenderTech = defenderFaction?.technology ?? ResearchState()
         let target = universe.planets[targetIndex]
         let targetShips = normalizedShips(target.shipInventory)
         let targetDefenses = normalizedDefenses(target.defenseInventory)
+        let defenderCombatUnitCount = targetShips.values.reduce(0) { $0 + max($1, 0) } +
+            targetDefenses.values.reduce(0) { $0 + max($1, 0) }
+        let intel = IntelEngine.resolveEspionage(
+            fleet: fleet,
+            attackerResearch: attackerTech,
+            defenderResearch: defenderTech,
+            defenderCombatUnitCount: defenderCombatUnitCount,
+            universeSeed: universe.seed
+        )
+        let visibleShips = IntelEngine.maskedShips(targetShips, tier: intel.intelTier)
+        let visibleDefenses = IntelEngine.maskedDefenses(targetDefenses, tier: intel.intelTier)
+        let survivingProbeCount = max((returningFleet.ships[.espionageProbe] ?? 0) - intel.lostProbes, 0)
+        returningFleet.ships[.espionageProbe] = survivingProbeCount > 0 ? survivingProbeCount : nil
 
         universe.reports.append(
             Report(
@@ -186,7 +186,13 @@ public enum CombatEngine {
                 time: fleet.arrivalTime,
                 kind: .espionage,
                 title: "Espionage at \(target.coordinate.displayText)",
-                summary: "Resources \(resourceSummary(target.resources)); ships \(unitCount(targetShips)); defenses \(unitCount(targetDefenses)).",
+                summary: espionageSummary(
+                    resources: target.resources,
+                    ships: visibleShips,
+                    defenses: visibleDefenses,
+                    intelTier: intel.intelTier,
+                    lostProbes: intel.lostProbes
+                ),
                 participants: [
                     ReportParticipant(
                         role: .attacker,
@@ -194,23 +200,48 @@ public enum CombatEngine {
                         planetID: fleet.originPlanetID,
                         name: attackerFaction?.name ?? "Observer",
                         beforeShips: normalizedShips(fleet.ships),
-                        afterShips: normalizedShips(fleet.ships)
+                        afterShips: normalizedShips(returningFleet.ships)
                     ),
                     ReportParticipant(
                         role: .defender,
                         factionID: target.ownerID,
                         planetID: target.id,
                         name: defenderFaction?.name ?? target.name,
-                        beforeShips: targetShips,
-                        afterShips: targetShips,
-                        beforeDefenses: targetDefenses,
-                        afterDefenses: targetDefenses
+                        beforeShips: visibleShips,
+                        afterShips: visibleShips,
+                        beforeDefenses: visibleDefenses,
+                        afterDefenses: visibleDefenses
                     )
-                ]
+                ],
+                intelTier: intel.intelTier
             )
         )
 
-        return returningFleet
+        return returningFleet.ships.isEmpty ? nil : returningFleet
+    }
+
+    public static func previewAttack(_ fleet: Fleet, in universe: Universe) -> BattleSimulationResult? {
+        guard let targetIndex = targetPlanetIndex(for: fleet, in: universe) else {
+            return nil
+        }
+
+        let attackerFaction = faction(for: fleet.ownerID, in: universe)
+        let defenderFaction = universe.planets[targetIndex].ownerID.flatMap { faction(for: $0, in: universe) }
+        let attackerShips = normalizedShips(fleet.ships)
+        let defenderShips = normalizedShips(universe.planets[targetIndex].shipInventory)
+        let defenderDefenses = normalizedDefenses(universe.planets[targetIndex].defenseInventory)
+
+        return BattleSimulationEngine.resolve(
+            BattleSimulationInput(
+                attackerShips: attackerShips,
+                defenderShips: defenderShips,
+                defenderDefenses: defenderDefenses,
+                attackerResearch: attackerFaction?.technology ?? ResearchState(),
+                defenderResearch: defenderFaction?.technology ?? ResearchState(),
+                ruleSet: universe.ruleSet,
+                seed: stableHash(fleet.id.rawValue.uuidString)
+            )
+        )
     }
 
     public static func launchMissileStrike(
@@ -826,6 +857,33 @@ public enum CombatEngine {
 
     private static func resourceSummary(_ resources: ResourceBundle) -> String {
         "M\(Int(max(resources.metal, 0))) C\(Int(max(resources.crystal, 0))) D\(Int(max(resources.deuterium, 0)))"
+    }
+
+    private static func espionageSummary(
+        resources: ResourceBundle,
+        ships: [ShipKind: Int],
+        defenses: [DefenseKind: Int],
+        intelTier: Int,
+        lostProbes: Int
+    ) -> String {
+        var parts = [
+            "Intel tier \(min(max(intelTier, 1), 5))/5",
+            "resources \(resourceSummary(resources))"
+        ]
+
+        if intelTier >= 3 {
+            parts.append("ships \(unitCount(ships))")
+            parts.append("defenses \(unitCount(defenses))")
+        } else {
+            parts.append("ships hidden")
+            parts.append("defenses hidden")
+        }
+
+        if lostProbes > 0 {
+            parts.append("\(lostProbes) probes lost")
+        }
+
+        return parts.joined(separator: "; ") + "."
     }
 
     private static func safeAdding(_ lhs: ResourceBundle, _ rhs: ResourceBundle) -> ResourceBundle {

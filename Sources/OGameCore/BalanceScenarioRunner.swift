@@ -3,9 +3,15 @@ import Foundation
 public struct BalanceScenarioResult: Equatable, Sendable {
     public var firstShipAt: TimeInterval?
     public var firstFleetLaunchAt: TimeInterval?
+    public var firstEspionageAt: TimeInterval?
+    public var firstExplorationEventAt: TimeInterval?
     public var firstCombatAt: TimeInterval?
     public var firstColonizationAt: TimeInterval?
+    public var firstMoonAt: TimeInterval?
+    public var firstMoonActionAt: TimeInterval?
     public var victoryAt: TimeInterval?
+    public var automationQueuedActionCount: Int
+    public var aiAttackCount: Int
     public var eventCount: Int
     public var reportCount: Int
     public var finalRankings: [FactionScore]
@@ -13,18 +19,30 @@ public struct BalanceScenarioResult: Equatable, Sendable {
     public init(
         firstShipAt: TimeInterval? = nil,
         firstFleetLaunchAt: TimeInterval? = nil,
+        firstEspionageAt: TimeInterval? = nil,
+        firstExplorationEventAt: TimeInterval? = nil,
         firstCombatAt: TimeInterval? = nil,
         firstColonizationAt: TimeInterval? = nil,
+        firstMoonAt: TimeInterval? = nil,
+        firstMoonActionAt: TimeInterval? = nil,
         victoryAt: TimeInterval? = nil,
+        automationQueuedActionCount: Int = 0,
+        aiAttackCount: Int = 0,
         eventCount: Int = 0,
         reportCount: Int = 0,
         finalRankings: [FactionScore] = []
     ) {
         self.firstShipAt = firstShipAt
         self.firstFleetLaunchAt = firstFleetLaunchAt
+        self.firstEspionageAt = firstEspionageAt
+        self.firstExplorationEventAt = firstExplorationEventAt
         self.firstCombatAt = firstCombatAt
         self.firstColonizationAt = firstColonizationAt
+        self.firstMoonAt = firstMoonAt
+        self.firstMoonActionAt = firstMoonActionAt
         self.victoryAt = victoryAt
+        self.automationQueuedActionCount = automationQueuedActionCount
+        self.aiAttackCount = aiAttackCount
         self.eventCount = eventCount
         self.reportCount = reportCount
         self.finalRankings = finalRankings
@@ -112,6 +130,10 @@ public enum BalanceScenarioRunner {
         universe.factions[factionIndex].technology.levels[.espionage] = max(
             universe.factions[factionIndex].technology.levels[.espionage] ?? 0,
             1
+        )
+        universe.factions[factionIndex].technology.levels[.computer] = max(
+            universe.factions[factionIndex].technology.levels[.computer] ?? 0,
+            3
         )
         universe.factions[factionIndex].technology.levels[.combustionDrive] = max(
             universe.factions[factionIndex].technology.levels[.combustionDrive] ?? 0,
@@ -238,6 +260,18 @@ public enum BalanceScenarioRunner {
             result.firstFleetLaunchAt = firstFleet.launchTime
         }
 
+        if result.firstEspionageAt == nil,
+           let report = universe.reports.filter({ $0.kind == .espionage }).min(by: { $0.time < $1.time })
+        {
+            result.firstEspionageAt = report.time
+        }
+
+        if result.firstExplorationEventAt == nil,
+           let event = universe.events.filter({ $0.kind == .exploration }).min(by: { $0.time < $1.time })
+        {
+            result.firstExplorationEventAt = event.time
+        }
+
         if result.firstCombatAt == nil,
            let report = universe.reports.filter({ $0.kind == .battle || $0.kind == .missile }).min(by: { $0.time < $1.time })
         {
@@ -257,6 +291,33 @@ public enum BalanceScenarioRunner {
         {
             result.firstColonizationAt = colonyEvent.time
         }
+
+        if result.firstMoonAt == nil,
+           let moonPlanet = universe.planets.filter({ $0.moon != nil }).min(by: { ($0.moon?.createdAt ?? .infinity) < ($1.moon?.createdAt ?? .infinity) })
+        {
+            result.firstMoonAt = moonPlanet.moon?.createdAt
+        }
+
+        if result.firstMoonActionAt == nil,
+           let event = universe.events
+            .filter({ $0.title == "Jump Gate Transfer" || $0.title.contains("Sensor") })
+            .min(by: { $0.time < $1.time })
+        {
+            result.firstMoonActionAt = event.time
+        }
+
+        result.aiAttackCount = universe.fleets.filter { fleet in
+            fleet.ownerID != universe.playerFactionID && fleet.mission == .attack
+        }.count + universe.reports.filter { report in
+            report.kind == .battle &&
+                report.participants.contains { $0.role == .attacker && $0.factionID != universe.playerFactionID }
+        }.count
+        result.automationQueuedActionCount = max(
+            result.automationQueuedActionCount,
+            playerPlanets(in: universe).reduce(0) { total, planet in
+                total + planet.buildQueue.count + planet.shipBuildQueue.count + planet.defenseBuildQueue.count
+            } + (universe.factions.first { $0.id == universe.playerFactionID }?.researchQueue.count ?? 0)
+        )
 
         if result.victoryAt == nil, let victoryAt = universe.victoryState.achievedAt {
             result.victoryAt = victoryAt

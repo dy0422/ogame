@@ -72,6 +72,7 @@ public enum RealtimeSimulationEngine {
             delta: simulatedDelta,
             aiDifficulty: settings.difficulty,
             isPlayerAutoUpgradeEnabled: settings.isAutoUpgradeEnabled,
+            autoUpgradePolicy: settings.autoUpgradePolicy,
             eventPolicy: .domainOnly
         )
         state.lastFrameDate = now

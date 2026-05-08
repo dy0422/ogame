@@ -38,7 +38,8 @@ public struct SaveEnvelope: Codable, Equatable, Sendable {
             elapsed: elapsedSinceLastSave(until: currentDate),
             now: currentDate,
             aiDifficulty: settings.difficulty,
-            isPlayerAutoUpgradeEnabled: settings.isAutoUpgradeEnabled
+            isPlayerAutoUpgradeEnabled: settings.isAutoUpgradeEnabled,
+            autoUpgradePolicy: settings.autoUpgradePolicy
         )
         return (caughtUpUniverse, summary)
     }

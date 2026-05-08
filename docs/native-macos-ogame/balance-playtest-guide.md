@@ -19,14 +19,20 @@ swift run OGameBalanceTool
 
 - `first_ship`
 - `first_fleet`
+- `first_espionage`
+- `first_exploration`
 - `first_conflict`
 - `first_colony`
+- `first_moon`
+- `first_moon_action`
 - `victory_at`
+- `ai_attacks`
+- `automation_actions`
 - `player_rank`
 - `events`
 - `reports`
 
-`OGameBalanceTool` 使用 `BalanceScenarioRunner`，包含轻量玩家引导脚本，用来验证一局新档可以稳定走到造舰、出航、冲突、殖民和胜利。
+`OGameBalanceTool` 使用 `BalanceScenarioRunner`，包含轻量玩家引导脚本，用来验证一局新档可以稳定走到造舰、出航、侦察/探索、冲突、殖民和胜利。新增字段用于观察舰队槽、探索事件、月球系统和自动托管是否把节奏推离目标窗口。
 
 ## 手动 Playtest 记录
 
@@ -35,8 +41,10 @@ swift run OGameBalanceTool
 - 第一次升级矿场的时间。
 - 第一次造船的时间。
 - 第一次侦察或探索的时间。
+- 第一次舰队召回的时间。
 - 第一次战斗的时间。
 - 第一次殖民的时间。
+- 第一次月球和第一次月球动作的时间。
 - 胜利路线和胜利时间。
 - 卡住、看不懂、需要更多提示的界面。
 - 保存、读取、离线补算是否可信。

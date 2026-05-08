@@ -603,19 +603,36 @@ final class AppModel: ObservableObject {
         autosaveAfterQueueing(successStatus: status)
     }
 
+    func startMoonFacilityUpgrade(planetID: PlanetID, kind: BuildingKind) {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再升级月球设施。"
+            return
+        }
+
+        let result = MoonEngine.startFacilityUpgrade(on: planetID, in: &universe, kind: kind)
+        guard result == .queued else {
+            statusMessage = "无法升级\(kind.localizedName)：\(Self.queueFailureDescription(result))。"
+            return
+        }
+
+        autosaveAfterQueueing(successStatus: "已加入\(kind.localizedName)月球设施升级。")
+    }
+
     func launchFleet(
         originID: PlanetID?,
         targetID: PlanetID?,
         mission: Fleet.Mission,
         ships: [ShipKind: Int],
-        cargo: ResourceBundle
+        cargo: ResourceBundle,
+        speedPercent: Double = 1
     ) {
         if let validationFailure = fleetLaunchValidationFailure(
             originID: originID,
             targetID: targetID,
             mission: mission,
             ships: ships,
-            cargo: cargo
+            cargo: cargo,
+            speedPercent: speedPercent
         ) {
             statusMessage = "无法派遣舰队：\(validationFailure.description)。"
             return
@@ -632,7 +649,8 @@ final class AppModel: ObservableObject {
             in: &universe,
             mission: mission,
             ships: normalizedShips(ships),
-            cargo: cargo
+            cargo: cargo,
+            speedPercent: speedPercent
         )
 
         switch result {
@@ -641,6 +659,20 @@ final class AppModel: ObservableObject {
         case .failure(let failure):
             statusMessage = "无法派遣舰队：\(Self.fleetFailureDescription(failure))。"
         }
+    }
+
+    func recallFleet(_ fleet: Fleet) {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再召回舰队。"
+            return
+        }
+
+        guard FleetEngine.recallFleet(fleet.id, ownerID: universe.playerFactionID, in: &universe) else {
+            statusMessage = "无法召回舰队：舰队已返航或不属于玩家。"
+            return
+        }
+
+        autosaveAfterQueueing(successStatus: "已召回\(fleet.mission.localizedName)舰队。")
     }
 
     func productionPerHour(for planet: Planet) -> ResourceBundle {
@@ -1064,14 +1096,16 @@ final class AppModel: ObservableObject {
         targetID: PlanetID?,
         mission: Fleet.Mission,
         ships: [ShipKind: Int],
-        cargo: ResourceBundle
+        cargo: ResourceBundle,
+        speedPercent: Double = 1
     ) -> Bool {
         fleetLaunchValidationFailure(
             originID: originID,
             targetID: targetID,
             mission: mission,
             ships: ships,
-            cargo: cargo
+            cargo: cargo,
+            speedPercent: speedPercent
         ) == nil
     }
 
@@ -1125,7 +1159,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func fleetFuelCost(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int]) -> Double? {
+    func fleetFuelCost(
+        originID: PlanetID?,
+        targetID: PlanetID?,
+        ships: [ShipKind: Int],
+        speedPercent: Double = 1
+    ) -> Double? {
         guard
             let origin = planet(for: originID),
             let target = planet(for: targetID)
@@ -1137,15 +1176,22 @@ final class AppModel: ObservableObject {
             from: origin.coordinate,
             to: target.coordinate,
             ships: normalizedShips(ships),
-            ruleSet: universe.ruleSet
+            ruleSet: universe.ruleSet,
+            speedPercent: speedPercent
         )
         return fuel.isFinite ? fuel : nil
     }
 
-    func canAffordFleetFuel(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int], cargo: ResourceBundle) -> Bool {
+    func canAffordFleetFuel(
+        originID: PlanetID?,
+        targetID: PlanetID?,
+        ships: [ShipKind: Int],
+        cargo: ResourceBundle,
+        speedPercent: Double = 1
+    ) -> Bool {
         guard
             let origin = planet(for: originID),
-            let fuel = fleetFuelCost(originID: originID, targetID: targetID, ships: ships),
+            let fuel = fleetFuelCost(originID: originID, targetID: targetID, ships: ships, speedPercent: speedPercent),
             fuel >= 0
         else {
             return false
@@ -1155,8 +1201,14 @@ final class AppModel: ObservableObject {
         return resourcesAfterCargo.canAfford(ResourceBundle(deuterium: fuel))
     }
 
-    func fleetFuelStatusText(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int], cargo: ResourceBundle) -> String {
-        guard let fuel = fleetFuelCost(originID: originID, targetID: targetID, ships: ships) else {
+    func fleetFuelStatusText(
+        originID: PlanetID?,
+        targetID: PlanetID?,
+        ships: [ShipKind: Int],
+        cargo: ResourceBundle,
+        speedPercent: Double = 1
+    ) -> String {
+        guard let fuel = fleetFuelCost(originID: originID, targetID: targetID, ships: ships, speedPercent: speedPercent) else {
             return "未知"
         }
 
@@ -1172,7 +1224,12 @@ final class AppModel: ObservableObject {
         return "需要 \(Self.formattedWholeNumber(fuel))；可用 \(Self.formattedWholeNumber(max(0, deuteriumAfterCargo)))"
     }
 
-    func fleetTravelDuration(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int]) -> TimeInterval? {
+    func fleetTravelDuration(
+        originID: PlanetID?,
+        targetID: PlanetID?,
+        ships: [ShipKind: Int],
+        speedPercent: Double = 1
+    ) -> TimeInterval? {
         guard
             let origin = planet(for: originID),
             let target = planet(for: targetID)
@@ -1184,9 +1241,59 @@ final class AppModel: ObservableObject {
             from: origin.coordinate,
             to: target.coordinate,
             ships: normalizedShips(ships),
-            ruleSet: universe.ruleSet
+            ruleSet: universe.ruleSet,
+            research: researchState(for: origin),
+            speedPercent: speedPercent
         )
         return duration.isFinite && duration > 0 ? duration : nil
+    }
+
+    func battlePreviewText(
+        originID: PlanetID?,
+        targetID: PlanetID?,
+        mission: Fleet.Mission,
+        ships: [ShipKind: Int],
+        cargo: ResourceBundle,
+        speedPercent: Double = 1
+    ) -> String? {
+        guard mission == .attack,
+              let origin = planet(for: originID),
+              let target = planet(for: targetID),
+              let ownerID = origin.ownerID
+        else {
+            return nil
+        }
+
+        let duration = fleetTravelDuration(
+            originID: originID,
+            targetID: targetID,
+            ships: ships,
+            speedPercent: speedPercent
+        ) ?? 1
+        let fleet = Fleet(
+            ownerID: ownerID,
+            mission: .attack,
+            origin: origin.coordinate,
+            target: target.coordinate,
+            ships: normalizedShips(ships),
+            cargo: cargo,
+            launchTime: universe.gameTime,
+            arrivalTime: universe.gameTime + duration,
+            returnTime: universe.gameTime + duration * 2,
+            originPlanetID: origin.id,
+            targetPlanetID: target.id,
+            speedPercent: speedPercent
+        )
+
+        guard let preview = CombatEngine.previewAttack(fleet, in: universe),
+              let firstRound = preview.rounds.first
+        else {
+            return "无法预估"
+        }
+
+        let winner = preview.attackerWon ? "优势" : "劣势"
+        let losses = firstRound.attackerLosses.values.reduce(0) { $0 + max($1, 0) }
+        return "\(winner) · 预计损失 \(losses) 艘 · 回合 \(preview.rounds.count)"
     }
 
     func fleetShipsSummary(_ ships: [ShipKind: Int]) -> String {
@@ -1386,7 +1493,7 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let result = PlayerAutoUpgradeEngine.makeDecisions(in: &universe)
+        let result = PlayerAutoUpgradeEngine.makeDecisions(in: &universe, policy: settings.autoUpgradePolicy)
         guard result.didQueue else {
             let noActionStatus = settings.isAutoUpgradeEnabled
                 ? "托管升级已开启：当前资源、前置或队列状态不足，空闲时会继续尝试。"
@@ -1406,6 +1513,65 @@ final class AppModel: ObservableObject {
     func updateDifficulty(_ difficulty: GameSettings.Difficulty) {
         settings.difficulty = difficulty
         statusMessage = "难度已设为\(difficulty.displayName)。\(difficulty.behaviorDescription)"
+    }
+
+    func updateAutoUpgradeStrategy(_ strategy: AutoUpgradeStrategy) {
+        settings.autoUpgradePolicy.strategy = strategy
+        autosaveSettingsChange(successStatus: "托管策略已设为\(strategy.localizedName)。")
+    }
+
+    func updateAutoUpgradeReserveRatio(_ ratio: Double) {
+        settings.autoUpgradePolicy.resourceReserveRatio = AutoUpgradePolicy(
+            strategy: settings.autoUpgradePolicy.strategy,
+            resourceReserveRatio: ratio,
+            maxBuildQueueDepthPerPlanet: settings.autoUpgradePolicy.maxBuildQueueDepthPerPlanet,
+            maxResearchQueueDepth: settings.autoUpgradePolicy.maxResearchQueueDepth,
+            allowShipConstruction: settings.autoUpgradePolicy.allowShipConstruction,
+            allowDefenseConstruction: settings.autoUpgradePolicy.allowDefenseConstruction,
+            allowMissileConstruction: settings.autoUpgradePolicy.allowMissileConstruction
+        ).resourceReserveRatio
+        statusMessage = "托管资源保留已设为 \(Self.formattedPercent(settings.autoUpgradePolicy.resourceReserveRatio))。保存后保留设置。"
+    }
+
+    func updateAutoUpgradeBuildQueueDepth(_ depth: Int) {
+        settings.autoUpgradePolicy.maxBuildQueueDepthPerPlanet = AutoUpgradePolicy(
+            strategy: settings.autoUpgradePolicy.strategy,
+            resourceReserveRatio: settings.autoUpgradePolicy.resourceReserveRatio,
+            maxBuildQueueDepthPerPlanet: depth,
+            maxResearchQueueDepth: settings.autoUpgradePolicy.maxResearchQueueDepth,
+            allowShipConstruction: settings.autoUpgradePolicy.allowShipConstruction,
+            allowDefenseConstruction: settings.autoUpgradePolicy.allowDefenseConstruction,
+            allowMissileConstruction: settings.autoUpgradePolicy.allowMissileConstruction
+        ).maxBuildQueueDepthPerPlanet
+        statusMessage = "托管建筑队列深度已设为 \(settings.autoUpgradePolicy.maxBuildQueueDepthPerPlanet)。保存后保留设置。"
+    }
+
+    func updateAutoUpgradeResearchQueueDepth(_ depth: Int) {
+        settings.autoUpgradePolicy.maxResearchQueueDepth = AutoUpgradePolicy(
+            strategy: settings.autoUpgradePolicy.strategy,
+            resourceReserveRatio: settings.autoUpgradePolicy.resourceReserveRatio,
+            maxBuildQueueDepthPerPlanet: settings.autoUpgradePolicy.maxBuildQueueDepthPerPlanet,
+            maxResearchQueueDepth: depth,
+            allowShipConstruction: settings.autoUpgradePolicy.allowShipConstruction,
+            allowDefenseConstruction: settings.autoUpgradePolicy.allowDefenseConstruction,
+            allowMissileConstruction: settings.autoUpgradePolicy.allowMissileConstruction
+        ).maxResearchQueueDepth
+        statusMessage = "托管科研队列深度已设为 \(settings.autoUpgradePolicy.maxResearchQueueDepth)。保存后保留设置。"
+    }
+
+    func updateAutoUpgradeShipConstruction(_ isAllowed: Bool) {
+        settings.autoUpgradePolicy.allowShipConstruction = isAllowed
+        statusMessage = isAllowed ? "托管已允许自动造舰。" : "托管已停止自动造舰。"
+    }
+
+    func updateAutoUpgradeDefenseConstruction(_ isAllowed: Bool) {
+        settings.autoUpgradePolicy.allowDefenseConstruction = isAllowed
+        statusMessage = isAllowed ? "托管已允许自动造防御。" : "托管已停止自动造防御。"
+    }
+
+    func updateAutoUpgradeMissileConstruction(_ isAllowed: Bool) {
+        settings.autoUpgradePolicy.allowMissileConstruction = isAllowed
+        statusMessage = isAllowed ? "托管已允许自动造导弹。" : "托管已停止自动造导弹。"
     }
 
     func refreshSaveSlots() {
@@ -1936,8 +2102,17 @@ final class AppModel: ObservableObject {
         if result.queuedResearch > 0 {
             queuedItems.append("\(result.queuedResearch) 项科技")
         }
+        if result.queuedShips > 0 {
+            queuedItems.append("\(result.queuedShips) 项造舰")
+        }
+        if result.queuedDefenses > 0 {
+            queuedItems.append("\(result.queuedDefenses) 项防御")
+        }
+        if result.queuedMissiles > 0 {
+            queuedItems.append("\(result.queuedMissiles) 项导弹")
+        }
 
-        let detail = queuedItems.isEmpty ? "升级" : queuedItems.joined(separator: "和")
+        let detail = queuedItems.isEmpty ? "升级" : queuedItems.joined(separator: "、")
         return "托管升级已加入\(detail)。"
     }
 
@@ -1981,6 +2156,8 @@ final class AppModel: ObservableObject {
             return "规则缺失或无效"
         case .missingRequirement(let requirement):
             return requirement.lockedReason
+        case .noAvailableFields:
+            return "星球可用地块不足"
         }
     }
 
@@ -2000,6 +2177,8 @@ final class AppModel: ObservableObject {
             return "重氢燃料不足"
         case .invalidMission:
             return "所选舰船或目标无法执行该任务"
+        case .fleetSlotLimit:
+            return "舰队槽已满"
         }
     }
 
@@ -2036,6 +2215,7 @@ final class AppModel: ObservableObject {
         case insufficientCargo
         case insufficientCargoCapacity
         case insufficientFuel
+        case fleetSlotLimit
 
         var description: String {
             switch self {
@@ -2061,6 +2241,8 @@ final class AppModel: ObservableObject {
                 return "货舱容量不足"
             case .insufficientFuel:
                 return "重氢燃料不足"
+            case .fleetSlotLimit:
+                return "舰队槽已满，请等待舰队返航或提升计算机技术"
             }
         }
     }
@@ -2102,7 +2284,8 @@ final class AppModel: ObservableObject {
         targetID: PlanetID?,
         mission: Fleet.Mission,
         ships: [ShipKind: Int],
-        cargo: ResourceBundle
+        cargo: ResourceBundle,
+        speedPercent: Double = 1
     ) -> FleetLaunchValidationFailure? {
         guard canSave else {
             return .saveUnavailable
@@ -2145,6 +2328,14 @@ final class AppModel: ObservableObject {
             return .insufficientShips
         }
 
+        guard let playerFaction else {
+            return .missingOrigin
+        }
+        let activeFleetCount = universe.fleets.filter { $0.ownerID == playerFaction.id && $0.phase != .completed }.count
+        guard activeFleetCount < TechnologyEffects.maxFleetSlots(for: playerFaction.technology) else {
+            return .fleetSlotLimit
+        }
+
         guard origin.resources.canAfford(cargo) else {
             return .insufficientCargo
         }
@@ -2153,7 +2344,13 @@ final class AppModel: ObservableObject {
             return .insufficientCargoCapacity
         }
 
-        guard canAffordFleetFuel(originID: originID, targetID: targetID, ships: normalizedShips, cargo: cargo) else {
+        guard canAffordFleetFuel(
+            originID: originID,
+            targetID: targetID,
+            ships: normalizedShips,
+            cargo: cargo,
+            speedPercent: speedPercent
+        ) else {
             return .insufficientFuel
         }
 

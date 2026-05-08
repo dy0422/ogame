@@ -14,7 +14,7 @@ struct OGameBalanceTool {
     static func main() {
         let durations = parseDurations() ?? [30, 60, 120, 240]
         print("Native OGame balance probe")
-        print("seed,difficulty,minutes,first_ship,first_fleet,first_conflict,first_colony,victory_at,player_rank,leader,leader_score,player_score,player_victory,events,reports")
+        print("seed,difficulty,minutes,first_ship,first_fleet,first_espionage,first_exploration,first_conflict,first_colony,first_moon,first_moon_action,victory_at,ai_attacks,automation_actions,player_rank,leader,leader_score,player_score,player_victory,events,reports")
 
         for difficulty in GameSettings.Difficulty.allCases {
             for minutes in durations {
@@ -63,9 +63,15 @@ struct OGameBalanceTool {
             String(minutes),
             whole(snapshot.result.firstShipAt),
             whole(snapshot.result.firstFleetLaunchAt),
+            whole(snapshot.result.firstEspionageAt),
+            whole(snapshot.result.firstExplorationEventAt),
             whole(snapshot.result.firstCombatAt),
             whole(snapshot.result.firstColonizationAt),
+            whole(snapshot.result.firstMoonAt),
+            whole(snapshot.result.firstMoonActionAt),
             whole(snapshot.result.victoryAt),
+            String(snapshot.result.aiAttackCount),
+            String(snapshot.result.automationQueuedActionCount),
             snapshot.playerRank.map { String($0.rank) } ?? "NA",
             snapshot.leader?.factionName ?? "NA",
             whole(snapshot.leader?.totalScore ?? 0),

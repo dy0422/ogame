@@ -588,6 +588,55 @@ private struct SettingsPanel: View {
         )
     }
 
+    private var autoUpgradeStrategyBinding: Binding<AutoUpgradeStrategy> {
+        Binding(
+            get: { model.settings.autoUpgradePolicy.strategy },
+            set: { model.updateAutoUpgradeStrategy($0) }
+        )
+    }
+
+    private var autoUpgradeReserveBinding: Binding<Double> {
+        Binding(
+            get: { model.settings.autoUpgradePolicy.resourceReserveRatio },
+            set: { model.updateAutoUpgradeReserveRatio($0) }
+        )
+    }
+
+    private var autoUpgradeBuildDepthBinding: Binding<Int> {
+        Binding(
+            get: { model.settings.autoUpgradePolicy.maxBuildQueueDepthPerPlanet },
+            set: { model.updateAutoUpgradeBuildQueueDepth($0) }
+        )
+    }
+
+    private var autoUpgradeResearchDepthBinding: Binding<Int> {
+        Binding(
+            get: { model.settings.autoUpgradePolicy.maxResearchQueueDepth },
+            set: { model.updateAutoUpgradeResearchQueueDepth($0) }
+        )
+    }
+
+    private var autoUpgradeShipsBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.autoUpgradePolicy.allowShipConstruction },
+            set: { model.updateAutoUpgradeShipConstruction($0) }
+        )
+    }
+
+    private var autoUpgradeDefensesBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.autoUpgradePolicy.allowDefenseConstruction },
+            set: { model.updateAutoUpgradeDefenseConstruction($0) }
+        )
+    }
+
+    private var autoUpgradeMissilesBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.autoUpgradePolicy.allowMissileConstruction },
+            set: { model.updateAutoUpgradeMissileConstruction($0) }
+        )
+    }
+
     private var offlineIntensityBinding: Binding<GameSettings.OfflineIntensity> {
         Binding(
             get: { model.settings.offlineIntensity },
@@ -618,7 +667,62 @@ private struct SettingsPanel: View {
                 }
                 .toggleStyle(.checkbox)
                 .disabled(!model.canSave)
-                .help("开启后队列空闲时自动为玩家排入建筑和科技，不会派遣舰队。")
+                .help("开启后会按策略自动填充建筑、科技和允许的生产队列，不会自动派遣舰队。")
+
+                VStack(alignment: .leading, spacing: 10) {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 220), alignment: .topLeading)],
+                        alignment: .leading,
+                        spacing: 12
+                    ) {
+                        SettingPicker(
+                            title: "托管策略",
+                            systemImage: "wand.and.stars.inverse",
+                            selection: autoUpgradeStrategyBinding,
+                            options: AutoUpgradeStrategy.allCases
+                        ) { option in
+                            option.localizedName
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("资源保留", systemImage: "lock.shield")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Slider(value: autoUpgradeReserveBinding, in: 0...0.8, step: 0.05)
+                                .disabled(!model.canSave)
+                            Text(Self.percentText(model.settings.autoUpgradePolicy.resourceReserveRatio))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Text(model.settings.autoUpgradePolicy.strategy.behaviorDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 16) {
+                        Stepper(
+                            "建筑队列 \(model.settings.autoUpgradePolicy.maxBuildQueueDepthPerPlanet)",
+                            value: autoUpgradeBuildDepthBinding,
+                            in: 1...20
+                        )
+                        Stepper(
+                            "科研队列 \(model.settings.autoUpgradePolicy.maxResearchQueueDepth)",
+                            value: autoUpgradeResearchDepthBinding,
+                            in: 1...20
+                        )
+                    }
+                    .disabled(!model.canSave)
+
+                    HStack(spacing: 16) {
+                        Toggle("自动造舰", isOn: autoUpgradeShipsBinding)
+                        Toggle("自动造防御", isOn: autoUpgradeDefensesBinding)
+                        Toggle("自动造导弹", isOn: autoUpgradeMissilesBinding)
+                    }
+                    .toggleStyle(.checkbox)
+                    .disabled(!model.canSave)
+                }
 
                 Button {
                     model.runAutoUpgradeNow()
@@ -691,6 +795,10 @@ private struct SettingsPanel: View {
             }
         }
         .frame(maxWidth: 860, alignment: .leading)
+    }
+
+    private static func percentText(_ value: Double) -> String {
+        value.formatted(.percent.precision(.fractionLength(0)))
     }
 }
 
@@ -855,7 +963,7 @@ private struct PlanetDetailView: View {
             PlanetHeroPanel(planet: planet, model: model)
 
             if let moon = planet.moon {
-                MoonSummaryCard(moon: moon, model: model)
+                MoonSummaryCard(planet: planet, moon: moon, model: model)
             }
 
             PlanetEconomyView(planet: planet, model: model)
@@ -874,6 +982,7 @@ private struct PlanetDetailView: View {
 }
 
 private struct MoonSummaryCard: View {
+    let planet: Planet
     let moon: Moon
     @ObservedObject var model: AppModel
 
@@ -897,10 +1006,22 @@ private struct MoonSummaryCard: View {
                         DispatchMetric(title: "创建时间", value: "T+\(Formatters.wholeSeconds(moon.createdAt))")
                         DispatchMetric(title: "设施", value: Formatters.wholeNumber(Double(moon.buildingLevels.values.reduce(0, +))))
                         ForEach(model.availableMoonFacilityKinds, id: \.self) { facility in
-                            DispatchMetric(
-                                title: facility.localizedName,
-                                value: "等级 \(moon.buildingLevels[facility, default: 0])"
-                            )
+                            HStack {
+                                DispatchMetric(
+                                    title: facility.localizedName,
+                                    value: "等级 \(moon.buildingLevels[facility, default: 0])"
+                                )
+                                Spacer(minLength: 8)
+                                Button {
+                                    model.startMoonFacilityUpgrade(planetID: planet.id, kind: facility)
+                                } label: {
+                                    Label("升级", systemImage: "arrow.up.circle")
+                                        .labelStyle(.iconOnly)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .help("升级\(facility.localizedName)")
+                            }
                         }
                     }
                 }
@@ -1921,6 +2042,7 @@ private struct FleetOverviewView: View {
     @State private var metalCargo = 0.0
     @State private var crystalCargo = 0.0
     @State private var deuteriumCargo = 0.0
+    @State private var speedPercent = 1.0
 
     private var launchCargo: ResourceBundle {
         ResourceBundle(
@@ -1956,6 +2078,7 @@ private struct FleetOverviewView: View {
                 metalCargo: $metalCargo,
                 crystalCargo: $crystalCargo,
                 deuteriumCargo: $deuteriumCargo,
+                speedPercent: $speedPercent,
                 launchCargo: launchCargo
             )
 
@@ -2047,6 +2170,7 @@ private struct FleetDispatchPanel: View {
     @Binding var metalCargo: Double
     @Binding var crystalCargo: Double
     @Binding var deuteriumCargo: Double
+    @Binding var speedPercent: Double
     @State private var missileCount = 1
     let launchCargo: ResourceBundle
 
@@ -2114,14 +2238,18 @@ private struct FleetDispatchPanel: View {
                     deuteriumCargo: $deuteriumCargo
                 )
 
+                FleetSpeedPicker(speedPercent: $speedPercent)
+
                 FleetDispatchSummary(
                     model: model,
                     originID: originID,
                     targetID: targetID,
+                    mission: mission,
                     ships: selectedShips,
                     cargo: launchCargo,
                     cargoUsed: cargoUsed,
-                    cargoCapacity: cargoCapacity
+                    cargoCapacity: cargoCapacity,
+                    speedPercent: speedPercent
                 )
 
                 if model.canShowMissileStrikeControls(originID: originID) {
@@ -2143,7 +2271,8 @@ private struct FleetDispatchPanel: View {
                             targetID: targetID,
                             mission: mission,
                             ships: selectedShips,
-                            cargo: launchCargo
+                            cargo: launchCargo,
+                            speedPercent: speedPercent
                         )
                     } label: {
                         Label("派遣", systemImage: "paperplane.fill")
@@ -2154,7 +2283,8 @@ private struct FleetDispatchPanel: View {
                         targetID: targetID,
                         mission: mission,
                         ships: selectedShips,
-                        cargo: launchCargo
+                        cargo: launchCargo,
+                        speedPercent: speedPercent
                     ))
                 }
             }
@@ -2425,14 +2555,37 @@ private struct CargoField: View {
     }
 }
 
+private struct FleetSpeedPicker: View {
+    @Binding var speedPercent: Double
+    private let speedOptions = [0.1, 0.25, 0.5, 0.75, 1.0]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("航速", systemImage: "speedometer")
+                .font(.callout.weight(.semibold))
+                .lineLimit(1)
+
+            Picker("航速", selection: $speedPercent) {
+                ForEach(speedOptions, id: \.self) { option in
+                    Text(option.formatted(.percent.precision(.fractionLength(0))))
+                        .tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+}
+
 private struct FleetDispatchSummary: View {
     @ObservedObject var model: AppModel
     let originID: PlanetID?
     let targetID: PlanetID?
+    let mission: Fleet.Mission
     let ships: [ShipKind: Int]
     let cargo: ResourceBundle
     let cargoUsed: Double
     let cargoCapacity: Double
+    let speedPercent: Double
 
     private var hasShipsSelected: Bool {
         ships.values.contains { $0 > 0 }
@@ -2446,16 +2599,30 @@ private struct FleetDispatchSummary: View {
         ) {
             DispatchMetric(title: "容量", value: "\(Formatters.wholeNumber(cargoUsed)) / \(Formatters.wholeNumber(cargoCapacity))")
             DispatchMetric(title: "燃料", value: fuelText, isWarning: hasShipsSelected && !fuelIsAffordable)
-            DispatchMetric(title: "航程", value: model.durationText(model.fleetTravelDuration(originID: originID, targetID: targetID, ships: ships)))
+            DispatchMetric(title: "航程", value: model.durationText(model.fleetTravelDuration(originID: originID, targetID: targetID, ships: ships, speedPercent: speedPercent)))
+            if let battlePreviewText {
+                DispatchMetric(title: "战斗预估", value: battlePreviewText)
+            }
         }
     }
 
     private var fuelText: String {
-        model.fleetFuelStatusText(originID: originID, targetID: targetID, ships: ships, cargo: cargo)
+        model.fleetFuelStatusText(originID: originID, targetID: targetID, ships: ships, cargo: cargo, speedPercent: speedPercent)
     }
 
     private var fuelIsAffordable: Bool {
-        model.canAffordFleetFuel(originID: originID, targetID: targetID, ships: ships, cargo: cargo)
+        model.canAffordFleetFuel(originID: originID, targetID: targetID, ships: ships, cargo: cargo, speedPercent: speedPercent)
+    }
+
+    private var battlePreviewText: String? {
+        model.battlePreviewText(
+            originID: originID,
+            targetID: targetID,
+            mission: mission,
+            ships: ships,
+            cargo: cargo,
+            speedPercent: speedPercent
+        )
     }
 }
 
@@ -2551,6 +2718,24 @@ private struct ActiveFleetRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
+
+                Text("航速 \(fleet.speedPercent.formatted(.percent.precision(.fractionLength(0))))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+
+            if fleet.ownerID == model.universe.playerFactionID && (fleet.phase == .outbound || fleet.phase == .holding) {
+                Button {
+                    model.recallFleet(fleet)
+                } label: {
+                    Label("召回", systemImage: "arrow.uturn.backward")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("召回舰队")
             }
         }
         .padding(.vertical, 10)

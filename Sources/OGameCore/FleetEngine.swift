@@ -8,6 +8,7 @@ public enum FleetLaunchFailure: Equatable, Sendable {
     case insufficientCargo
     case insufficientFuel
     case invalidMission
+    case fleetSlotLimit
 }
 
 public enum FleetLaunchResult: Equatable, Sendable {
@@ -22,7 +23,8 @@ public enum FleetEngine {
         in universe: inout Universe,
         mission: Fleet.Mission,
         ships requestedShips: [ShipKind: Int],
-        cargo: ResourceBundle = .zero
+        cargo: ResourceBundle = .zero,
+        speedPercent: Double = 1
     ) -> FleetLaunchResult {
         guard let originIndex = universe.planets.firstIndex(where: { $0.id == originPlanetID }) else {
             return .failure(.missingOrigin)
@@ -35,6 +37,12 @@ public enum FleetEngine {
         guard let ownerID = universe.planets[originIndex].ownerID else {
             return .failure(.missingOwner)
         }
+        let ownerResearch = universe.factions.first { $0.id == ownerID }?.technology ?? ResearchState()
+        let activeFleetCount = universe.fleets.filter { $0.ownerID == ownerID && $0.phase != .completed }.count
+        guard activeFleetCount < TechnologyEffects.maxFleetSlots(for: ownerResearch) else {
+            return .failure(.fleetSlotLimit)
+        }
+        let speedPercent = normalizedSpeedPercent(speedPercent)
 
         let ships = normalizedShips(requestedShips)
         guard !ships.isEmpty, isValidLaunchMission(mission, ships: ships, target: universe.planets[targetIndex]) else {
@@ -68,7 +76,9 @@ public enum FleetEngine {
             from: universe.planets[originIndex].coordinate,
             to: universe.planets[targetIndex].coordinate,
             ships: ships,
-            ruleSet: universe.ruleSet
+            ruleSet: universe.ruleSet,
+            research: ownerResearch,
+            speedPercent: speedPercent
         )
         guard fuel.isFinite, fuel >= 0 else {
             return .failure(.invalidMission)
@@ -83,7 +93,9 @@ public enum FleetEngine {
             from: universe.planets[originIndex].coordinate,
             to: universe.planets[targetIndex].coordinate,
             ships: ships,
-            ruleSet: universe.ruleSet
+            ruleSet: universe.ruleSet,
+            research: ownerResearch,
+            speedPercent: speedPercent
         )
         guard universe.gameTime.isFinite, travelTime.isFinite, travelTime > 0 else {
             return .failure(.invalidMission)
@@ -118,6 +130,7 @@ public enum FleetEngine {
                         mission.rawValue,
                         shipPayload(ships),
                         resourcePayload(cargo),
+                        String(speedPercent),
                         launchSequence,
                         String(universe.gameTime),
                         String(arrivalTime),
@@ -136,7 +149,8 @@ public enum FleetEngine {
             returnTime: returnTime,
             phase: .outbound,
             originPlanetID: originPlanetID,
-            targetPlanetID: targetPlanetID
+            targetPlanetID: targetPlanetID,
+            speedPercent: speedPercent
         )
 
         universe.fleets.append(fleet)
@@ -194,14 +208,22 @@ public enum FleetEngine {
         from origin: Coordinate,
         to target: Coordinate,
         ships: [ShipKind: Int],
-        ruleSet: RuleSet
+        ruleSet: RuleSet,
+        research: ResearchState = ResearchState(),
+        speedPercent: Double = 1
     ) -> TimeInterval {
         let normalized = normalizedShips(ships)
         guard !normalized.isEmpty else {
             return 0
         }
 
-        let slowestSpeed = normalized.keys.compactMap { ruleSet.shipRules[$0]?.speed }.min() ?? 0
+        let slowestSpeed = normalized.keys.compactMap { kind -> Double? in
+            guard let baseSpeed = ruleSet.shipRules[kind]?.speed else {
+                return nil
+            }
+
+            return TechnologyEffects.effectiveSpeed(for: kind, baseSpeed: baseSpeed, research: research)
+        }.min() ?? 0
         guard slowestSpeed.isFinite, slowestSpeed > 0 else {
             return 0
         }
@@ -211,7 +233,7 @@ public enum FleetEngine {
             return 0
         }
 
-        let duration = ceil((distance / slowestSpeed) * 3_600)
+        let duration = ceil((distance / slowestSpeed) * 3_600 / normalizedSpeedPercent(speedPercent))
         guard duration.isFinite, duration > 0 else {
             return 0
         }
@@ -223,7 +245,9 @@ public enum FleetEngine {
         from origin: Coordinate,
         to target: Coordinate,
         ships: [ShipKind: Int],
-        ruleSet: RuleSet
+        ruleSet: RuleSet,
+        research: ResearchState = ResearchState(),
+        speedPercent: Double = 1
     ) -> Double {
         let normalized = normalizedShips(ships)
         guard !normalized.isEmpty else {
@@ -251,7 +275,41 @@ public enum FleetEngine {
             return .infinity
         }
 
-        return ceil((distance / 1_000) * baseCost)
+        let speed = normalizedSpeedPercent(speedPercent)
+        let speedFuelMultiplier = 0.35 + pow(speed, 2) * 0.65
+        return ceil((distance / 1_000) * baseCost * speedFuelMultiplier)
+    }
+
+    public static func recallFleet(_ fleetID: FleetID, ownerID: FactionID, in universe: inout Universe) -> Bool {
+        guard let fleetIndex = universe.fleets.firstIndex(where: { $0.id == fleetID && $0.ownerID == ownerID }) else {
+            return false
+        }
+
+        let fleet = universe.fleets[fleetIndex]
+        guard fleet.phase == .outbound || fleet.phase == .holding else {
+            return false
+        }
+
+        let outboundDuration = max(fleet.arrivalTime - fleet.launchTime, 1)
+        let elapsedOutbound = min(max(universe.gameTime - fleet.launchTime, 0), outboundDuration)
+        let returnDuration = max(1, ceil(elapsedOutbound))
+        let returnTime = universe.gameTime + returnDuration
+        guard returnTime.isFinite else {
+            return false
+        }
+
+        universe.fleets[fleetIndex].phase = .returning
+        universe.fleets[fleetIndex].recalledAt = universe.gameTime
+        universe.fleets[fleetIndex].returnTime = returnTime
+        universe.events.append(
+            missionEvent(
+                for: universe.fleets[fleetIndex],
+                time: universe.gameTime,
+                kind: .system,
+                title: "Fleet Recalled"
+            )
+        )
+        return true
     }
 
     private static func resolveArrival(_ fleet: Fleet, in universe: inout Universe) -> Fleet? {
@@ -277,12 +335,13 @@ public enum FleetEngine {
                 universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .system, title: "Debris Recovered"))
             }
         case .explore:
-            let reward = explorationReward(for: fleet, universe: universe)
-            returningFleet.cargo = safeAdding(fleet.cargo, reward)
-            if let record = recordExploredTarget(for: fleet, reward: reward, in: &universe) {
+            let outcome = ExplorationEventEngine.resolve(fleet: fleet, universe: universe)
+            returningFleet.cargo = safeAdding(fleet.cargo, outcome.reward)
+            returningFleet.ships = applyExplorationShipOutcome(outcome, to: returningFleet.ships)
+            if let record = recordExploredTarget(for: fleet, reward: outcome.reward, in: &universe) {
                 universe.reports.append(explorationReport(for: fleet, record: record, in: universe))
             }
-            universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .exploration, title: "Exploration Complete"))
+            universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .exploration, title: "Exploration \(outcome.kind.rawValue)"))
         case .colonize:
             if let targetIndex = targetPlanetIndex(for: fleet, in: universe),
                universe.planets[targetIndex].ownerID == nil,
@@ -371,6 +430,31 @@ public enum FleetEngine {
 
             result[element.key] = addition.partialValue
         }
+    }
+
+    private static func applyExplorationShipOutcome(
+        _ outcome: ExplorationOutcome,
+        to ships: [ShipKind: Int]
+    ) -> [ShipKind: Int] {
+        var adjusted = normalizedShips(ships)
+
+        for (kind, quantity) in outcome.foundShips where quantity > 0 {
+            adjusted[kind, default: 0] += quantity
+        }
+        for (kind, quantity) in outcome.lostShips where quantity > 0 {
+            let remaining = max((adjusted[kind] ?? 0) - quantity, 0)
+            adjusted[kind] = remaining > 0 ? remaining : nil
+        }
+
+        return adjusted
+    }
+
+    private static func normalizedSpeedPercent(_ value: Double) -> Double {
+        guard value.isFinite else {
+            return 1
+        }
+
+        return min(max(value, 0.1), 1)
     }
 
     private static func cargoCapacity(for ships: [ShipKind: Int], ruleSet: RuleSet) -> Double {

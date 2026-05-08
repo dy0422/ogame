@@ -39,7 +39,8 @@ public enum OfflineSimulationEngine {
         elapsed: TimeInterval,
         now: Date,
         aiDifficulty: GameSettings.Difficulty = .standard,
-        isPlayerAutoUpgradeEnabled: Bool = false
+        isPlayerAutoUpgradeEnabled: Bool = false,
+        autoUpgradePolicy: AutoUpgradePolicy = AutoUpgradePolicy(maxBuildQueueDepthPerPlanet: 1, maxResearchQueueDepth: 1)
     ) -> OfflineCatchUpSummary {
         guard elapsed.isFinite, elapsed > 0 else {
             return emptySummary()
@@ -71,7 +72,8 @@ public enum OfflineSimulationEngine {
                 delta: delta,
                 allowAggressiveAIStrategy: allowAggressiveAI,
                 aiDifficulty: aiDifficulty,
-                isPlayerAutoUpgradeEnabled: isPlayerAutoUpgradeEnabled
+                isPlayerAutoUpgradeEnabled: isPlayerAutoUpgradeEnabled,
+                autoUpgradePolicy: autoUpgradePolicy
             )
 
             let generatedEvents = Array(universe.events[eventStartCount..<universe.events.count])
