@@ -4011,7 +4011,7 @@ func testQueueEngineRejectsInvalidBuildingRuleValuesWithoutMutation() {
         costMultiplier: 1.5,
         baseDuration: 20,
         durationMultiplier: 1.3,
-        productionPerHour: ResourceBundle(metal: 180),
+        productionPerHour: ResourceBundle(metal: 120),
         energyUsed: 10,
         aiPriorityWeight: 1
     )
@@ -4036,7 +4036,7 @@ func testQueueEngineRejectsInvalidBuildingRuleValuesWithoutMutation() {
         costMultiplier: -1.5,
         baseDuration: 20,
         durationMultiplier: 1.3,
-        productionPerHour: ResourceBundle(metal: 180),
+        productionPerHour: ResourceBundle(metal: 120),
         energyUsed: 10,
         aiPriorityWeight: 1
     )
@@ -4089,11 +4089,8 @@ func testSimulationTickCompletesBuildingQueueRecomputesEnergyAndRecordsEvent() {
     requireEqual(universe.gameTime, 18, "Simulation tick should advance to the building finish time")
     requireEqual(universe.planets[0].buildQueue, [], "Completed building queue item should be removed")
     requireEqual(universe.planets[0].buildingLevels[.solarPlant], 1, "Completed building queue should raise the building level")
-    requireEqual(
-        universe.planets[0].energy,
-        EnergyState(produced: 32, used: 0),
-        "Completed building queue should recompute planet energy"
-    )
+    requireApproxEqual(universe.planets[0].energy.produced, 22, "Completed building queue should recompute produced energy")
+    requireApproxEqual(universe.planets[0].energy.used, 0, "Completed building queue should recompute used energy")
 
     guard let completionEvent = universe.events.first(where: { $0.title == "Construction Complete" }) else {
         fatalError("Completing a building queue should record a construction event")
@@ -4180,9 +4177,10 @@ func testSimulationTickCompletesAlreadyDueConstructionBeforeProduction() {
     requireEqual(universe.planets[1].buildQueue, [], "Already-due mine completion should be removed before production")
     requireEqual(universe.planets[0].buildingLevels[.solarPlant], 1, "Already-due solar queue should raise solar level")
     requireEqual(universe.planets[1].buildingLevels[.metalMine], 1, "Already-due mine queue should raise mine level")
-    requireEqual(universe.planets[0].energy, EnergyState(produced: 32, used: 10), "Already-due solar completion should update energy before production")
-    requireApproxEqual(universe.planets[0].resources.metal, 180, "Solar completion should power existing mine production during the same tick")
-    requireApproxEqual(universe.planets[1].resources.metal, 180, "Mine completion should produce during the same tick")
+    requireApproxEqual(universe.planets[0].energy.produced, 22, "Already-due solar completion should update produced energy before production")
+    requireApproxEqual(universe.planets[0].energy.used, 11, "Already-due solar completion should update used energy before production")
+    requireApproxEqual(universe.planets[0].resources.metal, 212, "Solar completion should power existing mine production during the same tick")
+    requireApproxEqual(universe.planets[1].resources.metal, 212, "Mine completion should produce during the same tick")
 
     let completionEvents = universe.events.filter { $0.title == "Construction Complete" }
     requireEqual(completionEvents.count, 2, "Already-due construction queues should record deterministic completion events")
@@ -4620,8 +4618,8 @@ func testEconomyProductionPerHourUsesMineLevelsAndEnergyRatio() {
 
     requireApproxEqual(
         production,
-        ResourceBundle(metal: 180 * 2 * pow(1.12, 1), crystal: 120, deuterium: 72),
-        "Economy production should scale base mine output by level and exponential growth"
+        ResourceBundle(metal: 370.4, crystal: 128, deuterium: 52.8),
+        "Economy production should use server-shaped mine curves with single-player base income"
     )
 }
 
@@ -4646,7 +4644,7 @@ func testEconomyOneHourTickIncreasesOwnedPlanetResources() {
 
     requireApproxEqual(
         planet.resources,
-        ResourceBundle(metal: 503.2, crystal: 320, deuterium: 372),
+        ResourceBundle(metal: 470.4, crystal: 328, deuterium: 352.8),
         "One-hour economy tick should add mine production to resources"
     )
 }
@@ -4697,8 +4695,8 @@ func testEconomyEnergyShortageReducesMineOutput() {
 
     requireApproxEqual(
         production,
-        ResourceBundle(metal: 322.56, crystal: 215.04, deuterium: 0),
-        "Energy shortage should reduce mine output by the produced-over-used energy ratio"
+        ResourceBundle(metal: 212, crystal: 128, deuterium: 0),
+        "Energy shortage should reduce mine output while preserving base income"
     )
 }
 
@@ -4726,11 +4724,12 @@ func testPlanetProductionSettingsScaleMineOutputAndEnergyUse() {
     EconomyEngine.recomputeEnergy(for: &planet, ruleSet: .fastSkirmish)
     let production = EconomyEngine.productionPerHour(for: planet, ruleSet: .fastSkirmish)
 
-    requireEqual(planet.energy, EnergyState(produced: 128, used: 14), "Production settings should scale mine energy usage")
+    requireApproxEqual(planet.energy.produced, 117.128, "Production settings should preserve solar energy output")
+    requireApproxEqual(planet.energy.used, 20.35, "Production settings should scale mine energy usage")
     requireApproxEqual(
         production,
-        ResourceBundle(metal: 201.6, crystal: 0, deuterium: 18),
-        "Production settings should scale each mine output independently"
+        ResourceBundle(metal: 225.2, crystal: 40, deuterium: 13.2),
+        "Production settings should scale each mine output independently while preserving base income"
     )
 }
 
@@ -4753,8 +4752,8 @@ func testStorageBuildingsIncreaseStorageCaps() {
 
     requireEqual(
         storage,
-        ResourceStorage(metal: 20_500, crystal: 10_600, deuterium: 10_700),
-        "Storage buildings should add lane-specific storage caps"
+        ResourceStorage(metal: 1_125, crystal: 900, deuterium: 1_050),
+        "Storage buildings should use server-shaped lane-specific storage caps"
     )
 }
 
@@ -4824,11 +4823,8 @@ func testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed() {
 
     EconomyEngine.recomputeEnergy(for: &planet, ruleSet: .fastSkirmish)
 
-    requireEqual(
-        planet.energy,
-        EnergyState(produced: 96, used: 46),
-        "Economy energy recomputation should derive produced and used energy from current building levels"
-    )
+    requireApproxEqual(planet.energy.produced, 79.86, "Economy energy recomputation should derive produced energy from current building levels")
+    requireApproxEqual(planet.energy.used, 68.2, "Economy energy recomputation should derive used energy from current building levels")
 }
 
 func testEconomyUniverseTickDoesNotProduceOnNonOwnedPlanets() {
@@ -4855,7 +4851,7 @@ func testEconomyUniverseTickDoesNotProduceOnNonOwnedPlanets() {
 
     EconomyEngine.tick(universe: &universe, delta: 3_600)
 
-    requireApproxEqual(universe.planets[0].resources.metal, 180, "Owned planet should produce resources")
+    requireApproxEqual(universe.planets[0].resources, ResourceBundle(metal: 212, crystal: 40, deuterium: 0), "Owned planet should produce resources")
     requireEqual(universe.planets[1].resources, .zero, "Non-owned planet should not produce resources")
 }
 
@@ -4898,7 +4894,7 @@ func testSimulationDomainOnlyPolicySuppressesRoutineTickEvents() {
     SimulationEngine.tick(universe: &universe, delta: 60, eventPolicy: .domainOnly)
 
     requireEqual(universe.gameTime, 60, "Domain-only tick should still advance game time")
-    requireApproxEqual(universe.planets[0].resources.metal, 3, "Domain-only tick should still produce resources")
+    requireApproxEqual(universe.planets[0].resources.metal, 212 / 60, "Domain-only tick should still produce resources")
     requireEqual(universe.events, [], "Domain-only tick should suppress routine economy and system events")
 }
 
@@ -5178,7 +5174,7 @@ func testOfflineCatchUpProducesResourcesWithoutFloodingEvents() {
         now: Date(timeIntervalSince1970: 2_000)
     )
 
-    requireApproxEqual(universe.planets[0].resources.metal, 180, "Offline catch-up should produce owned-planet resources")
+    requireApproxEqual(universe.planets[0].resources.metal, 212, "Offline catch-up should produce owned-planet resources")
     requireEqual(summary.processedChunks, 12, "One hour at five-minute offline chunks should process twelve chunks")
     requireEqual(summary.completedConstructionCount, 0, "Resource-only catch-up should not report construction completions")
     requireEqual(summary.completedResearchCount, 0, "Resource-only catch-up should not report research completions")

@@ -48,6 +48,38 @@ func testRepositorySavesAndLoadsUniverse() throws {
     requireEqual(loaded.schemaVersion, SaveEnvelope.currentSchemaVersion, "Repository should preserve schema version")
 }
 
+func testRepositoryMigratesLegacyLowStorageBaseline() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    var universe = StarterUniverseFactory.makeNewGame(seed: 21, playerName: "Commander")
+    universe.planets[0].storage = ResourceStorage(metal: 10_000, crystal: 8_000, deuterium: 6_000)
+    universe.planets[1].storage = ResourceStorage(metal: 120_000, crystal: 100_000, deuterium: 90_000)
+    let envelope = SaveEnvelope(
+        schemaVersion: SaveEnvelope.currentSchemaVersion,
+        lastSavedAt: Date(timeIntervalSince1970: 1_500),
+        universe: universe
+    )
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.dateEncodingStrategy = .iso8601
+
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try encoder.encode(envelope).write(to: directory.appendingPathComponent("autosave.json"), options: [.atomic])
+
+    let loaded = try repository.load()
+
+    requireEqual(
+        loaded.universe.planets[0].storage,
+        ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        "Legacy low storage baselines should migrate to the current single-player baseline"
+    )
+    requireEqual(
+        loaded.universe.planets[1].storage,
+        ResourceStorage(metal: 120_000, crystal: 100_000, deuterium: 100_000),
+        "Storage migration should preserve lanes already above the current baseline"
+    )
+}
+
 func testRepositorySavesAndLoadsQueueMetadata() throws {
     let directory = uniqueTemporaryDirectory()
     let repository = JSONSaveRepository(saveDirectory: directory)
@@ -491,6 +523,7 @@ func testBackupIntegrityCheckRejectsWrongSchema() throws {
 }
 
 try testRepositorySavesAndLoadsUniverse()
+try testRepositoryMigratesLegacyLowStorageBaseline()
 try testRepositorySavesAndLoadsQueueMetadata()
 try testRepositorySavesAndLoadsFleetsReportsAndSettings()
 try testLoadedEnvelopePreparesOfflineCatchUpWithoutSavingUntilExplicitWrite()

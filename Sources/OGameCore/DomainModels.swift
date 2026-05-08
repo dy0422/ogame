@@ -812,7 +812,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         coordinate: Coordinate,
         ownerID: FactionID?,
         resources: ResourceBundle = .zero,
-        storage: ResourceStorage = ResourceStorage(metal: 10_000, crystal: 10_000, deuterium: 10_000),
+        storage: ResourceStorage = ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
         energy: EnergyState = EnergyState(),
         buildingLevels: [BuildingKind: Int] = [:],
         productionSettings: [BuildingKind: Double] = [:],

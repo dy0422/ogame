@@ -1,20 +1,31 @@
 import Foundation
 
 public enum EconomyEngine {
+    private static let baseProductionPerHour = ResourceBundle(metal: 80, crystal: 40)
+    private static let serverGrowthBase = 1.1
+    private static let storageGrowthBase = 1.5
+
     public static func recomputeEnergy(for planet: inout Planet, ruleSet: RuleSet) {
         planet.energy = energyState(for: planet, ruleSet: ruleSet)
     }
 
     public static func storageCapacity(for planet: Planet, ruleSet: RuleSet) -> ResourceStorage {
-        var storage = planet.storage
+        var storage = sanitizedStorage(planet.storage)
+        storage.metal = storageCapacity(base: storage.metal, level: normalizedLevel(planet.buildingLevels[.metalStorage] ?? 0))
+        storage.crystal = storageCapacity(base: storage.crystal, level: normalizedLevel(planet.buildingLevels[.crystalStorage] ?? 0))
+        storage.deuterium = storageCapacity(base: storage.deuterium, level: normalizedLevel(planet.buildingLevels[.deuteriumTank] ?? 0))
 
         for building in BuildingKind.allCases {
+            guard !isDedicatedStorageBuilding(building) else {
+                continue
+            }
+
             let level = normalizedLevel(planet.buildingLevels[building] ?? 0)
             guard level > 0, let rule = ruleSet.buildingRules[building] else {
                 continue
             }
 
-            storage = storage.adding(rule.storageBonus.scaled(by: Double(level)))
+            storage = storage.adding(sanitizedStorage(rule.storageBonus.scaled(by: Double(level))))
         }
 
         return storage
@@ -23,7 +34,7 @@ public enum EconomyEngine {
     public static func productionPerHour(for planet: Planet, ruleSet: RuleSet) -> ResourceBundle {
         let energy = energyState(for: planet, ruleSet: ruleSet)
         let ratio = energyRatio(for: energy)
-        var production = ResourceBundle.zero
+        var mineProduction = ResourceBundle.zero
 
         for building in BuildingKind.allCases {
             let level = normalizedLevel(planet.buildingLevels[building] ?? 0)
@@ -31,13 +42,13 @@ public enum EconomyEngine {
                 continue
             }
 
-            production = production.adding(
+            mineProduction = mineProduction.adding(
                 scaledProduction(rule.productionPerHour, level: level)
                     .scaled(by: productionScale(for: building, on: planet))
             )
         }
 
-        return production.scaled(by: ratio)
+        return baseProductionPerHour.adding(mineProduction.scaled(by: ratio))
     }
 
     public static func applyProduction(to planet: inout Planet, delta: TimeInterval, ruleSet: RuleSet) {
@@ -93,8 +104,8 @@ public enum EconomyEngine {
             }
 
             let productionScale = productionScale(for: building, on: planet)
-            produced += rule.energyProduced * Double(level)
-            used += rule.energyUsed * Double(level) * productionScale
+            produced += scaledEnergy(rule.energyProduced, level: level)
+            used += scaledEnergy(rule.energyUsed, level: level) * productionScale
         }
 
         return EnergyState(produced: produced, used: used)
@@ -109,8 +120,51 @@ public enum EconomyEngine {
             return .zero
         }
 
-        let multiplier = Double(level) * pow(1.12, Double(level - 1))
-        return baseProduction.scaled(by: multiplier)
+        return ResourceBundle(
+            metal: scaledServerCurve(baseProduction.metal, level: level),
+            crystal: scaledServerCurve(baseProduction.crystal, level: level),
+            deuterium: scaledServerCurve(baseProduction.deuterium, level: level)
+        )
+    }
+
+    private static func scaledEnergy(_ baseEnergy: Double, level: Int) -> Double {
+        guard level > 0 else {
+            return 0
+        }
+
+        return scaledServerCurve(baseEnergy, level: level)
+    }
+
+    private static func scaledServerCurve(_ baseValue: Double, level: Int) -> Double {
+        guard baseValue.isFinite else {
+            return 0
+        }
+
+        return max(baseValue, 0) * Double(level) * pow(serverGrowthBase, Double(level))
+    }
+
+    private static func storageCapacity(base: Double, level: Int) -> Double {
+        guard base.isFinite else {
+            return 0
+        }
+
+        guard level > 0 else {
+            return max(base, 0)
+        }
+
+        return max(base, 0) * pow(storageGrowthBase, Double(level))
+    }
+
+    private static func sanitizedStorage(_ storage: ResourceStorage) -> ResourceStorage {
+        ResourceStorage(
+            metal: storage.metal.isFinite ? max(storage.metal, 0) : 0,
+            crystal: storage.crystal.isFinite ? max(storage.crystal, 0) : 0,
+            deuterium: storage.deuterium.isFinite ? max(storage.deuterium, 0) : 0
+        )
+    }
+
+    private static func isDedicatedStorageBuilding(_ building: BuildingKind) -> Bool {
+        building == .metalStorage || building == .crystalStorage || building == .deuteriumTank
     }
 
     private static func productionScale(for building: BuildingKind, on planet: Planet) -> Double {

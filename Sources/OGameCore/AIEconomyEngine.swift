@@ -1,6 +1,8 @@
 import Foundation
 
 public enum AIEconomyEngine {
+    private static let serverGrowthBase = 1.1
+
     public static func makeDecisions(in universe: inout Universe) {
         let aiFactionIDs = universe.factions
             .filter { $0.kind == .ai && $0.id != universe.playerFactionID }
@@ -445,11 +447,19 @@ public enum AIEconomyEngine {
                 continue
             }
 
-            produced += rule.energyProduced * Double(level)
-            used += rule.energyUsed * Double(level)
+            produced += scaledServerCurve(rule.energyProduced, level: level)
+            used += scaledServerCurve(rule.energyUsed, level: level)
         }
 
         return EnergyState(produced: produced, used: used)
+    }
+
+    private static func scaledServerCurve(_ baseValue: Double, level: Int) -> Double {
+        guard level > 0, baseValue.isFinite else {
+            return 0
+        }
+
+        return max(baseValue, 0) * Double(level) * pow(serverGrowthBase, Double(level))
     }
 
     private static func buildingTerms(rule: BuildingRule, targetLevel: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {

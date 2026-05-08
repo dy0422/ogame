@@ -581,7 +581,7 @@ public extension RuleSet {
                 costMultiplier: 1.50,
                 baseDuration: 20,
                 durationMultiplier: 1.30,
-                productionPerHour: ResourceBundle(metal: 180),
+                productionPerHour: ResourceBundle(metal: 120),
                 energyUsed: 10,
                 aiPriorityWeight: 1.00
             ),
@@ -590,7 +590,7 @@ public extension RuleSet {
                 costMultiplier: 1.60,
                 baseDuration: 24,
                 durationMultiplier: 1.35,
-                productionPerHour: ResourceBundle(crystal: 120),
+                productionPerHour: ResourceBundle(crystal: 80),
                 energyUsed: 10,
                 aiPriorityWeight: 0.95
             ),
@@ -599,8 +599,8 @@ public extension RuleSet {
                 costMultiplier: 1.50,
                 baseDuration: 32,
                 durationMultiplier: 1.35,
-                productionPerHour: ResourceBundle(deuterium: 72),
-                energyUsed: 16,
+                productionPerHour: ResourceBundle(deuterium: 48),
+                energyUsed: 30,
                 aiPriorityWeight: 0.75
             ),
             .solarPlant: BuildingRule(
@@ -608,7 +608,7 @@ public extension RuleSet {
                 costMultiplier: 1.50,
                 baseDuration: 18,
                 durationMultiplier: 1.25,
-                energyProduced: 32,
+                energyProduced: 20,
                 aiPriorityWeight: 0.85
             ),
             .roboticsFactory: BuildingRule(
@@ -640,7 +640,6 @@ public extension RuleSet {
                 costMultiplier: 1.65,
                 baseDuration: 35,
                 durationMultiplier: 1.35,
-                storageBonus: ResourceStorage(metal: 10_000),
                 aiPriorityWeight: 0.18
             ),
             .crystalStorage: BuildingRule(
@@ -648,7 +647,6 @@ public extension RuleSet {
                 costMultiplier: 1.65,
                 baseDuration: 35,
                 durationMultiplier: 1.35,
-                storageBonus: ResourceStorage(crystal: 10_000),
                 aiPriorityWeight: 0.18
             ),
             .deuteriumTank: BuildingRule(
@@ -656,7 +654,6 @@ public extension RuleSet {
                 costMultiplier: 1.65,
                 baseDuration: 35,
                 durationMultiplier: 1.35,
-                storageBonus: ResourceStorage(deuterium: 10_000),
                 aiPriorityWeight: 0.16
             ),
             .naniteFactory: BuildingRule(
