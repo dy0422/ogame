@@ -1048,6 +1048,25 @@ func testStarterUniverseIsDeterministicForSeed() throws {
     requireEqual(decoded, first, "Starter universe should preserve stable enum-map JSON behavior")
 }
 
+func testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources() {
+    var universe = makeStrategicUniverse(playerPlanetCount: 2, aiPlanetCount: 1, neutralPlanetCount: 1)
+    let playerPlanetIDs = Set(universe.factions.first { $0.id == universe.playerFactionID }?.ownedPlanetIDs ?? [])
+    let unchangedPlanets = universe.planets.filter { !playerPlanetIDs.contains($0.id) }
+
+    let updatedCount = TestingResourceGrant.grantInfiniteResources(toPlayerIn: &universe)
+
+    requireEqual(updatedCount, playerPlanetIDs.count, "Resource grant should report updated player planets")
+    for planet in universe.planets where playerPlanetIDs.contains(planet.id) {
+        requireEqual(planet.resources, TestingResourceGrant.infiniteResourceBundle, "Player planets should receive infinite test resources")
+        requireEqual(planet.storage, TestingResourceGrant.infiniteStorage, "Player planets should receive infinite test storage")
+    }
+    for planet in unchangedPlanets {
+        let updated = requirePlanet(planet.id, in: universe, "Non-player planet should remain after test resource grant")
+        requireEqual(updated.resources, planet.resources, "Resource grant should not mutate non-player resources")
+        requireEqual(updated.storage, planet.storage, "Resource grant should not mutate non-player storage")
+    }
+}
+
 func strategicPlayerID() -> FactionID {
     FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000501")!)
 }
@@ -5749,6 +5768,7 @@ testSeededGeneratorProducesDeterministicDistinctSequences()
 testSeededGeneratorEqualityTracksSeedAndState()
 testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
+testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources()
 testStrategicRankingsScoreFactionStrengthsAndVictoryProgress()
 testStrategicVictoryRoutesTriggerForEconomyTechnologyDominationAndExploration()
 testLateGameObjectiveContributesToTechnologyVictory()

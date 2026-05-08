@@ -1510,6 +1510,21 @@ final class AppModel: ObservableObject {
         autosaveAfterQueueing(successStatus: Self.autoUpgradeQueuedStatus(for: result))
     }
 
+    func grantInfiniteResourcesForTesting() {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再使用测试资源。"
+            return
+        }
+
+        let updatedCount = TestingResourceGrant.grantInfiniteResources(toPlayerIn: &universe)
+        guard updatedCount > 0 else {
+            statusMessage = "没有可注入测试资源的玩家星球。"
+            return
+        }
+
+        autosaveAfterQueueing(successStatus: "测试资源已注入：\(updatedCount) 个玩家星球获得近似无限资源。")
+    }
+
     func updateDifficulty(_ difficulty: GameSettings.Difficulty) {
         settings.difficulty = difficulty
         statusMessage = "难度已设为\(difficulty.displayName)。\(difficulty.behaviorDescription)"

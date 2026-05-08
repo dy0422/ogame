@@ -724,14 +724,25 @@ private struct SettingsPanel: View {
                     .disabled(!model.canSave)
                 }
 
-                Button {
-                    model.runAutoUpgradeNow()
-                } label: {
-                    Label("立即执行一次托管升级", systemImage: "bolt.circle")
+                HStack(spacing: 10) {
+                    Button {
+                        model.runAutoUpgradeNow()
+                    } label: {
+                        Label("立即执行一次托管升级", systemImage: "bolt.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!model.canSave)
+                    .help("立刻按当前托管策略尝试填充玩家队列。")
+
+                    Button {
+                        model.grantInfiniteResourcesForTesting()
+                    } label: {
+                        Label("测试：资源无限", systemImage: "infinity.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!model.canSave)
+                    .help("将玩家所有星球的三项资源和仓储设为超大测试值。")
                 }
-                .buttonStyle(.bordered)
-                .disabled(!model.canSave)
-                .help("立刻尝试为玩家加入一项建筑和一项科技。")
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) {
