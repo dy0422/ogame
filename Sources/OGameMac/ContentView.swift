@@ -144,6 +144,10 @@ private struct DashboardView: View {
 
                     HeaderView(universe: model.universe, faction: model.playerFaction)
                     VictoryBannerView(summary: model.victoryBannerSummary, compact: true)
+                    CommanderBriefingPanel(model: model)
+                    if let settlement = model.victorySettlementSummary {
+                        VictorySettlementPanel(summary: settlement, model: model)
+                    }
                     PlanetSummaryView(planets: model.playerPlanets, model: model)
                     RecentEventsView(events: Array(model.universe.events.suffix(6).reversed()))
                 }
@@ -182,6 +186,104 @@ private struct HeaderView: View {
     }
 }
 
+private struct CommanderBriefingPanel: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: "指挥官简报", detail: "下一步建议")
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 220), alignment: .topLeading)],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    ForEach(model.commanderBriefingItems) { item in
+                        CommanderBriefingCard(item: item)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct CommanderBriefingCard: View {
+    let item: CommanderBriefingItem
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: item.systemImage)
+                .foregroundStyle(item.urgency.tint)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(item.title)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+
+                Text(item.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(item.urgency.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(item.urgency.tint.opacity(0.16))
+        }
+    }
+}
+
+private struct VictorySettlementPanel: View {
+    let summary: VictorySettlementSummary
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PanelSurface {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: summary.isPlayerVictory ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                    .font(.title3)
+                    .foregroundStyle(summary.isPlayerVictory ? Color.green : Color.orange)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(summary.title)
+                        .font(.title3.bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Text(summary.detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 10) {
+                        Label(summary.routeText, systemImage: "flag")
+                        Label(summary.timeText, systemImage: "clock")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+
+                Button {
+                    model.startNewGame()
+                } label: {
+                    Label("重新开局", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
 private struct PlanetSummaryView: View {
     let planets: [Planet]
     @ObservedObject var model: AppModel
@@ -209,22 +311,30 @@ private struct PlanetSummaryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(planet.name.displayName)
-                    .font(.headline)
-                    .lineLimit(1)
+            HStack(alignment: .top, spacing: 12) {
+                ServerAssetThumbnail(
+                    url: GameArt.planetImageURL(for: planet, small: true),
+                    fallbackSystemImage: "globe.europe.africa.fill",
+                    size: 64
+                )
 
-                Text(planet.coordinate.displayText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(planet.name.displayName)
+                        .font(.headline)
+                        .lineLimit(1)
 
-                if let moon = planet.moon {
-                    Label(moon.name.displayName, systemImage: "moon.stars")
+                    Text(planet.coordinate.displayText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+
+                    if let moon = planet.moon {
+                        Label(moon.name.displayName, systemImage: "moon.stars")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.85)
+                    }
                 }
             }
 
@@ -248,9 +358,9 @@ private struct ResourceGrid: View {
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-            ResourceRow(label: "金属", value: resources.metal)
-            ResourceRow(label: "晶体", value: resources.crystal)
-            ResourceRow(label: "重氢", value: resources.deuterium)
+            ResourceRow(label: "金属", value: resources.metal, art: .metal)
+            ResourceRow(label: "晶体", value: resources.crystal, art: .crystal)
+            ResourceRow(label: "重氢", value: resources.deuterium, art: .deuterium)
         }
         .font(.callout)
     }
@@ -272,12 +382,21 @@ private struct ResourceRateGrid: View {
 private struct ResourceRow: View {
     let label: String
     let value: Double
+    let art: GameResourceArt
 
     var body: some View {
         GridRow {
-            Text(label)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            HStack(spacing: 6) {
+                ServerAssetImage(
+                    url: GameArt.resourceImageURL(art),
+                    fallbackSystemImage: "circle.hexagongrid"
+                )
+                .frame(width: 24, height: 14)
+
+                Text(label)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
             Text(Formatters.wholeNumber(value))
                 .monospacedDigit()
@@ -764,6 +883,12 @@ private struct SaveManagementPanel: View {
                     } label: {
                         Label("刷新", systemImage: "arrow.clockwise")
                     }
+
+                    Button {
+                        model.openSaveDirectory()
+                    } label: {
+                        Label("打开文件夹", systemImage: "folder")
+                    }
                 }
 
                 if model.saveSlots.isEmpty {
@@ -890,15 +1015,29 @@ private struct PlanetDetailView: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(planet.name.displayName)
-                            .font(.largeTitle.bold())
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                    HStack(alignment: .center, spacing: 16) {
+                        ServerAssetThumbnail(
+                            url: GameArt.planetImageURL(for: planet),
+                            fallbackSystemImage: "globe.europe.africa.fill",
+                            size: 112
+                        )
 
-                        Text(planet.coordinate.displayText)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(planet.name.displayName)
+                                .font(.largeTitle.bold())
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+
+                            Text(planet.coordinate.displayText)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                            if planet.moon != nil {
+                                Label("已形成月球", systemImage: "moon.stars")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
 
                     if let moon = planet.moon {
@@ -933,16 +1072,24 @@ private struct MoonSummaryCard: View {
 
     var body: some View {
         PanelSurface {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionTitle(title: "月球", detail: moon.name.displayName)
+            HStack(alignment: .top, spacing: 14) {
+                ServerAssetThumbnail(
+                    url: GameArt.moonImageURL,
+                    fallbackSystemImage: "moon.stars",
+                    size: 72
+                )
 
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 160), alignment: .topLeading)],
-                    alignment: .leading,
-                    spacing: 10
-                ) {
-                    DispatchMetric(title: "创建时间", value: "T+\(Formatters.wholeSeconds(moon.createdAt))")
-                    DispatchMetric(title: "设施", value: Formatters.wholeNumber(Double(moon.buildingLevels.values.reduce(0, +))))
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionTitle(title: "月球", detail: moon.name.displayName)
+
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 160), alignment: .topLeading)],
+                        alignment: .leading,
+                        spacing: 10
+                    ) {
+                        DispatchMetric(title: "创建时间", value: "T+\(Formatters.wholeSeconds(moon.createdAt))")
+                        DispatchMetric(title: "设施", value: Formatters.wholeNumber(Double(moon.buildingLevels.values.reduce(0, +))))
+                    }
                 }
             }
         }
@@ -1132,9 +1279,11 @@ private struct UnitQueueRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: item.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
+            ServerAssetThumbnail(
+                url: GameArt.imageURL(for: item.unitKind),
+                fallbackSystemImage: item.systemImage,
+                size: 40
+            )
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
@@ -1175,9 +1324,11 @@ private struct BuildQueueRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: item.buildingKind.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
+            ServerAssetThumbnail(
+                url: GameArt.imageURL(for: item.buildingKind),
+                fallbackSystemImage: item.buildingKind.systemImage,
+                size: 40
+            )
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
@@ -1248,9 +1399,11 @@ private struct BuildingUpgradeRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: kind.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
+            ServerAssetThumbnail(
+                url: GameArt.imageURL(for: kind),
+                fallbackSystemImage: kind.systemImage,
+                size: 44
+            )
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(kind.localizedName)
@@ -1405,9 +1558,11 @@ private struct ShipBuildRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: kind.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
+            ServerAssetThumbnail(
+                url: GameArt.imageURL(for: kind),
+                fallbackSystemImage: kind.systemImage,
+                size: 44
+            )
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(kind.localizedName)
@@ -1467,9 +1622,11 @@ private struct DefenseBuildRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: kind.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
+            ServerAssetThumbnail(
+                url: GameArt.imageURL(for: kind),
+                fallbackSystemImage: kind.systemImage,
+                size: 44
+            )
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(kind.localizedName)
@@ -1529,9 +1686,11 @@ private struct MissileBuildRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: kind.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
+            ServerAssetThumbnail(
+                url: GameArt.imageURL(for: kind),
+                fallbackSystemImage: kind.systemImage,
+                size: 44
+            )
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(kind.localizedName)
@@ -2021,9 +2180,11 @@ private struct FleetShipSelectionRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: kind.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
+            ServerAssetThumbnail(
+                url: GameArt.imageURL(for: kind),
+                fallbackSystemImage: kind.systemImage,
+                size: 40
+            )
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(kind.localizedName)
@@ -2526,9 +2687,12 @@ private struct StarMapPlanetRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: systemImage)
-                .foregroundStyle(iconTint)
-                .frame(width: 18)
+            ServerAssetThumbnail(
+                url: summary.isVisible ? GameArt.planetImageURL(for: summary.planet, small: true) : nil,
+                fallbackSystemImage: systemImage,
+                size: 42
+            )
+            .opacity(summary.isVisible ? 1 : 0.58)
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
@@ -3194,9 +3358,11 @@ private struct ResearchUpgradeRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: technology.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
+            ServerAssetThumbnail(
+                url: GameArt.imageURL(for: technology),
+                fallbackSystemImage: technology.systemImage,
+                size: 44
+            )
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(technology.localizedName)
@@ -3454,9 +3620,19 @@ private struct ResourceCard: View {
     let resources: ResourceBundle
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionTitle(title: title, detail: nil)
-            ResourceGrid(resources: resources)
+        HStack(alignment: .top, spacing: 12) {
+            if title == "残骸带" {
+                ServerAssetThumbnail(
+                    url: GameArt.debrisImageURL,
+                    fallbackSystemImage: "sparkles",
+                    size: 56
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: title, detail: nil)
+                ResourceGrid(resources: resources)
+            }
         }
         .padding(14)
         .frame(maxWidth: 360, alignment: .leading)
@@ -3482,9 +3658,17 @@ private struct InventoryCard<Key: RawRepresentable & Hashable>: View where Key.R
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                     ForEach(values.keys.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { key in
                         GridRow {
-                            Text(key.rawValue.displayName)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            HStack(spacing: 8) {
+                                ServerAssetThumbnail(
+                                    url: GameArt.inventoryImageURL(for: key.rawValue),
+                                    fallbackSystemImage: "shippingbox",
+                                    size: 28
+                                )
+
+                                Text(key.rawValue.displayName)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
 
                             Text(Formatters.wholeNumber(Double(values[key, default: 0])))
                                 .monospacedDigit()
@@ -4045,6 +4229,19 @@ private extension RelationPosture {
             return .red
         case .pressured:
             return .purple
+        }
+    }
+}
+
+private extension BriefingUrgency {
+    var tint: Color {
+        switch self {
+        case .info:
+            return .blue
+        case .good:
+            return .green
+        case .warning:
+            return .orange
         }
     }
 }

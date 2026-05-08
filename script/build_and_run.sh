@@ -11,8 +11,12 @@ DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
+APP_RESOURCES="$APP_CONTENTS/Resources"
 APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
+SERVER_SKINS_SRC="$ROOT_DIR/skins/xnova"
+SERVER_SKINS_DEST="$APP_RESOURCES/skins/xnova"
+PACKAGE_ZIP="$DIST_DIR/$APP_NAME.zip"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 
@@ -20,9 +24,14 @@ swift build
 BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
 
 rm -rf "$APP_BUNDLE"
-mkdir -p "$APP_MACOS"
+mkdir -p "$APP_MACOS" "$APP_RESOURCES/skins"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"
+
+if [[ -d "$SERVER_SKINS_SRC" ]]; then
+  rm -rf "$SERVER_SKINS_DEST"
+  cp -R "$SERVER_SKINS_SRC" "$SERVER_SKINS_DEST"
+fi
 
 cat >"$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -69,8 +78,13 @@ case "$MODE" in
     sleep 1
     pgrep -x "$APP_NAME" >/dev/null
     ;;
+  --package|package)
+    rm -f "$PACKAGE_ZIP"
+    ditto -c -k --keepParent "$APP_BUNDLE" "$PACKAGE_ZIP"
+    echo "Packaged $PACKAGE_ZIP"
+    ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--package]" >&2
     exit 2
     ;;
 esac

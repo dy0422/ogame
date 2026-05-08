@@ -2,6 +2,9 @@ import Combine
 import Foundation
 import OGameCore
 import OGamePersistence
+#if canImport(AppKit)
+import AppKit
+#endif
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -338,6 +341,84 @@ final class AppModel: ObservableObject {
             }
             .prefix(8)
             .map { $0 }
+    }
+
+    var saveDirectoryURL: URL {
+        repository.saveDirectory
+    }
+
+    var victorySettlementSummary: VictorySettlementSummary? {
+        guard let winningFactionID = universe.victoryState.winningFactionID else {
+            return nil
+        }
+
+        let factionName = factionName(for: winningFactionID)
+        let routeName = universe.victoryState.winningRoute?.localizedName ?? "战略"
+        let achievedText = universe.victoryState.achievedAt.map { "T+\(Self.formattedWholeSeconds($0))" } ?? "未知时间"
+
+        return VictorySettlementSummary(
+            title: "\(factionName) 完成\(routeName)胜利",
+            detail: winningFactionID == universe.playerFactionID
+                ? "本局目标已经达成。可以继续沙盒推进，也可以立即重新开局挑战更快节奏。"
+                : "对手已经完成胜利路线。本局仍可继续作为沙盒宇宙运行，或重新开局调整策略。",
+            routeText: "\(routeName)路线",
+            timeText: achievedText,
+            isPlayerVictory: winningFactionID == universe.playerFactionID
+        )
+    }
+
+    var commanderBriefingItems: [CommanderBriefingItem] {
+        var items: [CommanderBriefingItem] = []
+
+        if let settlement = victorySettlementSummary {
+            items.append(
+                CommanderBriefingItem(
+                    title: settlement.isPlayerVictory ? "胜利结算" : "战局结算",
+                    detail: "\(settlement.routeText)已完成，达成时间 \(settlement.timeText)。",
+                    systemImage: "flag.checkered",
+                    urgency: settlement.isPlayerVictory ? .good : .warning
+                )
+            )
+        }
+
+        if let home = playerPlanets.first {
+            items.append(resourceFocusBriefing(for: home))
+            items.append(buildingBriefing(for: home))
+        }
+
+        if let research = researchBriefing() {
+            items.append(research)
+        }
+
+        items.append(fleetBriefing())
+
+        if let route = victoryProgressSummaries
+            .filter(\.isPlayer)
+            .max(by: { lhs, rhs in lhs.progress < rhs.progress })
+        {
+            items.append(
+                CommanderBriefingItem(
+                    title: "胜利路线",
+                    detail: "\(route.route.localizedName)路线当前 \(Self.formattedPercent(route.progress))，目标 \(Self.formattedWholeNumber(route.targetValue))。",
+                    systemImage: Self.victoryRouteSystemImage(route.route),
+                    urgency: route.progress >= 0.75 ? .good : .info
+                )
+            )
+        }
+
+        let unknownCount = starMapSections.first { $0.kind == .unknown }?.planets.count ?? 0
+        if unknownCount > 0 {
+            items.append(
+                CommanderBriefingItem(
+                    title: "星图探索",
+                    detail: "仍有 \(unknownCount) 个未知区域。派遣探索舰队可打开殖民和残骸机会。",
+                    systemImage: "sparkles",
+                    urgency: .info
+                )
+            )
+        }
+
+        return Array(items.prefix(5))
     }
 
     var recentExplorationEvents: [GameEvent] {
@@ -1264,6 +1345,149 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func openSaveDirectory() {
+        do {
+            try FileManager.default.createDirectory(
+                at: repository.saveDirectory,
+                withIntermediateDirectories: true
+            )
+            #if canImport(AppKit)
+            NSWorkspace.shared.open(repository.saveDirectory)
+            statusMessage = "已打开存档文件夹。"
+            #else
+            statusMessage = "存档路径：\(repository.saveDirectory.path)"
+            #endif
+        } catch {
+            statusMessage = "无法打开存档文件夹：\(error.localizedDescription)"
+        }
+    }
+
+    private func resourceFocusBriefing(for planet: Planet) -> CommanderBriefingItem {
+        let rates = productionPerHour(for: planet)
+        let resources = [
+            (name: "金属", amount: planet.resources.metal, rate: rates.metal),
+            (name: "晶体", amount: planet.resources.crystal, rate: rates.crystal),
+            (name: "重氢", amount: planet.resources.deuterium, rate: rates.deuterium)
+        ]
+        let focus = resources.min { lhs, rhs in
+            lhs.amount < rhs.amount
+        } ?? resources[0]
+
+        return CommanderBriefingItem(
+            title: "资源焦点",
+            detail: "\(focus.name)储备 \(Self.formattedWholeNumber(focus.amount))，小时产量 +\(Self.formattedWholeNumber(focus.rate))。",
+            systemImage: "shippingbox",
+            urgency: focus.amount < 250 ? .warning : .info
+        )
+    }
+
+    private func buildingBriefing(for planet: Planet) -> CommanderBriefingItem {
+        if let readyKind = availableBuildingKinds.first(where: { canStartBuildingUpgrade(planet: planet, kind: $0) }) {
+            return CommanderBriefingItem(
+                title: "建筑建议",
+                detail: "\(readyKind.localizedName)可立即升级到 \(nextBuildingLevel(for: readyKind, on: planet)) 级。",
+                systemImage: "hammer",
+                urgency: .good
+            )
+        }
+
+        if !planet.buildQueue.isEmpty {
+            return CommanderBriefingItem(
+                title: "建筑建议",
+                detail: "建造队列正在运行，完成后优先补经济建筑与电力。",
+                systemImage: "timer",
+                urgency: .info
+            )
+        }
+
+        let reason = availableBuildingKinds
+            .compactMap { buildingUpgradeLockedReason(planet: planet, kind: $0) }
+            .first ?? "资源不足"
+
+        return CommanderBriefingItem(
+            title: "建筑建议",
+            detail: "暂时无法开工：\(reason)。优先等待产能或调整资源。",
+            systemImage: "exclamationmark.triangle",
+            urgency: .warning
+        )
+    }
+
+    private func researchBriefing() -> CommanderBriefingItem? {
+        if let technology = availableResearchKinds.first(where: canStartResearch) {
+            return CommanderBriefingItem(
+                title: "科研建议",
+                detail: "\(technology.localizedName)可研究到 \(nextResearchLevel(for: technology)) 级，适合解锁舰队节奏。",
+                systemImage: "atom",
+                urgency: .good
+            )
+        }
+
+        guard playerFaction != nil else {
+            return nil
+        }
+
+        if playerFaction?.researchQueue.isEmpty == false {
+            return CommanderBriefingItem(
+                title: "科研建议",
+                detail: "研究队列正在运行，完成后再评估驱动和战斗科技。",
+                systemImage: "timer",
+                urgency: .info
+            )
+        }
+
+        return CommanderBriefingItem(
+            title: "科研建议",
+            detail: "当前科研受资源或实验室等级限制，先补经济与研究实验室。",
+            systemImage: "testtube.2",
+            urgency: .info
+        )
+    }
+
+    private func fleetBriefing() -> CommanderBriefingItem {
+        let ownedShips = playerPlanets.reduce(0) { total, planet in
+            total + planet.shipInventory.values.reduce(0, +)
+        }
+        let activePlayerFleets = activeFleets.filter { $0.ownerID == universe.playerFactionID }.count
+
+        if activePlayerFleets > 0 {
+            return CommanderBriefingItem(
+                title: "舰队态势",
+                detail: "\(activePlayerFleets) 支舰队正在飞行，停泊舰船 \(ownedShips) 艘。",
+                systemImage: "paperplane",
+                urgency: .info
+            )
+        }
+
+        if ownedShips == 0 {
+            return CommanderBriefingItem(
+                title: "舰队态势",
+                detail: "尚无可用舰船。先造小型运输舰或探测器，打开探索与运输循环。",
+                systemImage: "paperplane",
+                urgency: .warning
+            )
+        }
+
+        return CommanderBriefingItem(
+            title: "舰队态势",
+            detail: "停泊舰船 \(ownedShips) 艘，可选择探索、回收或侦察来加速前期收益。",
+            systemImage: "paperplane",
+            urgency: .good
+        )
+    }
+
+    private static func victoryRouteSystemImage(_ route: VictoryRoute) -> String {
+        switch route {
+        case .economy:
+            return "chart.line.uptrend.xyaxis"
+        case .technology:
+            return "atom"
+        case .domination:
+            return "scope"
+        case .exploration:
+            return "sparkles"
+        }
+    }
+
     private static func loadFailureStatus(for error: Error) -> String {
         "自动存档载入失败：\(loadFailureDescription(for: error))。为保护现有文件，保存已禁用。"
     }
@@ -2018,6 +2242,36 @@ struct VictoryBannerSummary {
     let title: String
     let detail: String
     let isComplete: Bool
+}
+
+enum BriefingUrgency {
+    case info
+    case good
+    case warning
+}
+
+struct CommanderBriefingItem: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let systemImage: String
+    let urgency: BriefingUrgency
+
+    init(title: String, detail: String, systemImage: String, urgency: BriefingUrgency) {
+        self.id = "\(title)-\(detail)-\(systemImage)"
+        self.title = title
+        self.detail = detail
+        self.systemImage = systemImage
+        self.urgency = urgency
+    }
+}
+
+struct VictorySettlementSummary {
+    let title: String
+    let detail: String
+    let routeText: String
+    let timeText: String
+    let isPlayerVictory: Bool
 }
 
 struct VictoryProgressSummary: Identifiable {

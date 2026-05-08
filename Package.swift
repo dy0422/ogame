@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "OGameCore", targets: ["OGameCore"]),
         .library(name: "OGamePersistence", targets: ["OGamePersistence"]),
         .executable(name: "OGameMac", targets: ["OGameMac"]),
+        .executable(name: "OGameBalanceTool", targets: ["OGameBalanceTool"]),
         .executable(name: "OGameCoreTests", targets: ["OGameCoreTests"]),
         .executable(name: "OGamePersistenceTests", targets: ["OGamePersistenceTests"])
     ],
@@ -25,6 +26,10 @@ let package = Package(
         .executableTarget(
             name: "OGameMac",
             dependencies: ["OGameCore", "OGamePersistence"]
+        ),
+        .executableTarget(
+            name: "OGameBalanceTool",
+            dependencies: ["OGameCore"]
         ),
         .executableTarget(
             name: "OGameCoreTests",
