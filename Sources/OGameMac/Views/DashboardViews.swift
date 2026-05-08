@@ -24,6 +24,62 @@ struct CommanderBriefingPanel: View {
     }
 }
 
+struct CommandCenterStrip: View {
+    @ObservedObject var model: AppModel
+
+    private var primaryPlanet: Planet? {
+        model.playerPlanets.first
+    }
+
+    private var buildQueueCount: Int {
+        model.playerPlanets.reduce(0) { $0 + $1.buildQueue.count }
+    }
+
+    private var researchQueueCount: Int {
+        model.playerFaction?.researchQueue.count ?? 0
+    }
+
+    var body: some View {
+        PanelSurface {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 150), alignment: .topLeading)],
+                alignment: .leading,
+                spacing: 10
+            ) {
+                GameMetricTile(
+                    title: "托管升级",
+                    value: model.settings.isAutoUpgradeEnabled ? "开启" : "关闭",
+                    systemImage: "wand.and.stars",
+                    tint: model.settings.isAutoUpgradeEnabled ? .green : .secondary
+                )
+                GameMetricTile(
+                    title: "建筑队列",
+                    value: buildQueueCount == 0 ? "空闲" : "\(buildQueueCount)",
+                    systemImage: "hammer",
+                    tint: buildQueueCount == 0 ? .orange : .blue
+                )
+                GameMetricTile(
+                    title: "研究队列",
+                    value: researchQueueCount == 0 ? "空闲" : "\(researchQueueCount)",
+                    systemImage: "atom",
+                    tint: researchQueueCount == 0 ? .orange : .purple
+                )
+
+                if let primaryPlanet {
+                    let energyRatio = model.energySupplyRatio(for: primaryPlanet)
+                    GameMetricTile(
+                        title: "能源效率",
+                        value: Formatters.percent(energyRatio),
+                        systemImage: "bolt.fill",
+                        tint: primaryPlanet.energy.available >= 0 ? .green : .red
+                    )
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
 private struct CommanderBriefingCard: View {
     let item: CommanderBriefingItem
 

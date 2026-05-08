@@ -161,29 +161,20 @@ private struct DashboardView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if model.isOnboardingVisible {
-                        OnboardingPanel(model: model)
-                    }
-
-                    HeaderView(universe: model.universe, faction: model.playerFaction)
-                    VictoryBannerView(summary: model.victoryBannerSummary, compact: true)
-                    CommanderBriefingPanel(model: model)
-                    if let settlement = model.victorySettlementSummary {
-                        VictorySettlementPanel(summary: settlement, model: model)
-                    }
-                    PlanetSummaryView(planets: model.playerPlanets, model: model)
-                    RecentEventsView(events: Array(model.universe.events.suffix(6).reversed()))
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        GamePage(title: nil, model: model) {
+            if model.isOnboardingVisible {
+                OnboardingPanel(model: model)
             }
 
-            Divider()
-
-            ActivityPanel(model: model)
+            HeaderView(universe: model.universe, faction: model.playerFaction)
+            VictoryBannerView(summary: model.victoryBannerSummary, compact: true)
+            CommandCenterStrip(model: model)
+            CommanderBriefingPanel(model: model)
+            if let settlement = model.victorySettlementSummary {
+                VictorySettlementPanel(summary: settlement, model: model)
+            }
+            PlanetSummaryView(planets: model.playerPlanets, model: model)
+            RecentEventsView(events: Array(model.universe.events.suffix(6).reversed()))
         }
         .navigationTitle("总览")
     }
@@ -522,114 +513,6 @@ private struct EventRow: View {
     }
 }
 
-private struct ActivityPanel: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("活动")
-                .font(.headline)
-
-            Text(model.statusMessage)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let offlineSummaryText = model.offlineSummaryText {
-                OfflineSummaryLine(summaryText: offlineSummaryText)
-            }
-
-            Divider()
-
-            StatusMetric(title: "游戏时间", value: "T+\(Formatters.wholeSeconds(model.universe.gameTime))")
-            StatusMetric(title: "势力", value: Formatters.wholeNumber(Double(model.universe.factions.count)))
-            StatusMetric(title: "舰队", value: Formatters.wholeNumber(Double(model.universe.fleets.count)))
-            StatusMetric(title: "存档", value: model.canSave ? model.autosaveStatusText : "受保护")
-            StatusMetric(title: "设置", value: model.settingsStatusText)
-
-            Spacer()
-        }
-        .padding(20)
-        .frame(width: 280, alignment: .topLeading)
-    }
-}
-
-private struct SimulationCommandBar: View {
-    @ObservedObject var model: AppModel
-
-    private var speedBinding: Binding<Double> {
-        Binding(
-            get: { model.settings.gameSpeed },
-            set: { model.updateGameSpeed($0) }
-        )
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Label(model.runtimeStatusText, systemImage: model.isSimulationPaused ? "pause.circle" : "play.circle")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(model.isSimulationPaused ? Color.orange : Color.green)
-                .lineLimit(1)
-                .frame(minWidth: 170, alignment: .leading)
-
-            Divider()
-                .frame(height: 22)
-
-            Label(model.nextSimulationEventText, systemImage: "clock")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button {
-                model.toggleSimulationPaused()
-            } label: {
-                Label(model.simulationControlTitle, systemImage: model.simulationControlSystemImage)
-                    .labelStyle(.iconOnly)
-            }
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut("t", modifiers: [.command])
-            .disabled(!model.canSave)
-            .help(model.canSave ? model.simulationControlTitle : "开始新游戏前模拟不可用")
-
-            Picker("速度", selection: speedBinding) {
-                ForEach(Self.speedPresets, id: \.self) { speed in
-                    Text("\(speed.formatted(.number.precision(.fractionLength(speed < 1 ? 2 : 0))))x")
-                        .tag(speed)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 300)
-            .disabled(!model.canSave)
-
-            Button {
-                model.save()
-            } label: {
-                Label("保存", systemImage: "square.and.arrow.down")
-                    .labelStyle(.iconOnly)
-            }
-            .keyboardShortcut("s", modifiers: [.command])
-            .disabled(!model.canSave)
-            .help(model.canSave ? "保存宇宙" : "开始新游戏前保存不可用")
-
-            if !model.canSave {
-                Button {
-                    model.startNewGame()
-                } label: {
-                    Label("新游戏", systemImage: "plus")
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
-    }
-
-    private static let speedPresets: [Double] = [0.25, 0.5, 1, 2, 4, 8]
-}
-
 private struct OnboardingPanel: View {
     @ObservedObject var model: AppModel
 
@@ -670,18 +553,9 @@ private struct SettingsAndSavesView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("设置")
-                    .font(.largeTitle.bold())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-
-                SettingsPanel(model: model)
-                SaveManagementPanel(model: model)
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        GamePage(title: "设置", model: model, showsActivityPanel: false, maxContentWidth: 960) {
+            SettingsPanel(model: model)
+            SaveManagementPanel(model: model)
         }
         .navigationTitle("设置")
         .onAppear {
@@ -960,43 +834,6 @@ private struct SaveSlotRow: View {
     }
 }
 
-private struct OfflineSummaryLine: View {
-    let summaryText: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("离线补算", systemImage: "clock.arrow.circlepath")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-
-            Text(summaryText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-private struct StatusMetric: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            Text(value)
-                .font(.title3.monospacedDigit())
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-    }
-}
-
 private struct EffectDescriptionText: View {
     let text: String
 
@@ -1014,56 +851,23 @@ private struct PlanetDetailView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(alignment: .center, spacing: 16) {
-                        ServerAssetThumbnail(
-                            url: GameArt.planetImageURL(for: planet),
-                            fallbackSystemImage: "globe.europe.africa.fill",
-                            size: 112
-                        )
+        GamePage(title: nil, model: model) {
+            PlanetHeroPanel(planet: planet, model: model)
 
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(planet.name.displayName)
-                                .font(.largeTitle.bold())
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-
-                            Text(planet.coordinate.displayText)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-
-                            if planet.moon != nil {
-                                Label("已形成月球", systemImage: "moon.stars")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-
-                    if let moon = planet.moon {
-                        MoonSummaryCard(moon: moon, model: model)
-                    }
-
-                    PlanetEconomyView(planet: planet, model: model)
-                    ConstructionQueueView(planet: planet, model: model)
-                    BuildingControlsView(planet: planet, model: model)
-                    ShipyardControlsView(planet: planet, model: model)
-                    InventoryCard(title: "舰船", values: planet.shipInventory)
-                    InventoryCard(title: "防御", values: planet.defenseInventory)
-                    if !planet.missileInventory.isEmpty {
-                        InventoryCard(title: "导弹", values: planet.missileInventory)
-                    }
-                    ResourceCard(title: "残骸带", resources: planet.debrisField)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if let moon = planet.moon {
+                MoonSummaryCard(moon: moon, model: model)
             }
 
-            Divider()
-
-            ActivityPanel(model: model)
+            PlanetEconomyView(planet: planet, model: model)
+            ConstructionQueueView(planet: planet, model: model)
+            BuildingControlsView(planet: planet, model: model)
+            ShipyardControlsView(planet: planet, model: model)
+            InventoryCard(title: "舰船", values: planet.shipInventory)
+            InventoryCard(title: "防御", values: planet.defenseInventory)
+            if !planet.missileInventory.isEmpty {
+                InventoryCard(title: "导弹", values: planet.missileInventory)
+            }
+            ResourceCard(title: "残骸带", resources: planet.debrisField)
         }
         .navigationTitle(planet.name.displayName)
     }
@@ -1633,17 +1437,110 @@ private struct BuildingControlsView: View {
                 )
 
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(model.availableBuildingKinds, id: \.self) { kind in
-                        BuildingUpgradeRow(planet: planet, kind: kind, model: model)
+                    ForEach(BuildingDecisionGroup.allCases) { group in
+                        let kinds = group.kinds.filter { model.availableBuildingKinds.contains($0) }
+                        if !kinds.isEmpty {
+                            BuildingGroupHeader(group: group)
 
-                        if kind != model.availableBuildingKinds.last {
-                            Divider()
+                            ForEach(kinds, id: \.self) { kind in
+                                BuildingUpgradeRow(planet: planet, kind: kind, model: model)
+
+                                if kind != kinds.last {
+                                    Divider()
+                                }
+                            }
                         }
                     }
                 }
             }
         }
         .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private enum BuildingDecisionGroup: CaseIterable, Identifiable {
+    case resources
+    case energy
+    case infrastructure
+    case military
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .resources:
+            return "资源"
+        case .energy:
+            return "能源"
+        case .infrastructure:
+            return "基础设施"
+        case .military:
+            return "军事"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .resources:
+            return "提高小时产量与容量"
+        case .energy:
+            return "稳定矿场效率"
+        case .infrastructure:
+            return "加速建造和解锁系统"
+        case .military:
+            return "造舰、防御和导弹入口"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .resources:
+            return "shippingbox"
+        case .energy:
+            return "bolt.fill"
+        case .infrastructure:
+            return "gearshape.2"
+        case .military:
+            return "scope"
+        }
+    }
+
+    var kinds: [BuildingKind] {
+        switch self {
+        case .resources:
+            return [.metalMine, .crystalMine, .deuteriumSynthesizer, .metalStorage, .crystalStorage, .deuteriumTank]
+        case .energy:
+            return [.solarPlant, .fusionReactor]
+        case .infrastructure:
+            return [.roboticsFactory, .researchLab, .naniteFactory]
+        case .military:
+            return [.shipyard, .missileSilo]
+        }
+    }
+}
+
+private struct BuildingGroupHeader: View {
+    let group: BuildingDecisionGroup
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(group.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text(group.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        } icon: {
+            Image(systemName: group.systemImage)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 12)
+        .padding(.bottom, 4)
     }
 }
 
@@ -2049,36 +1946,21 @@ private struct FleetOverviewView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("舰队")
-                        .font(.largeTitle.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+        GamePage(title: "舰队", model: model) {
+            FleetDispatchPanel(
+                model: model,
+                originID: $originID,
+                targetID: $targetID,
+                mission: $mission,
+                selectedShips: $selectedShips,
+                metalCargo: $metalCargo,
+                crystalCargo: $crystalCargo,
+                deuteriumCargo: $deuteriumCargo,
+                launchCargo: launchCargo
+            )
 
-                    FleetDispatchPanel(
-                        model: model,
-                        originID: $originID,
-                        targetID: $targetID,
-                        mission: $mission,
-                        selectedShips: $selectedShips,
-                        metalCargo: $metalCargo,
-                        crystalCargo: $crystalCargo,
-                        deuteriumCargo: $deuteriumCargo,
-                        launchCargo: launchCargo
-                    )
-
-                    ActiveFleetsPanel(model: model)
-                    ReportsPanel(model: model)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            Divider()
-
-            ActivityPanel(model: model)
+            ActiveFleetsPanel(model: model)
+            ReportsPanel(model: model)
         }
         .navigationTitle("舰队")
         .onAppear(perform: initializeSelection)
@@ -2408,13 +2290,32 @@ private struct FleetShipSelector: View {
     @ObservedObject var model: AppModel
     @Binding var selectedShips: [ShipKind: Int]
 
+    private var totalAvailableShips: Int {
+        guard let origin else {
+            return 0
+        }
+
+        return model.availableShipKinds.reduce(0) { total, kind in
+            total + max(0, origin.shipInventory[kind, default: 0])
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("舰船", systemImage: "paperplane")
                 .font(.callout.weight(.semibold))
                 .lineLimit(1)
 
-            if let origin, !model.availableShipKinds.isEmpty {
+            if origin == nil {
+                QueueEmptyLine(title: "请选择出发殖民地", systemImage: "paperplane")
+            } else if totalAvailableShips == 0 {
+                GameEmptyGuidance(
+                    title: "还没有可派遣舰船",
+                    detail: "先在星球页建造间谍探测器或小型运输舰，之后这里会显示可选择舰船。",
+                    systemImage: "wrench.and.screwdriver",
+                    tint: .orange
+                )
+            } else if let origin, !model.availableShipKinds.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(model.availableShipKinds, id: \.self) { kind in
                         FleetShipSelectionRow(
@@ -2432,7 +2333,7 @@ private struct FleetShipSelector: View {
                     }
                 }
             } else {
-                QueueEmptyLine(title: "请选择出发殖民地", systemImage: "paperplane")
+                QueueEmptyLine(title: "没有可用舰船规则", systemImage: "paperplane")
             }
         }
     }
@@ -2880,43 +2781,93 @@ private struct StarMapView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("星图")
-                        .font(.largeTitle.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    PanelSurface {
-                        LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 150), alignment: .topLeading)],
-                            alignment: .leading,
-                            spacing: 12
-                        ) {
-                            StrategicMetric(title: "星球", value: Formatters.wholeNumber(Double(allPlanets.count)))
-                            StrategicMetric(title: "拥有", value: Formatters.wholeNumber(Double(model.playerPlanets.count)))
-                            StrategicMetric(title: "残骸", value: Formatters.wholeNumber(Double(debrisSystemCount)))
-                            StrategicMetric(title: "舰队标记", value: Formatters.wholeNumber(Double(activeFleetTouchCount)))
-                        }
-                    }
-                    .frame(maxWidth: 860, alignment: .leading)
-
-                    ForEach(model.starMapSections) { section in
-                        StarMapSectionView(section: section)
-                    }
-
-                    ExplorationSummaryPanel(model: model)
+        GamePage(title: "星图", model: model) {
+            PanelSurface {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 150), alignment: .topLeading)],
+                    alignment: .leading,
+                    spacing: 12
+                ) {
+                    StrategicMetric(title: "星球", value: Formatters.wholeNumber(Double(allPlanets.count)))
+                    StrategicMetric(title: "拥有", value: Formatters.wholeNumber(Double(model.playerPlanets.count)))
+                    StrategicMetric(title: "残骸", value: Formatters.wholeNumber(Double(debrisSystemCount)))
+                    StrategicMetric(title: "舰队标记", value: Formatters.wholeNumber(Double(activeFleetTouchCount)))
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: 860, alignment: .leading)
+
+            StarMapGalaxyStrip(summaries: allPlanets)
+
+            ForEach(model.starMapSections) { section in
+                StarMapSectionView(section: section)
             }
 
-            Divider()
-
-            ActivityPanel(model: model)
+            ExplorationSummaryPanel(model: model)
         }
         .navigationTitle("星图")
+    }
+}
+
+private struct StarMapGalaxyStrip: View {
+    let summaries: [StarMapPlanetSummary]
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: "银河坐标", detail: "\(summaries.count) 个可见坐标")
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 94), alignment: .topLeading)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(summaries) { summary in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Image(systemName: symbol(for: summary))
+                                .foregroundStyle(tint(for: summary))
+                                .frame(width: 18, alignment: .leading)
+
+                            Text(summary.planet.coordinate.displayText)
+                                .font(.caption.monospacedDigit().weight(.semibold))
+                                .lineLimit(1)
+
+                            Text(summary.ownerName)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(tint(for: summary).opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(tint(for: summary).opacity(0.16))
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+
+    private func tint(for summary: StarMapPlanetSummary) -> Color {
+        if summary.isPlayerOwned {
+            return .blue
+        }
+        if summary.isVisible {
+            return .orange
+        }
+        return .secondary
+    }
+
+    private func symbol(for summary: StarMapPlanetSummary) -> String {
+        if summary.isPlayerOwned {
+            return "house.and.flag"
+        }
+        if summary.isVisible {
+            return "scope"
+        }
+        return "questionmark.circle"
     }
 }
 
@@ -3153,42 +3104,27 @@ private struct RankingsView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("排名")
-                        .font(.largeTitle.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+        GamePage(title: "排名", model: model) {
+            PanelSurface {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionTitle(title: "势力排名", detail: "\(model.factionRankings.count) 个势力")
 
-                    PanelSurface {
-                        VStack(alignment: .leading, spacing: 12) {
-                            SectionTitle(title: "势力排名", detail: "\(model.factionRankings.count) 个势力")
+                    if model.factionRankings.isEmpty {
+                        QueueEmptyLine(title: "暂无排名", systemImage: "list.number")
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(model.factionRankings) { ranking in
+                                RankingRow(ranking: ranking, isPlayer: ranking.factionID == model.universe.playerFactionID)
 
-                            if model.factionRankings.isEmpty {
-                                QueueEmptyLine(title: "暂无排名", systemImage: "list.number")
-                            } else {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ForEach(model.factionRankings) { ranking in
-                                        RankingRow(ranking: ranking, isPlayer: ranking.factionID == model.universe.playerFactionID)
-
-                                        if ranking.id != model.factionRankings.last?.id {
-                                            Divider()
-                                        }
-                                    }
+                                if ranking.id != model.factionRankings.last?.id {
+                                    Divider()
                                 }
                             }
                         }
                     }
-                    .frame(maxWidth: 920, alignment: .leading)
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Divider()
-
-            ActivityPanel(model: model)
+            .frame(maxWidth: 920, alignment: .leading)
         }
         .navigationTitle("排名")
     }
@@ -3263,26 +3199,10 @@ private struct VictoryProgressView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("胜利")
-                        .font(.largeTitle.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    VictoryBannerView(summary: model.victoryBannerSummary)
-
-                    VictoryRoutePanel(title: "玩家路线", routes: playerRoutes)
-                    VictoryRoutePanel(title: "路线领先者", routes: leadingRoutes)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            Divider()
-
-            ActivityPanel(model: model)
+        GamePage(title: "胜利", model: model) {
+            VictoryBannerView(summary: model.victoryBannerSummary)
+            VictoryRoutePanel(title: "玩家路线", routes: playerRoutes)
+            VictoryRoutePanel(title: "路线领先者", routes: leadingRoutes)
         }
         .navigationTitle("胜利")
     }
@@ -3390,42 +3310,27 @@ private struct FactionRelationsView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("关系")
-                        .font(.largeTitle.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+        GamePage(title: "关系", model: model) {
+            PanelSurface {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionTitle(title: "势力关系", detail: "\(model.relationSummaries.count) 个接触")
 
-                    PanelSurface {
-                        VStack(alignment: .leading, spacing: 12) {
-                            SectionTitle(title: "势力关系", detail: "\(model.relationSummaries.count) 个接触")
+                    if model.relationSummaries.isEmpty {
+                        QueueEmptyLine(title: "暂无势力接触", systemImage: "person.2.wave.2")
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(model.relationSummaries) { summary in
+                                FactionRelationRow(summary: summary)
 
-                            if model.relationSummaries.isEmpty {
-                                QueueEmptyLine(title: "暂无势力接触", systemImage: "person.2.wave.2")
-                            } else {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ForEach(model.relationSummaries) { summary in
-                                        FactionRelationRow(summary: summary)
-
-                                        if summary.id != model.relationSummaries.last?.id {
-                                            Divider()
-                                        }
-                                    }
+                                if summary.id != model.relationSummaries.last?.id {
+                                    Divider()
                                 }
                             }
                         }
                     }
-                    .frame(maxWidth: 860, alignment: .leading)
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Divider()
-
-            ActivityPanel(model: model)
+            .frame(maxWidth: 860, alignment: .leading)
         }
         .navigationTitle("关系")
     }
@@ -3489,24 +3394,9 @@ private struct ResearchOverviewView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("研究")
-                        .font(.largeTitle.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    ResearchQueueView(model: model)
-                    ResearchControlsView(model: model)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            Divider()
-
-            ActivityPanel(model: model)
+        GamePage(title: "研究", model: model) {
+            ResearchQueueView(model: model)
+            ResearchControlsView(model: model)
         }
         .navigationTitle("研究")
     }
@@ -3597,17 +3487,110 @@ private struct ResearchControlsView: View {
                 )
 
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(model.availableResearchKinds, id: \.self) { technology in
-                        ResearchUpgradeRow(technology: technology, model: model)
+                    ForEach(ResearchDecisionGroup.allCases) { group in
+                        let technologies = group.technologies.filter { model.availableResearchKinds.contains($0) }
+                        if !technologies.isEmpty {
+                            ResearchGroupHeader(group: group)
 
-                        if technology != model.availableResearchKinds.last {
-                            Divider()
+                            ForEach(technologies, id: \.self) { technology in
+                                ResearchUpgradeRow(technology: technology, model: model)
+
+                                if technology != technologies.last {
+                                    Divider()
+                                }
+                            }
                         }
                     }
                 }
             }
         }
         .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private enum ResearchDecisionGroup: CaseIterable, Identifiable {
+    case command
+    case combat
+    case energy
+    case drives
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .command:
+            return "侦察与指挥"
+        case .combat:
+            return "战斗科技"
+        case .energy:
+            return "能源基础"
+        case .drives:
+            return "舰队引擎"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .command:
+            return "探测、队列与舰队调度"
+        case .combat:
+            return "攻击、防护与生存"
+        case .energy:
+            return "设施前置与能源效率"
+        case .drives:
+            return "航速、殖民和高级舰船"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .command:
+            return "antenna.radiowaves.left.and.right"
+        case .combat:
+            return "shield.lefthalf.filled"
+        case .energy:
+            return "bolt.fill"
+        case .drives:
+            return "speedometer"
+        }
+    }
+
+    var technologies: [TechnologyKind] {
+        switch self {
+        case .command:
+            return [.espionage, .computer]
+        case .combat:
+            return [.weapons, .shielding, .armor]
+        case .energy:
+            return [.energy]
+        case .drives:
+            return [.combustionDrive, .impulseDrive, .hyperspaceDrive]
+        }
+    }
+}
+
+private struct ResearchGroupHeader: View {
+    let group: ResearchDecisionGroup
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(group.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text(group.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        } icon: {
+            Image(systemName: group.systemImage)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 12)
+        .padding(.bottom, 4)
     }
 }
 
@@ -3698,35 +3681,20 @@ private struct ManagementListView<Content: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(title)
-                        .font(.largeTitle.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    if isEmpty {
-                        EmptyStateView(title: emptyTitle, systemImage: emptySystemImage)
-                    } else {
-                        VStack(alignment: .leading, spacing: 0) {
-                            content
-                        }
-                        .padding(.horizontal, 14)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(Color.secondary.opacity(0.16))
-                        }
-                    }
+        GamePage(title: title, model: model) {
+            if isEmpty {
+                EmptyStateView(title: emptyTitle, systemImage: emptySystemImage)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    content
                 }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.16))
+                }
             }
-
-            Divider()
-
-            ActivityPanel(model: model)
         }
         .navigationTitle(title)
     }
@@ -3833,14 +3801,11 @@ private struct ResourceCostLine: View {
     var body: some View {
         if let cost {
             HStack(spacing: 8) {
-                Text("金 \(Formatters.wholeNumber(cost.metal))")
-                Text("晶 \(Formatters.wholeNumber(cost.crystal))")
-                Text("重 \(Formatters.wholeNumber(cost.deuterium))")
-                Text("时间 \(durationText)")
+                GameCostToken(title: "金", value: Formatters.wholeNumber(cost.metal), tint: canAfford ? .secondary : .red)
+                GameCostToken(title: "晶", value: Formatters.wholeNumber(cost.crystal), tint: canAfford ? .secondary : .red)
+                GameCostToken(title: "重", value: Formatters.wholeNumber(cost.deuterium), tint: canAfford ? .secondary : .red)
+                GameCostToken(title: "时间", value: durationText)
             }
-            .font(.caption)
-            .foregroundStyle(canAfford ? Color.secondary : Color.red)
-            .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.8)
         } else {
@@ -4283,7 +4248,7 @@ private extension GameEvent {
     }
 }
 
-private enum Formatters {
+enum Formatters {
     static func wholeSeconds(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite else {
             return "未知"
