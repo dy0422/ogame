@@ -87,7 +87,7 @@ private struct SidebarPlanetRow: View {
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(planet.name)
+                Text(planet.name.displayName)
                     .lineLimit(1)
 
                 Text(planet.coordinate.displayText)
@@ -165,13 +165,13 @@ private struct HeaderView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(universe.name)
+            Text(universe.name.displayName)
                 .font(.largeTitle.bold())
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
 
             HStack(spacing: 12) {
-                Label(faction?.name ?? "未知势力", systemImage: "person.crop.circle")
+                Label(faction?.name.displayName ?? "未知势力", systemImage: "person.crop.circle")
                 Label("T+\(Formatters.wholeSeconds(universe.gameTime))", systemImage: "clock")
                 Label(universe.ruleSet.displayName.displayName, systemImage: "speedometer")
             }
@@ -210,7 +210,7 @@ private struct PlanetSummaryCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(planet.name)
+                Text(planet.name.displayName)
                     .font(.headline)
                     .lineLimit(1)
 
@@ -220,7 +220,7 @@ private struct PlanetSummaryCard: View {
                     .lineLimit(1)
 
                 if let moon = planet.moon {
-                    Label(moon.name, systemImage: "moon.stars")
+                    Label(moon.name.displayName, systemImage: "moon.stars")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -891,7 +891,7 @@ private struct PlanetDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(planet.name)
+                        Text(planet.name.displayName)
                             .font(.largeTitle.bold())
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -924,7 +924,7 @@ private struct PlanetDetailView: View {
 
             ActivityPanel(model: model)
         }
-        .navigationTitle(planet.name)
+        .navigationTitle(planet.name.displayName)
     }
 }
 
@@ -934,7 +934,7 @@ private struct MoonSummaryCard: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
-                SectionTitle(title: "月球", detail: moon.name)
+                SectionTitle(title: "月球", detail: moon.name.displayName)
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 160), alignment: .topLeading)],
@@ -1929,7 +1929,7 @@ private struct PlanetPicker: View {
                         .tag(Optional<PlanetID>.none)
                 } else {
                     ForEach(planets) { planet in
-                        Text("\(planet.name) \(planet.coordinate.displayText)")
+                            Text("\(planet.name.displayName) \(planet.coordinate.displayText)")
                             .lineLimit(1)
                             .tag(Optional(planet.id))
                     }
@@ -2687,7 +2687,7 @@ private struct ExplorationSummaryRow: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(summary.planet.name)
+                    Text(summary.planet.name.displayName)
                         .font(.headline)
                         .lineLimit(1)
 
@@ -2778,7 +2778,7 @@ private struct RankingRow: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(ranking.factionName)
+                    Text(ranking.factionName.displayName)
                         .font(.headline)
                         .lineLimit(1)
 
@@ -2930,7 +2930,7 @@ private struct VictoryRouteRow: View {
                         .font(.headline)
                         .lineLimit(1)
 
-                    Text(route.factionName)
+                    Text(route.factionName.displayName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -3013,7 +3013,7 @@ private struct FactionRelationRow: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(summary.factionName)
+                    Text(summary.factionName.displayName)
                         .font(.headline)
                         .lineLimit(1)
 
@@ -3680,7 +3680,7 @@ private enum LocalizedGameText {
         guard let launchedRange = text.range(of: " launched a ") else {
             return nil
         }
-        let origin = String(text[..<launchedRange.lowerBound])
+        let origin = String(text[..<launchedRange.lowerBound]).displayName
         let rest = String(text[launchedRange.upperBound...])
         guard let missionRange = rest.range(of: " fleet to ") else {
             return nil
@@ -3705,7 +3705,7 @@ private enum LocalizedGameText {
         guard let completedRange = text.range(of: " completed ") else {
             return nil
         }
-        let subject = String(text[..<completedRange.lowerBound])
+        let subject = String(text[..<completedRange.lowerBound]).displayName
         let detail = trimmedPeriod(String(text[completedRange.upperBound...]))
 
         if let levelRange = detail.range(of: " level ") {
@@ -3728,7 +3728,7 @@ private enum LocalizedGameText {
         else {
             return nil
         }
-        let origin = String(text[..<launchedRange.lowerBound])
+        let origin = String(text[..<launchedRange.lowerBound]).displayName
         let count = String(text[launchedRange.upperBound..<missilesRange.lowerBound])
         let target = trimmedPeriod(String(text[missilesRange.upperBound...]))
         return "\(origin) 向 \(target) 发射 \(count) 枚导弹。"
@@ -3761,7 +3761,7 @@ private enum LocalizedGameText {
         else {
             return nil
         }
-        let faction = String(text[..<range.lowerBound])
+        let faction = String(text[..<range.lowerBound]).displayName
         let route = String(text[range.upperBound...]).replacingOccurrences(of: " victory route.", with: "").displayName
         return "\(faction) 已完成\(route)胜利路线。"
     }

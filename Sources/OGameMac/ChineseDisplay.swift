@@ -5,6 +5,9 @@ extension String {
         if let localized = ChineseDisplay.name(for: self) {
             return localized
         }
+        if let localized = ChineseDisplay.dynamicName(for: self) {
+            return localized
+        }
 
         return reduce(into: "") { result, character in
             if character.isUppercase, !result.isEmpty {
@@ -149,6 +152,34 @@ private enum ChineseDisplay {
             return "等离子炮塔"
         case "interplanetaryMissile":
             return "星际导弹"
+        default:
+            return nil
+        }
+    }
+
+    static func dynamicName(for rawValue: String) -> String? {
+        if rawValue.hasPrefix("Unclaimed ") {
+            return rawValue.replacingOccurrences(of: "Unclaimed ", with: "未占领 ")
+        }
+        if rawValue.hasPrefix("AI Economy Test") {
+            return rawValue.replacingOccurrences(of: "AI Economy Test", with: "AI 经济测试")
+        }
+        if rawValue.hasPrefix("AI World ") {
+            return rawValue.replacingOccurrences(of: "AI World ", with: "AI 星球 ")
+        }
+        if rawValue == "AI" {
+            return "AI"
+        }
+
+        switch rawValue {
+        case "Commander":
+            return "指挥官"
+        case "Homeworld":
+            return "母星"
+        case "Player":
+            return "玩家"
+        case "Player World":
+            return "玩家星球"
         default:
             return nil
         }

@@ -135,7 +135,7 @@ final class AppModel: ObservableObject {
     }
 
     var starMapSections: [StarMapPlanetSection] {
-        let factionNamesByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.name) })
+        let factionNamesByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.name.displayName) })
         let factionKindsByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.kind) })
         let playerOwnedPlanetIDs = Set(playerFaction?.ownedPlanetIDs ?? [])
         let exploredPlanetIDs = playerExploredPlanetIDs
@@ -152,7 +152,7 @@ final class AppModel: ObservableObject {
                 let friendlyFleetCount = touchingFleets.filter { $0.ownerID == universe.playerFactionID }.count
                 let otherFleetCount = touchingFleets.count - friendlyFleetCount
                 let ownerName = isPlayerOwned
-                    ? (playerFaction?.name ?? "玩家")
+                    ? (playerFaction?.name.displayName ?? "玩家")
                     : isVisible ? planet.ownerID.flatMap { factionNamesByID[$0] } ?? "中立" : "未知"
                 let ownerKind = isPlayerOwned
                     ? Faction.Kind.player
@@ -160,7 +160,7 @@ final class AppModel: ObservableObject {
 
                 return StarMapPlanetSummary(
                     planet: planet,
-                    displayName: isVisible ? planet.name : "未知区域",
+                    displayName: isVisible ? planet.name.displayName : "未知区域",
                     ownerName: ownerName,
                     ownerKind: ownerKind,
                     isPlayerOwned: isPlayerOwned,
@@ -273,7 +273,7 @@ final class AppModel: ObservableObject {
 
                 return FactionRelationSummary(
                     factionID: faction.id,
-                    factionName: faction.name,
+                    factionName: faction.name.displayName,
                     kind: faction.kind,
                     strategy: faction.strategy,
                     posture: relation.posture,
@@ -430,7 +430,7 @@ final class AppModel: ObservableObject {
         }
 
         let planet = universe.planets.first { $0.id == planetID }
-        let status = "已在\(planet?.name ?? "殖民地")加入 \(quantity) 架\(kind.localizedName)。"
+        let status = "已在\(planet?.name.displayName ?? "殖民地")加入 \(quantity) 架\(kind.localizedName)。"
         autosaveAfterQueueing(successStatus: status)
     }
 
@@ -452,7 +452,7 @@ final class AppModel: ObservableObject {
         }
 
         let planet = universe.planets.first { $0.id == planetID }
-        let status = "已在\(planet?.name ?? "殖民地")加入 \(quantity) 个\(kind.localizedName)。"
+        let status = "已在\(planet?.name.displayName ?? "殖民地")加入 \(quantity) 个\(kind.localizedName)。"
         autosaveAfterQueueing(successStatus: status)
     }
 
@@ -474,7 +474,7 @@ final class AppModel: ObservableObject {
         }
 
         let planet = universe.planets.first { $0.id == planetID }
-        let status = "已在\(planet?.name ?? "殖民地")加入 \(quantity) 枚\(kind.localizedName)。"
+        let status = "已在\(planet?.name.displayName ?? "殖民地")加入 \(quantity) 枚\(kind.localizedName)。"
         autosaveAfterQueueing(successStatus: status)
     }
 
@@ -1520,7 +1520,7 @@ final class AppModel: ObservableObject {
         targetLevel: Int?
     ) -> String {
         let levelText = targetLevel.map { "等级 \($0)" } ?? ""
-        let location = planetName.map { "（\($0)）" } ?? ""
+        let location = planetName.map { "（\($0.displayName)）" } ?? ""
         return "已加入\(kind.localizedName)\(levelText)\(location)。"
     }
 
@@ -1809,12 +1809,12 @@ final class AppModel: ObservableObject {
         let isPlayerOwned = isPlayerOwned(planet)
         let isVisible = isVisibleToPlayer(planet)
         let ownerName = isPlayerOwned
-            ? (playerFaction?.name ?? "玩家")
+            ? (playerFaction?.name.displayName ?? "玩家")
             : isVisible ? planet.ownerID.map(factionName(for:)) ?? "中立" : "未侦察"
 
         return FleetTargetSummary(
             id: planet.id,
-            displayName: isVisible ? planet.name : "未知区域",
+            displayName: isVisible ? planet.name.displayName : "未知区域",
             coordinateText: planet.coordinate.displayText,
             ownerName: ownerName,
             isPlayerOwned: isPlayerOwned,
@@ -1824,7 +1824,7 @@ final class AppModel: ObservableObject {
     }
 
     private func factionName(for factionID: FactionID) -> String {
-        universe.factions.first { $0.id == factionID }?.name ?? "未知势力"
+        universe.factions.first { $0.id == factionID }?.name.displayName ?? "未知势力"
     }
 
     private static func sortPlanetsByCoordinate(_ lhs: Planet, _ rhs: Planet) -> Bool {
