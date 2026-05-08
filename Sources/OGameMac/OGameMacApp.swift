@@ -12,21 +12,21 @@ struct OGameMacApp: App {
         }
         .commands {
             CommandGroup(replacing: .saveItem) {
-                Button("Save") {
+                Button("保存") {
                     model.save()
                 }
                 .keyboardShortcut("s", modifiers: [.command])
                 .disabled(!model.canSave)
             }
 
-            CommandMenu("Simulation") {
-                Button("Advance 1 Minute") {
+            CommandMenu("模拟") {
+                Button("推进 1 分钟") {
                     model.advanceOneMinute()
                 }
                 .keyboardShortcut("t", modifiers: [.command])
                 .disabled(!model.canSave)
 
-                Button("New Game") {
+                Button("新游戏") {
                     model.startNewGame()
                 }
             }

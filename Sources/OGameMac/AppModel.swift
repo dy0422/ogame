@@ -51,21 +51,21 @@ final class AppModel: ObservableObject {
             if catchUpResult.summary.didMutate {
                 statusMessage = Self.offlineCatchUpPendingStatus(for: catchUpResult.summary)
             } else {
-                statusMessage = "Loaded save from \(envelope.lastSavedAt.formatted(date: .abbreviated, time: .shortened))."
+                statusMessage = "已载入存档：\(envelope.lastSavedAt.formatted(date: .abbreviated, time: .shortened))。"
             }
         } catch JSONSaveRepository.RepositoryError.missingSave {
             universe = Self.refreshedStrategicUniverse(
-                StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+                StarterUniverseFactory.makeNewGame(seed: 1, playerName: "指挥官")
             )
             settings = GameSettings()
             offlineSummary = nil
             hasPendingOfflineCatchUpSave = false
             isOnboardingVisible = true
-            statusMessage = "New fast skirmish initialized."
+            statusMessage = "新的快速遭遇战已初始化。"
             canSave = true
         } catch {
             universe = Self.refreshedStrategicUniverse(
-                StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+                StarterUniverseFactory.makeNewGame(seed: 1, playerName: "指挥官")
             )
             settings = GameSettings()
             offlineSummary = nil
@@ -152,15 +152,15 @@ final class AppModel: ObservableObject {
                 let friendlyFleetCount = touchingFleets.filter { $0.ownerID == universe.playerFactionID }.count
                 let otherFleetCount = touchingFleets.count - friendlyFleetCount
                 let ownerName = isPlayerOwned
-                    ? (playerFaction?.name ?? "Player")
-                    : isVisible ? planet.ownerID.flatMap { factionNamesByID[$0] } ?? "Neutral" : "Unknown"
+                    ? (playerFaction?.name ?? "玩家")
+                    : isVisible ? planet.ownerID.flatMap { factionNamesByID[$0] } ?? "中立" : "未知"
                 let ownerKind = isPlayerOwned
                     ? Faction.Kind.player
                     : isVisible ? planet.ownerID.flatMap { factionKindsByID[$0] } : nil
 
                 return StarMapPlanetSummary(
                     planet: planet,
-                    displayName: isVisible ? planet.name : "Unknown Sector",
+                    displayName: isVisible ? planet.name : "未知区域",
                     ownerName: ownerName,
                     ownerKind: ownerKind,
                     isPlayerOwned: isPlayerOwned,
@@ -205,11 +205,11 @@ final class AppModel: ObservableObject {
     var victoryBannerSummary: VictoryBannerSummary {
         if let winningFactionID = universe.victoryState.winningFactionID {
             let factionName = factionName(for: winningFactionID)
-            let routeName = universe.victoryState.winningRoute?.rawValue.displayName ?? "Strategic"
-            let achievedText = universe.victoryState.achievedAt.map { " at T+\(Self.formattedWholeSeconds($0))" } ?? ""
+            let routeName = universe.victoryState.winningRoute?.localizedName ?? "战略"
+            let achievedText = universe.victoryState.achievedAt.map { "，达成时间 T+\(Self.formattedWholeSeconds($0))" } ?? ""
             return VictoryBannerSummary(
-                title: "\(factionName) victory secured",
-                detail: "\(routeName) route completed\(achievedText).",
+                title: "\(factionName) 已取得胜利",
+                detail: "\(routeName)路线已完成\(achievedText)。",
                 isComplete: true
             )
         }
@@ -219,15 +219,15 @@ final class AppModel: ObservableObject {
             .max(by: { lhs, rhs in lhs.progress < rhs.progress })
         {
             return VictoryBannerSummary(
-                title: "Victory routes active",
-                detail: "\(leadingProgress.route.rawValue.displayName) leads at \(Self.formattedPercent(leadingProgress.progress)).",
+                title: "胜利路线进行中",
+                detail: "\(leadingProgress.route.localizedName)路线领先，进度 \(Self.formattedPercent(leadingProgress.progress))。",
                 isComplete: false
             )
         }
 
         return VictoryBannerSummary(
-            title: "Victory routes active",
-            detail: "Strategic progress will appear as factions develop.",
+            title: "胜利路线进行中",
+            detail: "各势力发展后会显示战略进度。",
             isComplete: false
         )
     }
@@ -268,8 +268,8 @@ final class AppModel: ObservableObject {
             .map { faction in
                 let directRelation = playerRelationByFactionID[faction.id]
                 let relation = directRelation ?? FactionRelation(factionID: faction.id)
-                let perspective = directRelation == nil ? "No contact" : "Our memory"
-                let summary = directRelation?.summary ?? "No player-side contact recorded."
+                let perspective = directRelation == nil ? "未接触" : "我方记录"
+                let summary = directRelation?.summary ?? "未记录我方接触。"
 
                 return FactionRelationSummary(
                     factionID: faction.id,
@@ -311,7 +311,7 @@ final class AppModel: ObservableObject {
                 }
 
                 let ownerName = record.discoveredOwnerID.map(factionName(for:)) ??
-                    (record.discoveredNeutral ? "Neutral" : "Unknown")
+                    (record.discoveredNeutral ? "中立" : "未知")
 
                 return ExplorationSummary(
                     planet: planet,
@@ -362,20 +362,20 @@ final class AppModel: ObservableObject {
     }
 
     var advanceActionTitle: String {
-        "Advance \(Self.formattedDuration(advanceDelta))"
+        "推进 \(Self.formattedDuration(advanceDelta))"
     }
 
     var settingsStatusText: String {
-        "Speed \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x - Offline \(settings.offlineIntensity.displayName) - \(settings.difficulty.displayName)"
+        "速度 \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x - 离线 \(settings.offlineIntensity.displayName) - \(settings.difficulty.displayName)"
     }
 
     var autosaveStatusText: String {
-        settings.isAutosaveEnabled ? "Autosave On" : "Autosave Off"
+        settings.isAutosaveEnabled ? "自动保存开启" : "自动保存关闭"
     }
 
     func startBuildingUpgrade(planetID: PlanetID, kind: BuildingKind) {
         guard canSave else {
-            statusMessage = "Loading autosave failed. Start a new game before queueing construction."
+            statusMessage = "自动存档载入失败。请先开始新游戏再加入建造队列。"
             return
         }
 
@@ -397,7 +397,7 @@ final class AppModel: ObservableObject {
 
     func startResearch(_ technology: TechnologyKind) {
         guard canSave else {
-            statusMessage = "Loading autosave failed. Start a new game before queueing research."
+            statusMessage = "自动存档载入失败。请先开始新游戏再加入研究队列。"
             return
         }
 
@@ -414,12 +414,12 @@ final class AppModel: ObservableObject {
 
     func startShipBuild(planetID: PlanetID, kind: ShipKind, quantity: Int) {
         guard canSave else {
-            statusMessage = "Loading autosave failed. Start a new game before queueing ships."
+            statusMessage = "自动存档载入失败。请先开始新游戏再建造舰船。"
             return
         }
 
         guard quantity > 0 else {
-            statusMessage = "Could not queue \(kind.rawValue.displayName): quantity must be positive."
+            statusMessage = "无法加入\(kind.localizedName)：数量必须为正数。"
             return
         }
 
@@ -430,18 +430,18 @@ final class AppModel: ObservableObject {
         }
 
         let planet = universe.planets.first { $0.id == planetID }
-        let status = "Queued \(quantity) \(kind.rawValue.displayName) on \(planet?.name ?? "colony")."
+        let status = "已在\(planet?.name ?? "殖民地")加入 \(quantity) 架\(kind.localizedName)。"
         autosaveAfterQueueing(successStatus: status)
     }
 
     func startDefenseBuild(planetID: PlanetID, kind: DefenseKind, quantity: Int) {
         guard canSave else {
-            statusMessage = "Loading autosave failed. Start a new game before queueing defenses."
+            statusMessage = "自动存档载入失败。请先开始新游戏再建造防御。"
             return
         }
 
         guard quantity > 0 else {
-            statusMessage = "Could not queue \(kind.rawValue.displayName): quantity must be positive."
+            statusMessage = "无法加入\(kind.localizedName)：数量必须为正数。"
             return
         }
 
@@ -452,18 +452,18 @@ final class AppModel: ObservableObject {
         }
 
         let planet = universe.planets.first { $0.id == planetID }
-        let status = "Queued \(quantity) \(kind.rawValue.displayName) on \(planet?.name ?? "colony")."
+        let status = "已在\(planet?.name ?? "殖民地")加入 \(quantity) 个\(kind.localizedName)。"
         autosaveAfterQueueing(successStatus: status)
     }
 
     func startMissileBuild(planetID: PlanetID, kind: MissileKind, quantity: Int) {
         guard canSave else {
-            statusMessage = "Loading autosave failed. Start a new game before queueing missiles."
+            statusMessage = "自动存档载入失败。请先开始新游戏再建造导弹。"
             return
         }
 
         guard quantity > 0 else {
-            statusMessage = "Could not queue \(kind.rawValue.displayName): quantity must be positive."
+            statusMessage = "无法加入\(kind.localizedName)：数量必须为正数。"
             return
         }
 
@@ -474,7 +474,7 @@ final class AppModel: ObservableObject {
         }
 
         let planet = universe.planets.first { $0.id == planetID }
-        let status = "Queued \(quantity) \(kind.rawValue.displayName) on \(planet?.name ?? "colony")."
+        let status = "已在\(planet?.name ?? "殖民地")加入 \(quantity) 枚\(kind.localizedName)。"
         autosaveAfterQueueing(successStatus: status)
     }
 
@@ -492,12 +492,12 @@ final class AppModel: ObservableObject {
             ships: ships,
             cargo: cargo
         ) {
-            statusMessage = "Could not launch fleet: \(validationFailure.description)."
+            statusMessage = "无法派遣舰队：\(validationFailure.description)。"
             return
         }
 
         guard let originID, let targetID else {
-            statusMessage = "Could not launch fleet: select an origin and target."
+            statusMessage = "无法派遣舰队：请选择出发星球和目标。"
             return
         }
 
@@ -514,7 +514,7 @@ final class AppModel: ObservableObject {
         case .launched(let fleet):
             autosaveAfterQueueing(successStatus: fleetLaunchStatus(for: fleet))
         case .failure(let failure):
-            statusMessage = "Could not launch fleet: \(Self.fleetFailureDescription(failure))."
+            statusMessage = "无法派遣舰队：\(Self.fleetFailureDescription(failure))。"
         }
     }
 
@@ -536,14 +536,14 @@ final class AppModel: ObservableObject {
 
     func updateProductionSetting(planetID: PlanetID, kind: BuildingKind, value: Double) {
         guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID }) else {
-            statusMessage = "Could not update production: missing colony."
+            statusMessage = "无法调整产能：找不到殖民地。"
             return
         }
 
         let clampedValue = min(max(value.isFinite ? value : 1, 0), 1)
         universe.planets[planetIndex].productionSettings[kind] = clampedValue
         EconomyEngine.recomputeEnergy(for: &universe.planets[planetIndex], ruleSet: universe.ruleSet)
-        statusMessage = "\(kind.rawValue.displayName) production set to \(Self.formattedPercent(clampedValue)). Save to keep this setting."
+        statusMessage = "\(kind.localizedName)产能已设为 \(Self.formattedPercent(clampedValue))。保存后保留设置。"
     }
 
     func energySupplyRatio(for planet: Planet) -> Double {
@@ -564,10 +564,10 @@ final class AppModel: ObservableObject {
         let available = Self.formattedSignedWholeNumber(planet.energy.available)
 
         guard planet.energy.used > 0 else {
-            return "\(produced) produced - idle"
+            return "产出 \(produced) - 空闲"
         }
 
-        return "\(Self.formattedPercent(energySupplyRatio(for: planet))) supply - \(produced)/\(used) - \(available)"
+        return "供能 \(Self.formattedPercent(energySupplyRatio(for: planet))) - \(produced)/\(used) - \(available)"
     }
 
     func buildingLevel(for kind: BuildingKind, on planet: Planet) -> Int {
@@ -597,17 +597,17 @@ final class AppModel: ObservableObject {
 
     func buildingUpgradeLockedReason(planet: Planet, kind: BuildingKind) -> String? {
         guard canSave else {
-            return "Start or load a valid save first"
+            return "请先开始或载入有效存档"
         }
 
         guard planet.buildQueue.isEmpty else {
-            return "Construction queue busy"
+            return "建造队列忙碌"
         }
 
         guard let rule = universe.ruleSet.buildingRules[kind],
               let cost = buildingUpgradeCost(for: planet, kind: kind)
         else {
-            return "Missing or invalid economy rule"
+            return "经济规则缺失或无效"
         }
 
         if let missingRequirement = QueueEngine.missingRequirement(
@@ -619,7 +619,7 @@ final class AppModel: ObservableObject {
         }
 
         guard planet.resources.canAfford(cost) else {
-            return "Insufficient resources"
+            return "资源不足"
         }
 
         return nil
@@ -663,18 +663,18 @@ final class AppModel: ObservableObject {
 
     func researchLockedReason(_ technology: TechnologyKind) -> String? {
         guard canSave else {
-            return "Start or load a valid save first"
+            return "请先开始或载入有效存档"
         }
 
         guard playerFaction?.researchQueue.isEmpty == true else {
-            return "Research queue busy"
+            return "研究队列忙碌"
         }
 
         guard let rule = universe.ruleSet.researchRules[technology],
               let paymentPlanet = playerResearchPaymentPlanet,
               let cost = researchCost(for: technology)
         else {
-            return "Missing or invalid research rule"
+            return "研究规则缺失或无效"
         }
 
         if let missingRequirement = QueueEngine.missingRequirement(
@@ -686,7 +686,7 @@ final class AppModel: ObservableObject {
         }
 
         guard paymentPlanet.resources.canAfford(cost) else {
-            return "Insufficient resources"
+            return "资源不足"
         }
 
         return nil
@@ -746,21 +746,21 @@ final class AppModel: ObservableObject {
 
     func shipBuildLockedReason(planet: Planet, kind: ShipKind, quantity: Int) -> String? {
         guard canSave else {
-            return "Start or load a valid save first"
+            return "请先开始或载入有效存档"
         }
 
         guard quantity > 0 else {
-            return "Invalid quantity"
+            return "数量无效"
         }
 
         guard planet.shipBuildQueue.isEmpty else {
-            return "Shipyard queue busy"
+            return "造船厂队列忙碌"
         }
 
         guard let rule = universe.ruleSet.shipRules[kind],
               let cost = shipBuildCost(for: kind, quantity: quantity)
         else {
-            return "Missing or invalid ship rule"
+            return "舰船规则缺失或无效"
         }
 
         if let missingRequirement = QueueEngine.missingRequirement(
@@ -772,7 +772,7 @@ final class AppModel: ObservableObject {
         }
 
         guard planet.resources.canAfford(cost) else {
-            return "Insufficient resources"
+            return "资源不足"
         }
 
         return nil
@@ -784,21 +784,21 @@ final class AppModel: ObservableObject {
 
     func defenseBuildLockedReason(planet: Planet, kind: DefenseKind, quantity: Int) -> String? {
         guard canSave else {
-            return "Start or load a valid save first"
+            return "请先开始或载入有效存档"
         }
 
         guard quantity > 0 else {
-            return "Invalid quantity"
+            return "数量无效"
         }
 
         guard planet.defenseBuildQueue.isEmpty else {
-            return "Defense queue busy"
+            return "防御队列忙碌"
         }
 
         guard let rule = universe.ruleSet.defenseRules[kind],
               let cost = defenseBuildCost(for: kind, quantity: quantity)
         else {
-            return "Missing or invalid defense rule"
+            return "防御规则缺失或无效"
         }
 
         if let missingRequirement = QueueEngine.missingRequirement(
@@ -810,7 +810,7 @@ final class AppModel: ObservableObject {
         }
 
         guard planet.resources.canAfford(cost) else {
-            return "Insufficient resources"
+            return "资源不足"
         }
 
         return nil
@@ -822,21 +822,21 @@ final class AppModel: ObservableObject {
 
     func missileBuildLockedReason(planet: Planet, kind: MissileKind, quantity: Int) -> String? {
         guard canSave else {
-            return "Start or load a valid save first"
+            return "请先开始或载入有效存档"
         }
 
         guard quantity > 0 else {
-            return "Invalid quantity"
+            return "数量无效"
         }
 
         guard planet.defenseBuildQueue.isEmpty else {
-            return "Defense queue busy"
+            return "防御队列忙碌"
         }
 
         guard let rule = universe.ruleSet.missileRules[kind],
               let cost = missileBuildCost(for: kind, quantity: quantity)
         else {
-            return "Missing or invalid missile rule"
+            return "导弹规则缺失或无效"
         }
 
         if let missingRequirement = QueueEngine.missingRequirement(
@@ -848,7 +848,7 @@ final class AppModel: ObservableObject {
         }
 
         guard planet.resources.canAfford(cost) else {
-            return "Insufficient resources"
+            return "资源不足"
         }
 
         return nil
@@ -861,11 +861,11 @@ final class AppModel: ObservableObject {
     func unitQueueTitle(_ item: UnitBuildQueueItem) -> String {
         switch item.unitKind {
         case .ship(let kind):
-            return kind.rawValue.displayName
+            return kind.localizedName
         case .defense(let kind):
-            return kind.rawValue.displayName
+            return kind.localizedName
         case .missile(let kind):
-            return kind.rawValue.displayName
+            return kind.localizedName
         }
     }
 
@@ -896,7 +896,7 @@ final class AppModel: ObservableObject {
 
     func fleetTargetStateSignature(targetID: PlanetID?) -> String {
         guard let target = planet(for: targetID) else {
-            return "missing"
+            return "缺失"
         }
 
         let summary = fleetTargetSummary(for: target)
@@ -980,12 +980,12 @@ final class AppModel: ObservableObject {
             targetID: targetID,
             missileCount: missileCount
         ) {
-            statusMessage = "Could not launch missile strike: \(validationFailure.description)."
+            statusMessage = "无法发射导弹：\(validationFailure.description)。"
             return
         }
 
         guard let originID, let targetID, let target = planet(for: targetID) else {
-            statusMessage = "Could not launch missile strike: select an origin and target."
+            statusMessage = "无法发射导弹：请选择发射星球和目标。"
             return
         }
 
@@ -996,9 +996,9 @@ final class AppModel: ObservableObject {
             missileCount: missileCount
         ) {
         case .resolved:
-            autosaveAfterQueueing(successStatus: "Launched missile strike at \(target.coordinate.displayText).")
+            autosaveAfterQueueing(successStatus: "已向 \(target.coordinate.displayText) 发射导弹打击。")
         case .failed(let failure):
-            statusMessage = "Could not launch missile strike: \(Self.missileStrikeFailureDescription(failure))."
+            statusMessage = "无法发射导弹：\(Self.missileStrikeFailureDescription(failure))。"
         }
     }
 
@@ -1044,7 +1044,7 @@ final class AppModel: ObservableObject {
 
     func fleetFuelStatusText(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int], cargo: ResourceBundle) -> String {
         guard let fuel = fleetFuelCost(originID: originID, targetID: targetID, ships: ships) else {
-            return "unknown"
+            return "未知"
         }
 
         guard let origin = planet(for: originID) else {
@@ -1056,7 +1056,7 @@ final class AppModel: ObservableObject {
             return Self.formattedWholeNumber(fuel)
         }
 
-        return "\(Self.formattedWholeNumber(fuel)) needed; \(Self.formattedWholeNumber(max(0, deuteriumAfterCargo))) available"
+        return "需要 \(Self.formattedWholeNumber(fuel))；可用 \(Self.formattedWholeNumber(max(0, deuteriumAfterCargo)))"
     }
 
     func fleetTravelDuration(originID: PlanetID?, targetID: PlanetID?, ships: [ShipKind: Int]) -> TimeInterval? {
@@ -1080,69 +1080,69 @@ final class AppModel: ObservableObject {
         let parts = normalizedShips(ships)
             .sorted { lhs, rhs in lhs.key.rawValue < rhs.key.rawValue }
             .map { "\($0.key.rawValue.displayName) x\($0.value)" }
-        return parts.isEmpty ? "No ships" : parts.joined(separator: ", ")
+        return parts.isEmpty ? "无舰船" : parts.joined(separator: ", ")
     }
 
     func fleetCargoSummary(_ cargo: ResourceBundle) -> String {
         guard cargo.totalAmountForDisplay > 0 else {
-            return "No cargo"
+            return "无货物"
         }
 
-        return "M \(Self.formattedWholeNumber(cargo.metal)) / C \(Self.formattedWholeNumber(cargo.crystal)) / D \(Self.formattedWholeNumber(cargo.deuterium))"
+        return "金 \(Self.formattedWholeNumber(cargo.metal)) / 晶 \(Self.formattedWholeNumber(cargo.crystal)) / 重 \(Self.formattedWholeNumber(cargo.deuterium))"
     }
 
     func fleetPhaseText(_ fleet: Fleet) -> String {
-        "\(fleet.phase.rawValue.displayName) - \(fleetRemainingText(fleet))"
+        "\(fleet.phase.localizedName) - \(fleetRemainingText(fleet))"
     }
 
     func fleetRemainingText(_ fleet: Fleet) -> String {
         let nextTime = fleetNextTime(fleet)
         guard nextTime.isFinite, universe.gameTime.isFinite else {
-            return "unknown remaining"
+            return "剩余时间未知"
         }
 
         let remaining = max(0, nextTime - universe.gameTime)
         guard remaining > 0 else {
-            return "ready"
+            return "就绪"
         }
 
-        return "\(Self.formattedDuration(remaining)) remaining"
+        return "剩余 \(Self.formattedDuration(remaining))"
     }
 
     func reportDetailSummary(_ report: Report) -> String {
         let loot = fleetCargoSummary(report.loot)
         let debris = fleetCargoSummary(report.debris)
         let losses = fleetCargoSummary(report.losses)
-        return "Loot \(loot) - Debris \(debris) - Losses \(losses)"
+        return "战利品 \(loot) - 残骸 \(debris) - 损失 \(losses)"
     }
 
     func queueRemainingText(until finishTime: TimeInterval) -> String {
         guard finishTime.isFinite, universe.gameTime.isFinite else {
-            return "unknown remaining"
+            return "剩余时间未知"
         }
 
         let remaining = max(0, finishTime - universe.gameTime)
         guard remaining > 0 else {
-            return "ready"
+            return "就绪"
         }
 
-        return "\(Self.formattedDuration(remaining)) remaining"
+        return "剩余 \(Self.formattedDuration(remaining))"
     }
 
     func durationText(_ duration: TimeInterval?) -> String {
         guard let duration, duration.isFinite else {
-            return "unknown"
+            return "未知"
         }
 
         return Self.formattedDuration(duration)
     }
 
     func buildQueueStatus(_ item: BuildQueueItem) -> String {
-        "\(item.buildingKind.rawValue.displayName) level \(item.targetLevel) - \(queueRemainingText(until: item.finishTime))"
+        "\(item.buildingKind.localizedName) \(item.targetLevel) 级 - \(queueRemainingText(until: item.finishTime))"
     }
 
     func researchQueueStatus(_ item: ResearchQueueItem) -> String {
-        "\(item.technologyKind.rawValue.displayName) level \(item.targetLevel) - \(queueRemainingText(until: item.finishTime))"
+        "\(item.technologyKind.localizedName) \(item.targetLevel) 级 - \(queueRemainingText(until: item.finishTime))"
     }
 
     func queueProgress(startTime: TimeInterval, finishTime: TimeInterval) -> Double {
@@ -1165,18 +1165,18 @@ final class AppModel: ObservableObject {
 
     func advanceOneMinute() {
         guard canSave else {
-            statusMessage = "Loading autosave failed. Start a new game before advancing or saving."
+            statusMessage = "自动存档载入失败。请先开始新游戏再推进或保存。"
             return
         }
 
         SimulationEngine.tick(universe: &universe, delta: advanceDelta, aiDifficulty: settings.difficulty)
         refreshStrategicState()
-        statusMessage = "Advanced \(Self.formattedDuration(advanceDelta)) at \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x speed to T+\(Self.formattedWholeSeconds(universe.gameTime))."
+        statusMessage = "以 \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x 速度推进 \(Self.formattedDuration(advanceDelta))，当前 T+\(Self.formattedWholeSeconds(universe.gameTime))。"
     }
 
     func save() {
         guard canSave else {
-            statusMessage = "Save is disabled because autosave loading failed. Start a new game before saving."
+            statusMessage = "自动存档载入失败，保存已禁用。请先开始新游戏。"
             return
         }
 
@@ -1186,49 +1186,49 @@ final class AppModel: ObservableObject {
             try repository.save(universe, wallClockDate: currentDate(), settings: settings)
             hasPendingOfflineCatchUpSave = false
             statusMessage = savedPendingOfflineCatchUp
-                ? "Saved universe. Offline progress is now saved."
-                : "Saved universe."
+                ? "宇宙已保存，离线进度也已写入。"
+                : "宇宙已保存。"
             refreshSaveSlots()
         } catch {
-            statusMessage = "Save failed: \(error.localizedDescription)"
+            statusMessage = "保存失败：\(error.localizedDescription)"
         }
     }
 
     func startNewGame() {
-        universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "Commander")
+        universe = StarterUniverseFactory.makeNewGame(seed: 1, playerName: "指挥官")
         refreshStrategicState()
         offlineSummary = nil
         hasPendingOfflineCatchUpSave = false
         canSave = true
         isOnboardingVisible = true
-        statusMessage = "New game started. Saving will replace the current autosave."
+        statusMessage = "新游戏已开始。保存后会替换当前自动存档。"
     }
 
     func dismissOnboarding() {
         isOnboardingVisible = false
-        statusMessage = "Onboarding dismissed. Use Settings to tune saves and simulation speed."
+        statusMessage = "初始提示已关闭。可在设置中调整保存和模拟速度。"
     }
 
     func updateGameSpeed(_ gameSpeed: Double) {
         settings.gameSpeed = GameSettings.clampedGameSpeed(gameSpeed)
-        statusMessage = "Game speed set to \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x. Manual advance uses this speed."
+        statusMessage = "游戏速度已设为 \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x。手动推进会使用该速度。"
     }
 
     func updateOfflineIntensity(_ offlineIntensity: GameSettings.OfflineIntensity) {
         settings.offlineIntensity = offlineIntensity
-        statusMessage = "Offline simulation set to \(offlineIntensity.displayName). Save to keep this setting."
+        statusMessage = "离线模拟已设为\(offlineIntensity.displayName)。保存后保留设置。"
     }
 
     func updateAutosaveEnabled(_ isEnabled: Bool) {
         settings.isAutosaveEnabled = isEnabled
         statusMessage = isEnabled
-            ? "Autosave enabled for queue and fleet actions."
-            : "Autosave disabled. Queue and fleet actions will wait for manual save."
+            ? "队列和舰队操作将自动保存。"
+            : "自动保存已关闭，队列和舰队操作需手动保存。"
     }
 
     func updateDifficulty(_ difficulty: GameSettings.Difficulty) {
         settings.difficulty = difficulty
-        statusMessage = "Difficulty set to \(difficulty.displayName). \(difficulty.behaviorDescription)"
+        statusMessage = "难度已设为\(difficulty.displayName)。\(difficulty.behaviorDescription)"
     }
 
     func refreshSaveSlots() {
@@ -1243,38 +1243,38 @@ final class AppModel: ObservableObject {
         do {
             let slot = try repository.createBackup(wallClockDate: currentDate())
             refreshSaveSlots()
-            statusMessage = "Created backup \(slot.name). Autosave was not modified."
+            statusMessage = "已创建备份 \(slot.name)，自动存档未修改。"
         } catch {
-            statusMessage = "Backup failed: \(Self.loadFailureDescription(for: error))"
+            statusMessage = "备份失败：\(Self.loadFailureDescription(for: error))"
         }
     }
 
     func deleteSaveSlot(named slotName: String) {
         guard slotName != repository.fileName else {
-            statusMessage = "Autosave is protected here. Create a backup before removing saves manually."
+            statusMessage = "自动存档受保护。请先创建备份，再手动移除存档。"
             return
         }
 
         do {
             try repository.deleteBackup(named: slotName)
             refreshSaveSlots()
-            statusMessage = "Deleted backup \(slotName)."
+            statusMessage = "已删除备份 \(slotName)。"
         } catch {
-            statusMessage = "Delete failed: \(Self.loadFailureDescription(for: error))"
+            statusMessage = "删除失败：\(Self.loadFailureDescription(for: error))"
         }
     }
 
     private static func loadFailureStatus(for error: Error) -> String {
-        "Loading autosave failed: \(loadFailureDescription(for: error)). Saving is disabled to protect the existing file."
+        "自动存档载入失败：\(loadFailureDescription(for: error))。为保护现有文件，保存已禁用。"
     }
 
     private static func loadFailureDescription(for error: Error) -> String {
         if case JSONSaveRepository.RepositoryError.unsupportedSchema(let schemaVersion) = error {
-            return "unsupported save schema \(schemaVersion)"
+            return "不支持的存档结构版本 \(schemaVersion)"
         }
 
         if case JSONSaveRepository.RepositoryError.invalidFileName(let fileName) = error {
-            return "invalid save file name '\(fileName)'"
+            return "存档文件名无效：\(fileName)"
         }
 
         return error.localizedDescription
@@ -1282,28 +1282,28 @@ final class AppModel: ObservableObject {
 
     private static func formattedWholeSeconds(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite else {
-            return "unknown time"
+            return "未知时间"
         }
 
-        return seconds.formatted(.number.precision(.fractionLength(0))) + " seconds"
+        return seconds.formatted(.number.precision(.fractionLength(0))) + " 秒"
     }
 
     private static func offlineCatchUpPendingStatus(for summary: OfflineCatchUpSummary) -> String {
-        "Caught up \(formattedDuration(summary.elapsedSeconds)) offline. Progress is applied but not saved yet."
+        "已补算离线进度 \(formattedDuration(summary.elapsedSeconds))，进度已应用但尚未保存。"
     }
 
     private static func offlineSummaryDetail(
         for summary: OfflineCatchUpSummary,
         hasPendingSave: Bool
     ) -> String {
-        let constructionText = itemCountText(summary.completedConstructionCount, singular: "construction")
-        let researchText = itemCountText(summary.completedResearchCount, singular: "research")
-        let saveText = hasPendingSave ? "Pending save." : "Saved."
-        return "Processed \(summary.processedChunks) chunks; completed \(constructionText) and \(researchText). \(saveText)"
+        let constructionText = itemCountText(summary.completedConstructionCount, singular: "项建造")
+        let researchText = itemCountText(summary.completedResearchCount, singular: "项研究")
+        let saveText = hasPendingSave ? "等待保存。" : "已保存。"
+        return "处理 \(summary.processedChunks) 个片段；完成 \(constructionText) 和 \(researchText)。\(saveText)"
     }
 
     private static func itemCountText(_ count: Int, singular: String) -> String {
-        count == 1 ? "1 \(singular)" : "\(count) \(singular)"
+        "\(count) \(singular)"
     }
 
     private var playerResearchPaymentPlanet: Planet? {
@@ -1328,21 +1328,21 @@ final class AppModel: ObservableObject {
         refreshStrategicState()
 
         if hasPendingOfflineCatchUpSave {
-            statusMessage = "\(successStatus) Offline progress and this action are pending save."
+            statusMessage = "\(successStatus) 离线进度和本次操作等待保存。"
             return
         }
 
         guard settings.isAutosaveEnabled else {
-            statusMessage = "\(successStatus) Autosave is off; use Save when ready."
+            statusMessage = "\(successStatus) 自动保存已关闭，需要时请手动保存。"
             return
         }
 
         do {
             try repository.save(universe, wallClockDate: currentDate(), settings: settings)
             refreshSaveSlots()
-            statusMessage = "\(successStatus) Autosaved."
+            statusMessage = "\(successStatus) 已自动保存。"
         } catch {
-            statusMessage = "\(successStatus) Autosave failed: \(error.localizedDescription)"
+            statusMessage = "\(successStatus) 自动保存失败：\(error.localizedDescription)"
         }
     }
 
@@ -1519,54 +1519,54 @@ final class AppModel: ObservableObject {
         kind: BuildingKind,
         targetLevel: Int?
     ) -> String {
-        let levelText = targetLevel.map { " level \($0)" } ?? ""
-        let location = planetName.map { " on \($0)" } ?? ""
-        return "Queued \(kind.rawValue.displayName)\(levelText)\(location)."
+        let levelText = targetLevel.map { "等级 \($0)" } ?? ""
+        let location = planetName.map { "（\($0)）" } ?? ""
+        return "已加入\(kind.localizedName)\(levelText)\(location)。"
     }
 
     private static func researchQueuedStatus(technology: TechnologyKind, targetLevel: Int?) -> String {
-        let levelText = targetLevel.map { " level \($0)" } ?? ""
-        return "Queued \(technology.rawValue.displayName)\(levelText)."
+        let levelText = targetLevel.map { "等级 \($0)" } ?? ""
+        return "已加入\(technology.localizedName)\(levelText)。"
     }
 
     private func fleetLaunchStatus(for fleet: Fleet) -> String {
-        "Launched \(fleet.mission.rawValue.displayName) fleet to \(fleet.target.displayText)."
+        "已派遣\(fleet.mission.localizedName)舰队前往 \(fleet.target.displayText)。"
     }
 
     private static func buildingQueueFailureStatus(_ result: QueueResult, kind: BuildingKind) -> String {
-        "Could not queue \(kind.rawValue.displayName): \(queueFailureDescription(result))."
+        "无法加入\(kind.localizedName)：\(queueFailureDescription(result))。"
     }
 
     private static func researchQueueFailureStatus(_ result: QueueResult, technology: TechnologyKind) -> String {
-        "Could not queue \(technology.rawValue.displayName): \(queueFailureDescription(result))."
+        "无法加入\(technology.localizedName)：\(queueFailureDescription(result))。"
     }
 
     private static func shipQueueFailureStatus(_ result: QueueResult, kind: ShipKind) -> String {
-        "Could not queue \(kind.rawValue.displayName): \(queueFailureDescription(result))."
+        "无法加入\(kind.localizedName)：\(queueFailureDescription(result))。"
     }
 
     private static func defenseQueueFailureStatus(_ result: QueueResult, kind: DefenseKind) -> String {
-        "Could not queue \(kind.rawValue.displayName): \(queueFailureDescription(result))."
+        "无法加入\(kind.localizedName)：\(queueFailureDescription(result))。"
     }
 
     private static func missileQueueFailureStatus(_ result: QueueResult, kind: MissileKind) -> String {
-        "Could not queue \(kind.rawValue.displayName): \(queueFailureDescription(result))."
+        "无法加入\(kind.localizedName)：\(queueFailureDescription(result))。"
     }
 
     private static func queueFailureDescription(_ result: QueueResult) -> String {
         switch result {
         case .queued:
-            return "already queued"
+            return "已经加入队列"
         case .insufficientResources:
-            return "insufficient resources"
+            return "资源不足"
         case .missingPlanet:
-            return "missing colony"
+            return "找不到殖民地"
         case .missingFaction:
-            return "missing faction"
+            return "找不到阵营"
         case .queueBusy:
-            return "queue busy"
+            return "队列忙碌"
         case .missingRule:
-            return "missing or invalid economy rule"
+            return "规则缺失或无效"
         case .missingRequirement(let requirement):
             return requirement.lockedReason
         }
@@ -1575,40 +1575,40 @@ final class AppModel: ObservableObject {
     private static func fleetFailureDescription(_ failure: FleetLaunchFailure) -> String {
         switch failure {
         case .missingOrigin:
-            return "missing origin"
+            return "找不到出发星球"
         case .missingTarget:
-            return "missing target"
+            return "找不到目标"
         case .missingOwner:
-            return "origin has no owner"
+            return "出发星球没有归属"
         case .insufficientShips:
-            return "insufficient ships"
+            return "舰船不足"
         case .insufficientCargo:
-            return "insufficient cargo capacity or resources"
+            return "货舱容量或资源不足"
         case .insufficientFuel:
-            return "insufficient deuterium for fuel"
+            return "重氢燃料不足"
         case .invalidMission:
-            return "invalid mission for selected ships or target"
+            return "所选舰船或目标无法执行该任务"
         }
     }
 
     private static func missileStrikeFailureDescription(_ failure: CombatEngine.MissileStrikeFailure) -> String {
         switch failure {
         case .invalidMissileCount:
-            return "select at least one missile"
+            return "至少选择 1 枚导弹"
         case .missingOrigin:
-            return "missing origin"
+            return "找不到发射星球"
         case .missingTarget:
-            return "missing target"
+            return "找不到目标"
         case .missingOriginOwner:
-            return "origin has no owner"
+            return "发射星球没有归属"
         case .samePlanet:
-            return "target must differ from origin"
+            return "目标不能与发射星球相同"
         case .invalidTarget:
-            return "target must be a hostile colony"
+            return "目标必须是敌对殖民地"
         case .insufficientMissiles:
-            return "insufficient interplanetary missiles"
+            return "星际导弹不足"
         case .noTargetDefenses:
-            return "target has no defenses"
+            return "目标没有防御设施"
         }
     }
 
@@ -1628,27 +1628,27 @@ final class AppModel: ObservableObject {
         var description: String {
             switch self {
             case .saveUnavailable:
-                return "loading autosave failed. Start a new game before launching fleets"
+                return "自动存档载入失败，请先开始新游戏再派遣舰队"
             case .missingOrigin:
-                return "select an origin colony"
+                return "请选择出发殖民地"
             case .missingTarget:
-                return "select a target"
+                return "请选择目标"
             case .samePlanet:
-                return "target must differ from origin"
+                return "目标不能与出发星球相同"
             case .invalidMission:
-                return "invalid mission for selected ships or target"
+                return "所选舰船或目标无法执行该任务"
             case .noShips:
-                return "select at least one ship"
+                return "至少选择 1 艘舰船"
             case .invalidCargo:
-                return "cargo must be nonnegative"
+                return "货物数量不能为负"
             case .insufficientShips:
-                return "insufficient ships"
+                return "舰船不足"
             case .insufficientCargo:
-                return "insufficient resources for cargo"
+                return "装载资源不足"
             case .insufficientCargoCapacity:
-                return "insufficient cargo capacity"
+                return "货舱容量不足"
             case .insufficientFuel:
-                return "insufficient deuterium for fuel"
+                return "重氢燃料不足"
             }
         }
     }
@@ -1666,21 +1666,21 @@ final class AppModel: ObservableObject {
         var description: String {
             switch self {
             case .saveUnavailable:
-                return "loading autosave failed. Start a new game before launching missiles"
+                return "自动存档载入失败，请先开始新游戏再发射导弹"
             case .missingOrigin:
-                return "select an origin colony"
+                return "请选择发射殖民地"
             case .missingTarget:
-                return "select a target"
+                return "请选择目标"
             case .samePlanet:
-                return "target must differ from origin"
+                return "目标不能与发射星球相同"
             case .invalidTarget:
-                return "target must be a visible hostile colony"
+                return "目标必须是已侦察的敌对殖民地"
             case .invalidMissileCount:
-                return "select at least one missile"
+                return "至少选择 1 枚导弹"
             case .insufficientMissiles:
-                return "insufficient interplanetary missiles"
+                return "星际导弹不足"
             case .noTargetDefenses:
-                return "target has no defenses"
+                return "目标没有防御设施"
             }
         }
     }
@@ -1809,12 +1809,12 @@ final class AppModel: ObservableObject {
         let isPlayerOwned = isPlayerOwned(planet)
         let isVisible = isVisibleToPlayer(planet)
         let ownerName = isPlayerOwned
-            ? (playerFaction?.name ?? "Player")
-            : isVisible ? planet.ownerID.map(factionName(for:)) ?? "Neutral" : "Unscouted"
+            ? (playerFaction?.name ?? "玩家")
+            : isVisible ? planet.ownerID.map(factionName(for:)) ?? "中立" : "未侦察"
 
         return FleetTargetSummary(
             id: planet.id,
-            displayName: isVisible ? planet.name : "Unknown Sector",
+            displayName: isVisible ? planet.name : "未知区域",
             coordinateText: planet.coordinate.displayText,
             ownerName: ownerName,
             isPlayerOwned: isPlayerOwned,
@@ -1824,7 +1824,7 @@ final class AppModel: ObservableObject {
     }
 
     private func factionName(for factionID: FactionID) -> String {
-        universe.factions.first { $0.id == factionID }?.name ?? "Unknown faction"
+        universe.factions.first { $0.id == factionID }?.name ?? "未知势力"
     }
 
     private static func sortPlanetsByCoordinate(_ lhs: Planet, _ rhs: Planet) -> Bool {
@@ -1872,7 +1872,7 @@ final class AppModel: ObservableObject {
 
     private static func formattedDuration(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite else {
-            return "unknown"
+            return "未知"
         }
 
         let clampedSeconds = max(0, seconds)
@@ -1885,7 +1885,7 @@ final class AppModel: ObservableObject {
 
     private static func formattedWholeNumber(_ value: Double) -> String {
         guard value.isFinite else {
-            return "unknown"
+            return "未知"
         }
 
         return value.formatted(.number.precision(.fractionLength(0)))
@@ -1893,7 +1893,7 @@ final class AppModel: ObservableObject {
 
     private static func formattedSignedWholeNumber(_ value: Double) -> String {
         guard value.isFinite else {
-            return "unknown"
+            return "未知"
         }
 
         let formatted = formattedWholeNumber(abs(value))
@@ -1902,7 +1902,7 @@ final class AppModel: ObservableObject {
 
     private static func formattedPercent(_ value: Double) -> String {
         guard value.isFinite else {
-            return "unknown"
+            return "未知"
         }
 
         return value.formatted(.percent.precision(.fractionLength(0)))
@@ -1928,13 +1928,13 @@ struct StarMapPlanetSection: Identifiable {
         var title: String {
             switch self {
             case .player:
-                return "Owned Worlds"
+                return "我的星球"
             case .ai:
-                return "AI Worlds"
+                return "AI 星球"
             case .neutral:
-                return "Neutral Systems"
+                return "中立星系"
             case .unknown:
-                return "Unknown Sectors"
+                return "未知区域"
             }
         }
 
@@ -1960,39 +1960,23 @@ struct StarMapPlanetSection: Identifiable {
 
 extension GameSettings.OfflineIntensity {
     var displayName: String {
-        switch self {
-        case .paused:
-            return "Paused"
-        case .reduced:
-            return "Reduced"
-        case .normal:
-            return "Normal"
-        case .intense:
-            return "Intense"
-        }
+        localizedName
     }
 }
 
 extension GameSettings.Difficulty {
     var displayName: String {
-        switch self {
-        case .easy:
-            return "Easy"
-        case .standard:
-            return "Standard"
-        case .hard:
-            return "Hard"
-        }
+        localizedName
     }
 
     var behaviorDescription: String {
         switch self {
         case .easy:
-            return "AI scouts before attacks and reacts to threats with heavier defenses."
+            return "AI 会先侦察再攻击，并用更多防御回应威胁。"
         case .standard:
-            return "AI balances scouting, expansion, attacks, and defensive reactions."
+            return "AI 会平衡侦察、扩张、攻击和防御反应。"
         case .hard:
-            return "AI uses rankings and relation pressure more aggressively without reading hidden inventories."
+            return "AI 会更积极利用排名和关系压力，但不会读取隐藏库存。"
         }
     }
 }
@@ -2026,7 +2010,7 @@ struct FleetTargetSummary: Identifiable {
     }
 
     var detailText: String {
-        isVisible ? ownerName : "Unscouted"
+        isVisible ? ownerName : "未侦察"
     }
 }
 
@@ -2101,17 +2085,5 @@ private extension ResourceBundle {
         }
 
         return metal + crystal + deuterium
-    }
-}
-
-private extension String {
-    var displayName: String {
-        reduce(into: "") { result, character in
-            if character.isUppercase, !result.isEmpty {
-                result.append(" ")
-            }
-            result.append(character)
-        }
-        .capitalized
     }
 }

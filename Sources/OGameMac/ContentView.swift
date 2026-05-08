@@ -35,37 +35,37 @@ private struct SidebarView: View {
 
     var body: some View {
         List(selection: $selection) {
-            Section("Empire") {
-                Label("Dashboard", systemImage: "chart.bar")
+            Section("帝国") {
+                Label("总览", systemImage: "chart.bar")
                     .tag(SidebarDestination.dashboard)
 
-                Label("Fleets", systemImage: "paperplane")
+                Label("舰队", systemImage: "paperplane")
                     .tag(SidebarDestination.fleets)
 
-                Label("Research", systemImage: "atom")
+                Label("研究", systemImage: "atom")
                     .tag(SidebarDestination.research)
             }
 
-            Section("Strategy") {
-                Label("Star Map", systemImage: "map")
+            Section("战略") {
+                Label("星图", systemImage: "map")
                     .tag(SidebarDestination.starMap)
 
-                Label("Rankings", systemImage: "list.number")
+                Label("排名", systemImage: "list.number")
                     .tag(SidebarDestination.rankings)
 
-                Label("Victory", systemImage: "flag.checkered")
+                Label("胜利", systemImage: "flag.checkered")
                     .tag(SidebarDestination.victory)
 
-                Label("Relations", systemImage: "person.2.wave.2")
+                Label("关系", systemImage: "person.2.wave.2")
                     .tag(SidebarDestination.relations)
             }
 
-            Section("System") {
-                Label("Settings", systemImage: "gearshape")
+            Section("系统") {
+                Label("设置", systemImage: "gearshape")
                     .tag(SidebarDestination.settings)
             }
 
-            Section("Planets") {
+            Section("星球") {
                 ForEach(planets) { planet in
                     SidebarPlanetRow(planet: planet)
                         .tag(SidebarDestination.planet(planet.id))
@@ -155,7 +155,7 @@ private struct DashboardView: View {
 
             ActivityPanel(model: model)
         }
-        .navigationTitle("Dashboard")
+        .navigationTitle("总览")
     }
 }
 
@@ -171,9 +171,9 @@ private struct HeaderView: View {
                 .minimumScaleFactor(0.8)
 
             HStack(spacing: 12) {
-                Label(faction?.name ?? "Unknown faction", systemImage: "person.crop.circle")
+                Label(faction?.name ?? "未知势力", systemImage: "person.crop.circle")
                 Label("T+\(Formatters.wholeSeconds(universe.gameTime))", systemImage: "clock")
-                Label(universe.ruleSet.displayName, systemImage: "speedometer")
+                Label(universe.ruleSet.displayName.displayName, systemImage: "speedometer")
             }
             .font(.subheadline)
             .foregroundStyle(.secondary)
@@ -188,10 +188,10 @@ private struct PlanetSummaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionTitle(title: "Planets", detail: "\(planets.count) colonies")
+            SectionTitle(title: "星球", detail: "\(planets.count) 个殖民地")
 
             if planets.isEmpty {
-                EmptyStateView(title: "No owned planets", systemImage: "circle.dashed")
+                EmptyStateView(title: "没有已拥有星球", systemImage: "circle.dashed")
             } else {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12)], spacing: 12) {
                     ForEach(planets) { planet in
@@ -248,9 +248,9 @@ private struct ResourceGrid: View {
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
-            ResourceRow(label: "Metal", value: resources.metal)
-            ResourceRow(label: "Crystal", value: resources.crystal)
-            ResourceRow(label: "Deuterium", value: resources.deuterium)
+            ResourceRow(label: "金属", value: resources.metal)
+            ResourceRow(label: "晶体", value: resources.crystal)
+            ResourceRow(label: "重氢", value: resources.deuterium)
         }
         .font(.callout)
     }
@@ -261,9 +261,9 @@ private struct ResourceRateGrid: View {
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
-            ResourceRateRow(label: "Metal /h", value: rates.metal)
-            ResourceRateRow(label: "Crystal /h", value: rates.crystal)
-            ResourceRateRow(label: "Deuterium /h", value: rates.deuterium)
+            ResourceRateRow(label: "金属 /时", value: rates.metal)
+            ResourceRateRow(label: "晶体 /时", value: rates.crystal)
+            ResourceRateRow(label: "重氢 /时", value: rates.deuterium)
         }
         .font(.caption)
     }
@@ -329,10 +329,10 @@ private struct RecentEventsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SectionTitle(title: "Recent Events", detail: "\(events.count) shown")
+            SectionTitle(title: "近期事件", detail: "显示 \(events.count) 条")
 
             if events.isEmpty {
-                EmptyStateView(title: "No events recorded", systemImage: "text.bubble")
+                EmptyStateView(title: "尚无事件记录", systemImage: "text.bubble")
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(groups) { group in
@@ -391,17 +391,17 @@ private struct EventFeedGroup: Identifiable {
     private static func eventGroupTitle(for kind: GameEvent.Kind) -> String {
         switch kind {
         case .system:
-            return "System"
+            return "系统"
         case .economy:
-            return "Economy"
+            return "经济"
         case .intelligence:
-            return "Intel"
+            return "情报"
         case .combat:
-            return "Combat"
+            return "战斗"
         case .exploration:
-            return "Exploration"
+            return "探索"
         case .victory:
-            return "Victory"
+            return "胜利"
         }
     }
 }
@@ -450,7 +450,7 @@ private struct EventRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(event.title)
+                    Text(event.localizedTitle)
                         .font(.headline)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
@@ -464,7 +464,7 @@ private struct EventRow: View {
                         .lineLimit(1)
                 }
 
-                Text(event.message)
+                Text(event.localizedMessage)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -479,7 +479,7 @@ private struct ActivityPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Activity")
+            Text("活动")
                 .font(.headline)
 
             Text(model.statusMessage)
@@ -501,23 +501,23 @@ private struct ActivityPanel: View {
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut("t", modifiers: [.command])
                 .disabled(!model.canSave)
-                .help(model.canSave ? model.advanceActionTitle : "Start a new game before advancing")
+                .help(model.canSave ? model.advanceActionTitle : "推进前请先开始新游戏")
 
                 Button {
                     model.save()
                 } label: {
-                    Label("Save", systemImage: "square.and.arrow.down")
+                    Label("保存", systemImage: "square.and.arrow.down")
                         .frame(maxWidth: .infinity)
                 }
                 .keyboardShortcut("s", modifiers: [.command])
                 .disabled(!model.canSave)
-                .help(model.canSave ? "Save universe" : "Saving is disabled until a new game starts")
+                .help(model.canSave ? "保存宇宙" : "开始新游戏前保存不可用")
 
                 if !model.canSave {
                     Button {
                         model.startNewGame()
                     } label: {
-                        Label("New Game", systemImage: "plus")
+                        Label("新游戏", systemImage: "plus")
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -525,11 +525,11 @@ private struct ActivityPanel: View {
 
             Divider()
 
-            StatusMetric(title: "Game Time", value: "T+\(Formatters.wholeSeconds(model.universe.gameTime))")
-            StatusMetric(title: "Factions", value: Formatters.wholeNumber(Double(model.universe.factions.count)))
-            StatusMetric(title: "Fleets", value: Formatters.wholeNumber(Double(model.universe.fleets.count)))
-            StatusMetric(title: "Save", value: model.canSave ? model.autosaveStatusText : "Protected")
-            StatusMetric(title: "Settings", value: model.settingsStatusText)
+            StatusMetric(title: "游戏时间", value: "T+\(Formatters.wholeSeconds(model.universe.gameTime))")
+            StatusMetric(title: "势力", value: Formatters.wholeNumber(Double(model.universe.factions.count)))
+            StatusMetric(title: "舰队", value: Formatters.wholeNumber(Double(model.universe.fleets.count)))
+            StatusMetric(title: "存档", value: model.canSave ? model.autosaveStatusText : "受保护")
+            StatusMetric(title: "设置", value: model.settingsStatusText)
 
             Spacer()
         }
@@ -544,9 +544,9 @@ private struct OnboardingPanel: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
-                SectionTitle(title: "First Launch", detail: "Quick setup")
+                SectionTitle(title: "首次启动", detail: "快速设置")
 
-                Text("A new commander profile is ready. Review autosave and simulation speed, then save when you want this universe to become the current autosave.")
+                Text("新的指挥官档案已经就绪。确认自动保存和模拟速度后，可以将这个宇宙写入当前自动存档。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -555,7 +555,7 @@ private struct OnboardingPanel: View {
                     Button {
                         model.dismissOnboarding()
                     } label: {
-                        Label("Start Playing", systemImage: "checkmark.circle")
+                        Label("开始游戏", systemImage: "checkmark.circle")
                     }
                     .buttonStyle(.borderedProminent)
 
@@ -563,7 +563,7 @@ private struct OnboardingPanel: View {
                         model.save()
                         model.dismissOnboarding()
                     } label: {
-                        Label("Save Now", systemImage: "square.and.arrow.down")
+                        Label("立即保存", systemImage: "square.and.arrow.down")
                     }
                     .keyboardShortcut("s", modifiers: [.command])
                     .disabled(!model.canSave)
@@ -581,7 +581,7 @@ private struct SettingsAndSavesView: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Settings")
+                    Text("设置")
                         .font(.largeTitle.bold())
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -597,7 +597,7 @@ private struct SettingsAndSavesView: View {
 
             ActivityPanel(model: model)
         }
-        .navigationTitle("Settings")
+        .navigationTitle("设置")
         .onAppear {
             model.refreshSaveSlots()
         }
@@ -638,17 +638,17 @@ private struct SettingsPanel: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 16) {
-                SectionTitle(title: "Simulation", detail: model.settingsStatusText)
+                SectionTitle(title: "模拟", detail: model.settingsStatusText)
 
                 Toggle(isOn: autosaveBinding) {
-                    Label("Autosave queue and fleet actions", systemImage: "externaldrive.badge.checkmark")
+                    Label("队列和舰队操作自动保存", systemImage: "externaldrive.badge.checkmark")
                 }
                 .toggleStyle(.checkbox)
                 .disabled(!model.canSave)
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) {
-                        Label("Game Speed", systemImage: "speedometer")
+                        Label("游戏速度", systemImage: "speedometer")
                             .font(.callout.weight(.semibold))
 
                         Spacer(minLength: 12)
@@ -669,7 +669,7 @@ private struct SettingsPanel: View {
                     spacing: 12
                 ) {
                     SettingPicker(
-                        title: "Offline Intensity",
+                        title: "离线强度",
                         systemImage: "moon.zzz",
                         selection: offlineIntensityBinding,
                         options: GameSettings.OfflineIntensity.allCases
@@ -678,7 +678,7 @@ private struct SettingsPanel: View {
                     }
 
                     SettingPicker(
-                        title: "Difficulty",
+                        title: "难度",
                         systemImage: "dial.medium",
                         selection: difficultyBinding,
                         options: GameSettings.Difficulty.allCases
@@ -698,12 +698,12 @@ private struct SettingsPanel: View {
                     Button {
                         model.save()
                     } label: {
-                        Label("Save Settings", systemImage: "square.and.arrow.down")
+                        Label("保存设置", systemImage: "square.and.arrow.down")
                     }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut("s", modifiers: [.command])
                     .disabled(!model.canSave)
-                    .help(model.canSave ? "Save settings" : "Saving is disabled until a new game starts")
+                    .help(model.canSave ? "保存设置" : "开始新游戏前保存不可用")
                 }
             }
         }
@@ -748,13 +748,13 @@ private struct SaveManagementPanel: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 14) {
-                SectionTitle(title: "Save Management", detail: "\(model.saveSlots.count) slots")
+                SectionTitle(title: "存档管理", detail: "\(model.saveSlots.count) 个槽位")
 
                 HStack(spacing: 10) {
                     Button {
                         model.createBackup()
                     } label: {
-                        Label("Create Backup", systemImage: "archivebox")
+                        Label("创建备份", systemImage: "archivebox")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!canCreateBackup)
@@ -762,12 +762,12 @@ private struct SaveManagementPanel: View {
                     Button {
                         model.refreshSaveSlots()
                     } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                        Label("刷新", systemImage: "arrow.clockwise")
                     }
                 }
 
                 if model.saveSlots.isEmpty {
-                    QueueEmptyLine(title: "Save autosave before creating backups", systemImage: "externaldrive.badge.plus")
+                    QueueEmptyLine(title: "请先保存自动存档再创建备份", systemImage: "externaldrive.badge.plus")
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(model.saveSlots) { slot in
@@ -813,29 +813,29 @@ private struct SaveSlotRow: View {
             Button(role: .destructive) {
                 isConfirmingDelete = true
             } label: {
-                Label(slot.isAutosave ? "Autosave Protected" : "Delete Backup", systemImage: "trash")
+                Label(slot.isAutosave ? "自动存档受保护" : "删除备份", systemImage: "trash")
             }
             .controlSize(.small)
             .disabled(slot.isAutosave)
         }
         .padding(.vertical, 10)
         .confirmationDialog(
-            "Delete Backup",
+            "删除备份",
             isPresented: $isConfirmingDelete,
             titleVisibility: .visible
         ) {
-            Button("Delete \(slot.name)", role: .destructive) {
+            Button("删除 \(slot.name)", role: .destructive) {
                 model.deleteSaveSlot(named: slot.name)
             }
 
-            Button("Cancel", role: .cancel) {}
+            Button("取消", role: .cancel) {}
         } message: {
-            Text("Delete backup \(slot.name)? This cannot be undone.")
+            Text("确定删除备份 \(slot.name)？此操作无法撤销。")
         }
     }
 
     private var slotDetail: String {
-        let kind = slot.isAutosave ? "Autosave" : "Backup"
+        let kind = slot.isAutosave ? "自动存档" : "备份"
         let size = ByteCountFormatter.string(fromByteCount: slot.byteCount, countStyle: .file)
         guard let lastModifiedAt = slot.lastModifiedAt else {
             return "\(kind) - \(size)"
@@ -850,7 +850,7 @@ private struct OfflineSummaryLine: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("Offline Catch-Up", systemImage: "clock.arrow.circlepath")
+            Label("离线补算", systemImage: "clock.arrow.circlepath")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
@@ -909,12 +909,12 @@ private struct PlanetDetailView: View {
                     ConstructionQueueView(planet: planet, model: model)
                     BuildingControlsView(planet: planet, model: model)
                     ShipyardControlsView(planet: planet, model: model)
-                    InventoryCard(title: "Ships", values: planet.shipInventory)
-                    InventoryCard(title: "Defense", values: planet.defenseInventory)
+                    InventoryCard(title: "舰船", values: planet.shipInventory)
+                    InventoryCard(title: "防御", values: planet.defenseInventory)
                     if !planet.missileInventory.isEmpty {
-                        InventoryCard(title: "Missiles", values: planet.missileInventory)
+                        InventoryCard(title: "导弹", values: planet.missileInventory)
                     }
-                    ResourceCard(title: "Debris Field", resources: planet.debrisField)
+                    ResourceCard(title: "残骸带", resources: planet.debrisField)
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -934,15 +934,15 @@ private struct MoonSummaryCard: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
-                SectionTitle(title: "Moon", detail: moon.name)
+                SectionTitle(title: "月球", detail: moon.name)
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 160), alignment: .topLeading)],
                     alignment: .leading,
                     spacing: 10
                 ) {
-                    DispatchMetric(title: "Created", value: "T+\(Formatters.wholeSeconds(moon.createdAt))")
-                    DispatchMetric(title: "Facilities", value: Formatters.wholeNumber(Double(moon.buildingLevels.values.reduce(0, +))))
+                    DispatchMetric(title: "创建时间", value: "T+\(Formatters.wholeSeconds(moon.createdAt))")
+                    DispatchMetric(title: "设施", value: Formatters.wholeNumber(Double(moon.buildingLevels.values.reduce(0, +))))
                 }
             }
         }
@@ -957,22 +957,22 @@ private struct PlanetEconomyView: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 14) {
-                SectionTitle(title: "Economy", detail: model.energyStatusText(for: planet))
+                SectionTitle(title: "经济", detail: model.energyStatusText(for: planet))
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 180), alignment: .topLeading)],
                     alignment: .leading,
                     spacing: 16
                 ) {
-                    EconomyColumn(title: "Resources") {
+                    EconomyColumn(title: "资源") {
                         ResourceGrid(resources: planet.resources)
                     }
 
-                    EconomyColumn(title: "Hourly Rates") {
+                    EconomyColumn(title: "每小时产量") {
                         ResourceRateGrid(rates: model.productionPerHour(for: planet))
                     }
 
-                    EconomyColumn(title: "Storage") {
+                    EconomyColumn(title: "仓储") {
                         ResourceGrid(resources: model.storageCapacity(for: planet).resourceBundle)
                     }
                 }
@@ -999,7 +999,7 @@ private struct ProductionControlsView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 18)
 
-                    Text(kind.rawValue.displayName)
+                    Text(kind.localizedName)
                         .font(.caption.weight(.semibold))
                         .frame(width: 128, alignment: .leading)
 
@@ -1052,7 +1052,7 @@ private struct EnergyMeterView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
-                Label("Energy", systemImage: "bolt.fill")
+                Label("能源", systemImage: "bolt.fill")
                     .font(.callout.weight(.semibold))
 
                 Spacer(minLength: 12)
@@ -1098,12 +1098,12 @@ private struct ConstructionQueueView: View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
-                    title: "Queues",
-                    detail: entries.isEmpty ? "Idle" : "\(entries.count) active"
+                    title: "队列",
+                    detail: entries.isEmpty ? "空闲" : "\(entries.count) 个进行中"
                 )
 
                 if entries.isEmpty {
-                    QueueEmptyLine(title: "No active construction", systemImage: "hammer")
+                    QueueEmptyLine(title: "没有进行中的建造", systemImage: "hammer")
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(entries) { entry in
@@ -1181,7 +1181,7 @@ private struct BuildQueueRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(item.buildingKind.rawValue.displayName)
+                    Text(item.buildingKind.localizedName)
                         .font(.headline)
                         .lineLimit(1)
 
@@ -1214,8 +1214,8 @@ private struct BuildingControlsView: View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
-                    title: "Buildings",
-                    detail: planet.buildQueue.isEmpty ? "Ready" : "Queue busy"
+                    title: "建筑",
+                    detail: planet.buildQueue.isEmpty ? "就绪" : "队列忙碌"
                 )
 
                 VStack(alignment: .leading, spacing: 0) {
@@ -1253,11 +1253,11 @@ private struct BuildingUpgradeRow: View {
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(kind.rawValue.displayName)
+                Text(kind.localizedName)
                     .font(.headline)
                     .lineLimit(1)
 
-                Text("Level \(model.buildingLevel(for: kind, on: planet)) -> \(model.nextBuildingLevel(for: kind, on: planet))")
+                Text("等级 \(model.buildingLevel(for: kind, on: planet)) -> \(model.nextBuildingLevel(for: kind, on: planet))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1281,12 +1281,12 @@ private struct BuildingUpgradeRow: View {
             Button {
                 model.startBuildingUpgrade(planetID: planet.id, kind: kind)
             } label: {
-                Label("Upgrade", systemImage: "arrow.up.circle")
+                Label("升级", systemImage: "arrow.up.circle")
             }
             .controlSize(.small)
             .buttonStyle(.bordered)
             .disabled(!model.canStartBuildingUpgrade(planet: planet, kind: kind))
-            .help(model.buildingUpgradeLockedReason(planet: planet, kind: kind) ?? "Queue building upgrade")
+            .help(model.buildingUpgradeLockedReason(planet: planet, kind: kind) ?? "加入建筑升级队列")
         }
         .padding(.vertical, 10)
     }
@@ -1300,12 +1300,12 @@ private struct ShipyardControlsView: View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 16) {
                 SectionTitle(
-                    title: "Shipyard",
+                    title: "造船厂",
                     detail: shipyardDetail
                 )
 
                 UnitBuildSection(
-                    title: "Ships",
+                    title: "舰船",
                     systemImage: "paperplane",
                     isEmpty: model.availableShipKinds.isEmpty
                 ) {
@@ -1319,7 +1319,7 @@ private struct ShipyardControlsView: View {
                 }
 
                 UnitBuildSection(
-                    title: "Defense",
+                    title: "防御",
                     systemImage: "shield",
                     isEmpty: model.availableDefenseKinds.isEmpty
                 ) {
@@ -1333,7 +1333,7 @@ private struct ShipyardControlsView: View {
                 }
 
                 UnitBuildSection(
-                    title: "Missiles",
+                    title: "导弹",
                     systemImage: "scope",
                     isEmpty: model.availableMissileKinds.isEmpty
                 ) {
@@ -1352,10 +1352,10 @@ private struct ShipyardControlsView: View {
 
     private var shipyardDetail: String {
         if !planet.shipBuildQueue.isEmpty || !planet.defenseBuildQueue.isEmpty {
-            return "Queues active"
+            return "队列进行中"
         }
 
-        return "Ready"
+        return "就绪"
     }
 }
 
@@ -1379,7 +1379,7 @@ private struct UnitBuildSection<Content: View>: View {
                 .lineLimit(1)
 
             if isEmpty {
-                QueueEmptyLine(title: "No rules available", systemImage: "tray")
+                QueueEmptyLine(title: "没有可用规则", systemImage: "tray")
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     content
@@ -1410,11 +1410,11 @@ private struct ShipBuildRow: View {
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(kind.rawValue.displayName)
+                Text(kind.localizedName)
                     .font(.headline)
                     .lineLimit(1)
 
-                Text("Owned \(planet.shipInventory[kind, default: 0])")
+                Text("拥有 \(planet.shipInventory[kind, default: 0])")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1440,12 +1440,12 @@ private struct ShipBuildRow: View {
             Button {
                 model.startShipBuild(planetID: planet.id, kind: kind, quantity: quantity)
             } label: {
-                Label("Build", systemImage: "plus.circle")
+                Label("建造", systemImage: "plus.circle")
             }
             .controlSize(.small)
             .buttonStyle(.bordered)
             .disabled(!model.canStartShipBuild(planet: planet, kind: kind, quantity: quantity))
-            .help(model.shipBuildLockedReason(planet: planet, kind: kind, quantity: quantity) ?? "Queue ship production")
+            .help(model.shipBuildLockedReason(planet: planet, kind: kind, quantity: quantity) ?? "加入舰船生产队列")
         }
         .padding(.vertical, 10)
     }
@@ -1472,11 +1472,11 @@ private struct DefenseBuildRow: View {
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(kind.rawValue.displayName)
+                Text(kind.localizedName)
                     .font(.headline)
                     .lineLimit(1)
 
-                Text("Owned \(planet.defenseInventory[kind, default: 0])")
+                Text("拥有 \(planet.defenseInventory[kind, default: 0])")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1502,12 +1502,12 @@ private struct DefenseBuildRow: View {
             Button {
                 model.startDefenseBuild(planetID: planet.id, kind: kind, quantity: quantity)
             } label: {
-                Label("Build", systemImage: "plus.circle")
+                Label("建造", systemImage: "plus.circle")
             }
             .controlSize(.small)
             .buttonStyle(.bordered)
             .disabled(!model.canStartDefenseBuild(planet: planet, kind: kind, quantity: quantity))
-            .help(model.defenseBuildLockedReason(planet: planet, kind: kind, quantity: quantity) ?? "Queue defense production")
+            .help(model.defenseBuildLockedReason(planet: planet, kind: kind, quantity: quantity) ?? "加入防御生产队列")
         }
         .padding(.vertical, 10)
     }
@@ -1534,11 +1534,11 @@ private struct MissileBuildRow: View {
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(kind.rawValue.displayName)
+                Text(kind.localizedName)
                     .font(.headline)
                     .lineLimit(1)
 
-                Text("Owned \(planet.missileInventory[kind, default: 0])")
+                Text("拥有 \(planet.missileInventory[kind, default: 0])")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1564,12 +1564,12 @@ private struct MissileBuildRow: View {
             Button {
                 model.startMissileBuild(planetID: planet.id, kind: kind, quantity: quantity)
             } label: {
-                Label("Build", systemImage: "plus.circle")
+                Label("建造", systemImage: "plus.circle")
             }
             .controlSize(.small)
             .buttonStyle(.bordered)
             .disabled(!model.canStartMissileBuild(planet: planet, kind: kind, quantity: quantity))
-            .help(model.missileBuildLockedReason(planet: planet, kind: kind, quantity: quantity) ?? "Queue missile production")
+            .help(model.missileBuildLockedReason(planet: planet, kind: kind, quantity: quantity) ?? "加入导弹生产队列")
         }
         .padding(.vertical, 10)
     }
@@ -1611,7 +1611,7 @@ private struct FleetOverviewView: View {
 
     private var originInventorySignature: String {
         guard let origin = model.planet(for: originID) else {
-            return "missing"
+            return "缺失"
         }
 
         let shipCounts = model.availableShipKinds
@@ -1628,7 +1628,7 @@ private struct FleetOverviewView: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Fleets")
+                    Text("舰队")
                         .font(.largeTitle.bold())
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -1656,7 +1656,7 @@ private struct FleetOverviewView: View {
 
             ActivityPanel(model: model)
         }
-        .navigationTitle("Fleets")
+        .navigationTitle("舰队")
         .onAppear(perform: initializeSelection)
         .onChange(of: originID) { _ in
             synchronizeFleetSelection(updateTarget: true)
@@ -1767,30 +1767,30 @@ private struct FleetDispatchPanel: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 16) {
-                SectionTitle(title: "Dispatch", detail: selectedShipTotal == 0 ? "Select ships" : "\(selectedShipTotal) ships")
+                SectionTitle(title: "派遣", detail: selectedShipTotal == 0 ? "选择舰船" : "\(selectedShipTotal) 艘舰船")
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 220), alignment: .topLeading)],
                     alignment: .leading,
                     spacing: 12
                 ) {
-                    PlanetPicker(title: "Origin", selection: $originID, planets: model.playerPlanets, emptyTitle: "No colony")
+                    PlanetPicker(title: "出发地", selection: $originID, planets: model.playerPlanets, emptyTitle: "无殖民地")
                     FleetTargetPicker(
-                        title: "Target",
+                        title: "目标",
                         selection: $targetID,
                         targets: model.fleetTargetSummaries(excluding: originID),
-                        emptyTitle: "No target"
+                        emptyTitle: "无目标"
                     )
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Mission")
+                        Text("任务")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
 
-                        Picker("Mission", selection: $mission) {
+                        Picker("任务", selection: $mission) {
                             ForEach(model.fleetMissionKinds, id: \.rawValue) { option in
-                                Label(option.rawValue.displayName, systemImage: option.systemImage)
+                                Label(option.localizedName, systemImage: option.systemImage)
                                     .tag(option)
                                     .disabled(!model.isMissionAvailable(option, originID: originID, targetID: targetID, ships: selectedShips))
                             }
@@ -1840,7 +1840,7 @@ private struct FleetDispatchPanel: View {
                             cargo: launchCargo
                         )
                     } label: {
-                        Label("Launch", systemImage: "paperplane.fill")
+                        Label("派遣", systemImage: "paperplane.fill")
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!model.canLaunchFleet(
@@ -1869,7 +1869,7 @@ private struct MissileStrikeControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionTitle(title: "Missile Strike", detail: "\(availableMissiles) ready")
+            SectionTitle(title: "导弹打击", detail: "\(availableMissiles) 枚就绪")
 
             HStack(alignment: .center, spacing: 14) {
                 Stepper(value: $missileCount, in: 1...max(1, availableMissiles)) {
@@ -1888,7 +1888,7 @@ private struct MissileStrikeControls: View {
                         missileCount: missileCount
                     )
                 } label: {
-                    Label("Strike", systemImage: "scope")
+                    Label("打击", systemImage: "scope")
                 }
                 .buttonStyle(.bordered)
                 .disabled(!model.canLaunchMissileStrike(
@@ -1986,7 +1986,7 @@ private struct FleetShipSelector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Ships", systemImage: "paperplane")
+            Label("舰船", systemImage: "paperplane")
                 .font(.callout.weight(.semibold))
                 .lineLimit(1)
 
@@ -2008,7 +2008,7 @@ private struct FleetShipSelector: View {
                     }
                 }
             } else {
-                QueueEmptyLine(title: "Select an origin colony", systemImage: "paperplane")
+                QueueEmptyLine(title: "请选择出发殖民地", systemImage: "paperplane")
             }
         }
     }
@@ -2026,11 +2026,11 @@ private struct FleetShipSelectionRow: View {
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(kind.rawValue.displayName)
+                Text(kind.localizedName)
                     .font(.headline)
                     .lineLimit(1)
 
-                Text("Available \(available)")
+                Text("可用 \(available)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -2059,7 +2059,7 @@ private struct CargoEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Cargo", systemImage: "shippingbox")
+            Label("货物", systemImage: "shippingbox")
                 .font(.callout.weight(.semibold))
                 .lineLimit(1)
 
@@ -2068,9 +2068,9 @@ private struct CargoEditor: View {
                 alignment: .leading,
                 spacing: 10
             ) {
-                CargoField(title: "Metal", value: $metalCargo)
-                CargoField(title: "Crystal", value: $crystalCargo)
-                CargoField(title: "Deuterium", value: $deuteriumCargo)
+                CargoField(title: "金属", value: $metalCargo)
+                CargoField(title: "晶体", value: $crystalCargo)
+                CargoField(title: "重氢", value: $deuteriumCargo)
             }
         }
     }
@@ -2117,9 +2117,9 @@ private struct FleetDispatchSummary: View {
             alignment: .leading,
             spacing: 10
         ) {
-            DispatchMetric(title: "Capacity", value: "\(Formatters.wholeNumber(cargoUsed)) / \(Formatters.wholeNumber(cargoCapacity))")
-            DispatchMetric(title: "Fuel", value: fuelText, isWarning: hasShipsSelected && !fuelIsAffordable)
-            DispatchMetric(title: "Travel", value: model.durationText(model.fleetTravelDuration(originID: originID, targetID: targetID, ships: ships)))
+            DispatchMetric(title: "容量", value: "\(Formatters.wholeNumber(cargoUsed)) / \(Formatters.wholeNumber(cargoCapacity))")
+            DispatchMetric(title: "燃料", value: fuelText, isWarning: hasShipsSelected && !fuelIsAffordable)
+            DispatchMetric(title: "航程", value: model.durationText(model.fleetTravelDuration(originID: originID, targetID: targetID, ships: ships)))
         }
     }
 
@@ -2160,12 +2160,12 @@ private struct ActiveFleetsPanel: View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
-                    title: "Active Fleets",
-                    detail: model.activeFleets.isEmpty ? "Idle" : "\(model.activeFleets.count) in flight"
+                    title: "活动舰队",
+                    detail: model.activeFleets.isEmpty ? "空闲" : "\(model.activeFleets.count) 支飞行中"
                 )
 
                 if model.activeFleets.isEmpty {
-                    QueueEmptyLine(title: "No active fleets", systemImage: "paperplane")
+                    QueueEmptyLine(title: "没有活动舰队", systemImage: "paperplane")
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(model.activeFleets) { fleet in
@@ -2195,7 +2195,7 @@ private struct ActiveFleetRow: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(fleet.mission.rawValue.displayName)
+                    Text(fleet.mission.localizedName)
                         .font(.headline)
                         .lineLimit(1)
 
@@ -2252,14 +2252,14 @@ private struct ReportsPanel: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
-                SectionTitle(title: "Reports", detail: reportsDetail)
+                SectionTitle(title: "报告", detail: reportsDetail)
 
                 if model.recentReports.isEmpty && model.recentExplorationEvents.isEmpty {
-                    QueueEmptyLine(title: "No reports recorded", systemImage: "doc.text.magnifyingglass")
+                    QueueEmptyLine(title: "尚无报告记录", systemImage: "doc.text.magnifyingglass")
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ReportRowsSection(
-                            title: "Battle",
+                            title: "战斗",
                             systemImage: "target",
                             reports: battleReports,
                             model: model
@@ -2267,7 +2267,7 @@ private struct ReportsPanel: View {
                         SectionDivider(isVisible: !battleReports.isEmpty && (!missileReports.isEmpty || !espionageReports.isEmpty || !explorationReports.isEmpty || !model.recentExplorationEvents.isEmpty))
 
                         ReportRowsSection(
-                            title: "Missile",
+                            title: "导弹",
                             systemImage: "scope",
                             reports: missileReports,
                             model: model
@@ -2275,7 +2275,7 @@ private struct ReportsPanel: View {
                         SectionDivider(isVisible: !missileReports.isEmpty && (!espionageReports.isEmpty || !explorationReports.isEmpty || !model.recentExplorationEvents.isEmpty))
 
                         ReportRowsSection(
-                            title: "Espionage",
+                            title: "侦察",
                             systemImage: "eye",
                             reports: espionageReports,
                             model: model
@@ -2283,7 +2283,7 @@ private struct ReportsPanel: View {
                         SectionDivider(isVisible: !espionageReports.isEmpty && (!explorationReports.isEmpty || !model.recentExplorationEvents.isEmpty))
 
                         ReportRowsSection(
-                            title: "Exploration",
+                            title: "探索",
                             systemImage: "sparkles",
                             reports: explorationReports,
                             model: model
@@ -2300,7 +2300,7 @@ private struct ReportsPanel: View {
 
     private var reportsDetail: String {
         let count = model.recentReports.count + model.recentExplorationEvents.count
-        return count == 0 ? "None" : "\(count) recent"
+        return count == 0 ? "无" : "\(count) 条近期"
     }
 }
 
@@ -2333,7 +2333,7 @@ private struct ExplorationEventRowsSection: View {
     var body: some View {
         if !events.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                ReportGroupHeader(title: "Exploration Events", systemImage: "sparkles", count: events.count)
+                ReportGroupHeader(title: "探索事件", systemImage: "sparkles", count: events.count)
 
                 ForEach(events) { event in
                     ExplorationEventReportRow(event: event)
@@ -2394,7 +2394,7 @@ private struct ReportRow: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(report.title)
+                    Text(report.localizedTitle)
                         .font(.headline)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
@@ -2408,7 +2408,7 @@ private struct ReportRow: View {
                         .lineLimit(1)
                 }
 
-                Text(report.summary)
+                Text(report.localizedSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -2430,8 +2430,8 @@ private struct ExplorationEventReportRow: View {
 
     var body: some View {
         EventStyleRow(
-            title: event.title,
-            detail: event.message,
+            title: event.localizedTitle,
+            detail: event.localizedMessage,
             accessory: "T+\(Formatters.wholeSeconds(event.time))",
             systemImage: "sparkles"
         )
@@ -2457,7 +2457,7 @@ private struct StarMapView: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Star Map")
+                    Text("星图")
                         .font(.largeTitle.bold())
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -2468,10 +2468,10 @@ private struct StarMapView: View {
                             alignment: .leading,
                             spacing: 12
                         ) {
-                            StrategicMetric(title: "Planets", value: Formatters.wholeNumber(Double(allPlanets.count)))
-                            StrategicMetric(title: "Owned", value: Formatters.wholeNumber(Double(model.playerPlanets.count)))
-                            StrategicMetric(title: "Debris", value: Formatters.wholeNumber(Double(debrisSystemCount)))
-                            StrategicMetric(title: "Fleet Marks", value: Formatters.wholeNumber(Double(activeFleetTouchCount)))
+                            StrategicMetric(title: "星球", value: Formatters.wholeNumber(Double(allPlanets.count)))
+                            StrategicMetric(title: "拥有", value: Formatters.wholeNumber(Double(model.playerPlanets.count)))
+                            StrategicMetric(title: "残骸", value: Formatters.wholeNumber(Double(debrisSystemCount)))
+                            StrategicMetric(title: "舰队标记", value: Formatters.wholeNumber(Double(activeFleetTouchCount)))
                         }
                     }
                     .frame(maxWidth: 860, alignment: .leading)
@@ -2490,7 +2490,7 @@ private struct StarMapView: View {
 
             ActivityPanel(model: model)
         }
-        .navigationTitle("Star Map")
+        .navigationTitle("星图")
     }
 }
 
@@ -2500,10 +2500,10 @@ private struct StarMapSectionView: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
-                SectionTitle(title: section.kind.title, detail: "\(section.planets.count) systems")
+                SectionTitle(title: section.kind.title, detail: "\(section.planets.count) 个星系")
 
                 if section.planets.isEmpty {
-                    QueueEmptyLine(title: "No systems in this section", systemImage: section.kind.systemImage)
+                    QueueEmptyLine(title: "此分区暂无星系", systemImage: section.kind.systemImage)
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(section.planets) { summary in
@@ -2560,7 +2560,7 @@ private struct StarMapPlanetRow: View {
 
                     if summary.debrisTotal > 0 {
                         StrategicChip(
-                            title: "Debris \(Formatters.wholeNumber(summary.debrisTotal))",
+                            title: "残骸 \(Formatters.wholeNumber(summary.debrisTotal))",
                             systemImage: "sparkles",
                             tint: .orange
                         )
@@ -2568,7 +2568,7 @@ private struct StarMapPlanetRow: View {
 
                     if summary.friendlyFleetCount > 0 {
                         StrategicChip(
-                            title: "Fleet \(summary.friendlyFleetCount)",
+                            title: "舰队 \(summary.friendlyFleetCount)",
                             systemImage: "paperplane",
                             tint: .blue
                         )
@@ -2576,14 +2576,14 @@ private struct StarMapPlanetRow: View {
 
                     if summary.otherFleetCount > 0 {
                         StrategicChip(
-                            title: "Contact \(summary.otherFleetCount)",
+                            title: "接触 \(summary.otherFleetCount)",
                             systemImage: "scope",
                             tint: .red
                         )
                     }
 
                     StrategicChip(
-                        title: summary.isExploredByPlayer ? "Explored" : "Unscouted",
+                        title: summary.isExploredByPlayer ? "已侦察" : "未侦察",
                         systemImage: summary.isExploredByPlayer ? "checkmark.seal" : "questionmark.circle",
                         tint: summary.isExploredByPlayer ? .green : .secondary
                     )
@@ -2595,18 +2595,18 @@ private struct StarMapPlanetRow: View {
 
     private var ownershipTitle: String {
         if summary.isPlayerOwned {
-            return "Owned"
+            return "拥有"
         }
 
         if !summary.isVisible {
-            return "Unknown"
+            return "未知"
         }
 
         if summary.ownerKind == .ai {
             return "AI"
         }
 
-        return "Neutral"
+        return "中立"
     }
 
     private var systemImage: String {
@@ -2653,12 +2653,12 @@ private struct ExplorationSummaryPanel: View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
-                    title: "Exploration Intel",
-                    detail: summaries.isEmpty ? "No records" : "\(summaries.count) recent"
+                    title: "探索情报",
+                    detail: summaries.isEmpty ? "无记录" : "\(summaries.count) 条近期"
                 )
 
                 if summaries.isEmpty {
-                    QueueEmptyLine(title: "No explored systems recorded", systemImage: "sparkles")
+                    QueueEmptyLine(title: "尚无已探索星系记录", systemImage: "sparkles")
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(summaries) { summary in
@@ -2706,14 +2706,14 @@ private struct ExplorationSummaryRow: View {
                         .lineLimit(1)
                 }
 
-                Text("Owner \(summary.ownerName)")
+                Text("归属 \(summary.ownerName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
-                StrategicResourceLine(title: "Reward", resources: summary.reward)
-                StrategicResourceLine(title: "Resources", resources: summary.discoveredResources)
-                StrategicResourceLine(title: "Debris", resources: summary.discoveredDebris)
+                StrategicResourceLine(title: "奖励", resources: summary.reward)
+                StrategicResourceLine(title: "资源", resources: summary.discoveredResources)
+                StrategicResourceLine(title: "残骸", resources: summary.discoveredDebris)
             }
         }
         .padding(.vertical, 10)
@@ -2727,17 +2727,17 @@ private struct RankingsView: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Rankings")
+                    Text("排名")
                         .font(.largeTitle.bold())
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
 
                     PanelSurface {
                         VStack(alignment: .leading, spacing: 12) {
-                            SectionTitle(title: "Faction Standings", detail: "\(model.factionRankings.count) factions")
+                            SectionTitle(title: "势力排名", detail: "\(model.factionRankings.count) 个势力")
 
                             if model.factionRankings.isEmpty {
-                                QueueEmptyLine(title: "No rankings available", systemImage: "list.number")
+                                QueueEmptyLine(title: "暂无排名", systemImage: "list.number")
                             } else {
                                 VStack(alignment: .leading, spacing: 0) {
                                     ForEach(model.factionRankings) { ranking in
@@ -2761,7 +2761,7 @@ private struct RankingsView: View {
 
             ActivityPanel(model: model)
         }
-        .navigationTitle("Rankings")
+        .navigationTitle("排名")
     }
 }
 
@@ -2783,7 +2783,7 @@ private struct RankingRow: View {
                         .lineLimit(1)
 
                     if isPlayer {
-                        StrategicChip(title: "Player", systemImage: "person.crop.circle", tint: .blue)
+                        StrategicChip(title: "玩家", systemImage: "person.crop.circle", tint: .blue)
                     }
 
                     Spacer(minLength: 12)
@@ -2802,11 +2802,11 @@ private struct RankingRow: View {
                     alignment: .leading,
                     spacing: 8
                 ) {
-                    StrategicMetric(title: "Economy", value: Formatters.wholeNumber(ranking.economyScore))
-                    StrategicMetric(title: "Fleet", value: Formatters.wholeNumber(ranking.fleetScore))
-                    StrategicMetric(title: "Research", value: Formatters.wholeNumber(ranking.researchScore))
-                    StrategicMetric(title: "Planets", value: Formatters.wholeNumber(ranking.planetScore))
-                    StrategicMetric(title: "Defense", value: Formatters.wholeNumber(ranking.defenseScore))
+                    StrategicMetric(title: "经济", value: Formatters.wholeNumber(ranking.economyScore))
+                    StrategicMetric(title: "舰队", value: Formatters.wholeNumber(ranking.fleetScore))
+                    StrategicMetric(title: "研究", value: Formatters.wholeNumber(ranking.researchScore))
+                    StrategicMetric(title: "星球", value: Formatters.wholeNumber(ranking.planetScore))
+                    StrategicMetric(title: "防御", value: Formatters.wholeNumber(ranking.defenseScore))
                 }
             }
         }
@@ -2837,15 +2837,15 @@ private struct VictoryProgressView: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Victory")
+                    Text("胜利")
                         .font(.largeTitle.bold())
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
 
                     VictoryBannerView(summary: model.victoryBannerSummary)
 
-                    VictoryRoutePanel(title: "Player Routes", routes: playerRoutes)
-                    VictoryRoutePanel(title: "Route Leaders", routes: leadingRoutes)
+                    VictoryRoutePanel(title: "玩家路线", routes: playerRoutes)
+                    VictoryRoutePanel(title: "路线领先者", routes: leadingRoutes)
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2855,7 +2855,7 @@ private struct VictoryProgressView: View {
 
             ActivityPanel(model: model)
         }
-        .navigationTitle("Victory")
+        .navigationTitle("胜利")
     }
 }
 
@@ -2894,10 +2894,10 @@ private struct VictoryRoutePanel: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
-                SectionTitle(title: title, detail: routes.isEmpty ? "No progress" : "\(routes.count) routes")
+                SectionTitle(title: title, detail: routes.isEmpty ? "无进度" : "\(routes.count) 条路线")
 
                 if routes.isEmpty {
-                    QueueEmptyLine(title: "No route progress available", systemImage: "flag")
+                    QueueEmptyLine(title: "暂无胜利路线进度", systemImage: "flag")
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(routes) { route in
@@ -2926,7 +2926,7 @@ private struct VictoryRouteRow: View {
 
             VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(route.route.rawValue.displayName)
+                    Text(route.route.localizedName)
                         .font(.headline)
                         .lineLimit(1)
 
@@ -2964,17 +2964,17 @@ private struct FactionRelationsView: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Relations")
+                    Text("关系")
                         .font(.largeTitle.bold())
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
 
                     PanelSurface {
                         VStack(alignment: .leading, spacing: 12) {
-                            SectionTitle(title: "Faction Relations", detail: "\(model.relationSummaries.count) contacts")
+                            SectionTitle(title: "势力关系", detail: "\(model.relationSummaries.count) 个接触")
 
                             if model.relationSummaries.isEmpty {
-                                QueueEmptyLine(title: "No faction contacts available", systemImage: "person.2.wave.2")
+                                QueueEmptyLine(title: "暂无势力接触", systemImage: "person.2.wave.2")
                             } else {
                                 VStack(alignment: .leading, spacing: 0) {
                                     ForEach(model.relationSummaries) { summary in
@@ -2998,7 +2998,7 @@ private struct FactionRelationsView: View {
 
             ActivityPanel(model: model)
         }
-        .navigationTitle("Relations")
+        .navigationTitle("关系")
     }
 }
 
@@ -3018,7 +3018,7 @@ private struct FactionRelationRow: View {
                         .lineLimit(1)
 
                     StrategicChip(
-                        title: summary.posture.rawValue.displayName,
+                        title: summary.posture.localizedName,
                         systemImage: summary.posture.systemImage,
                         tint: summary.posture.tint
                     )
@@ -3041,10 +3041,10 @@ private struct FactionRelationRow: View {
                     alignment: .leading,
                     spacing: 8
                 ) {
-                    StrategicMetric(title: "Strategy", value: summary.strategy.rawValue.displayName)
-                    StrategicMetric(title: "Threat", value: "\(summary.threatScore)")
-                    StrategicMetric(title: "Attacks", value: "\(summary.attackCount)")
-                    StrategicMetric(title: "Last", value: lastInteractionText)
+                    StrategicMetric(title: "策略", value: summary.strategy.localizedName)
+                    StrategicMetric(title: "威胁", value: "\(summary.threatScore)")
+                    StrategicMetric(title: "攻击", value: "\(summary.attackCount)")
+                    StrategicMetric(title: "最近", value: lastInteractionText)
                 }
             }
         }
@@ -3052,7 +3052,7 @@ private struct FactionRelationRow: View {
     }
 
     private var lastInteractionText: String {
-        summary.lastInteractionTime > 0 ? "T+\(Formatters.wholeSeconds(summary.lastInteractionTime))" : "None"
+        summary.lastInteractionTime > 0 ? "T+\(Formatters.wholeSeconds(summary.lastInteractionTime))" : "无"
     }
 }
 
@@ -3063,7 +3063,7 @@ private struct ResearchOverviewView: View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text("Research")
+                    Text("研究")
                         .font(.largeTitle.bold())
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -3079,7 +3079,7 @@ private struct ResearchOverviewView: View {
 
             ActivityPanel(model: model)
         }
-        .navigationTitle("Research")
+        .navigationTitle("研究")
     }
 }
 
@@ -3094,12 +3094,12 @@ private struct ResearchQueueView: View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
-                    title: "Research Queue",
-                    detail: queue.isEmpty ? "Idle" : "\(queue.count) active"
+                    title: "研究队列",
+                    detail: queue.isEmpty ? "空闲" : "\(queue.count) 个进行中"
                 )
 
                 if queue.isEmpty {
-                    QueueEmptyLine(title: "No active research", systemImage: "atom")
+                    QueueEmptyLine(title: "没有进行中的研究", systemImage: "atom")
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(queue) { item in
@@ -3129,7 +3129,7 @@ private struct ResearchQueueRow: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(item.technologyKind.rawValue.displayName)
+                    Text(item.technologyKind.localizedName)
                         .font(.headline)
                         .lineLimit(1)
 
@@ -3161,8 +3161,8 @@ private struct ResearchControlsView: View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(
-                    title: "Technologies",
-                    detail: model.playerFaction?.researchQueue.isEmpty == false ? "Queue busy" : "Ready"
+                    title: "科技",
+                    detail: model.playerFaction?.researchQueue.isEmpty == false ? "队列忙碌" : "就绪"
                 )
 
                 VStack(alignment: .leading, spacing: 0) {
@@ -3199,11 +3199,11 @@ private struct ResearchUpgradeRow: View {
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(technology.rawValue.displayName)
+                Text(technology.localizedName)
                     .font(.headline)
                     .lineLimit(1)
 
-                Text("Level \(model.researchLevel(for: technology)) -> \(model.nextResearchLevel(for: technology))")
+                Text("等级 \(model.researchLevel(for: technology)) -> \(model.nextResearchLevel(for: technology))")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -3227,12 +3227,12 @@ private struct ResearchUpgradeRow: View {
             Button {
                 model.startResearch(technology)
             } label: {
-                Label("Research", systemImage: "play.circle")
+                Label("研究", systemImage: "play.circle")
             }
             .controlSize(.small)
             .buttonStyle(.bordered)
             .disabled(!model.canStartResearch(technology))
-            .help(model.researchLockedReason(technology) ?? "Queue research")
+            .help(model.researchLockedReason(technology) ?? "加入研究队列")
         }
         .padding(.vertical, 10)
     }
@@ -3379,9 +3379,9 @@ private struct StrategicResourceLine: View {
             Text(title)
                 .foregroundStyle(.secondary)
 
-            Text("M \(Formatters.wholeNumber(resources.metal))")
-            Text("C \(Formatters.wholeNumber(resources.crystal))")
-            Text("D \(Formatters.wholeNumber(resources.deuterium))")
+            Text("金 \(Formatters.wholeNumber(resources.metal))")
+            Text("晶 \(Formatters.wholeNumber(resources.crystal))")
+            Text("重 \(Formatters.wholeNumber(resources.deuterium))")
         }
         .font(.caption)
         .monospacedDigit()
@@ -3398,10 +3398,10 @@ private struct ResourceCostLine: View {
     var body: some View {
         if let cost {
             HStack(spacing: 8) {
-                Text("M \(Formatters.wholeNumber(cost.metal))")
-                Text("C \(Formatters.wholeNumber(cost.crystal))")
-                Text("D \(Formatters.wholeNumber(cost.deuterium))")
-                Text("Time \(durationText)")
+                Text("金 \(Formatters.wholeNumber(cost.metal))")
+                Text("晶 \(Formatters.wholeNumber(cost.crystal))")
+                Text("重 \(Formatters.wholeNumber(cost.deuterium))")
+                Text("时间 \(durationText)")
             }
             .font(.caption)
             .foregroundStyle(canAfford ? Color.secondary : Color.red)
@@ -3409,7 +3409,7 @@ private struct ResourceCostLine: View {
             .lineLimit(1)
             .minimumScaleFactor(0.8)
         } else {
-            Text("Rule unavailable")
+            Text("规则不可用")
                 .font(.caption)
                 .foregroundStyle(.red)
                 .lineLimit(1)
@@ -3477,7 +3477,7 @@ private struct InventoryCard<Key: RawRepresentable & Hashable>: View where Key.R
             SectionTitle(title: title, detail: nil)
 
             if values.isEmpty {
-                EmptyStateView(title: "None", systemImage: "tray")
+                EmptyStateView(title: "无", systemImage: "tray")
             } else {
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
                     ForEach(values.keys.sorted(by: { $0.rawValue < $1.rawValue }), id: \.self) { key in
@@ -3542,6 +3542,276 @@ private struct EmptyStateView: View {
 }
 
 private extension GameEvent {
+    var localizedTitle: String {
+        LocalizedGameText.title(title)
+    }
+
+    var localizedMessage: String {
+        LocalizedGameText.message(message)
+    }
+}
+
+private extension Report {
+    var localizedTitle: String {
+        LocalizedGameText.title(title)
+    }
+
+    var localizedSummary: String {
+        LocalizedGameText.reportSummary(summary)
+    }
+}
+
+private enum LocalizedGameText {
+    static func title(_ text: String) -> String {
+        switch text {
+        case "Command Link Established":
+            return "指挥链路已建立"
+        case "Economy Updated":
+            return "经济已更新"
+        case "Simulation Advanced":
+            return "模拟已推进"
+        case "Offline Catch-Up Complete":
+            return "离线补算完成"
+        case "Construction Complete":
+            return "建造完成"
+        case "Research Complete":
+            return "研究完成"
+        case "Ship Construction Complete":
+            return "舰船建造完成"
+        case "Defense Construction Complete":
+            return "防御建造完成"
+        case "Missile Construction Complete":
+            return "导弹建造完成"
+        case "Fleet Launched":
+            return "舰队已派遣"
+        case "Transport Delivered":
+            return "运输已送达"
+        case "Debris Recovered":
+            return "残骸已回收"
+        case "Exploration Complete":
+            return "探索完成"
+        case "Colony Established":
+            return "殖民地已建立"
+        case "Combat Resolved":
+            return "战斗已结算"
+        case "Espionage Report":
+            return "侦察报告"
+        case "Fleet Lost Contact":
+            return "舰队失联"
+        case "Fleet Returned":
+            return "舰队返航"
+        case "Missile Strike":
+            return "导弹打击"
+        case "Victory Achieved":
+            return "达成胜利"
+        default:
+            if let coordinate = suffix(in: text, after: "Battle deferred at ") {
+                return "战斗延期 \(coordinate)"
+            }
+            if let coordinate = suffix(in: text, after: "Battle at ") {
+                return "战斗报告 \(coordinate)"
+            }
+            if let coordinate = suffix(in: text, after: "Espionage at ") {
+                return "侦察报告 \(coordinate)"
+            }
+            if let coordinate = suffix(in: text, after: "Exploration at ") {
+                return "探索报告 \(coordinate)"
+            }
+            if let coordinate = suffix(in: text, after: "Missile strike at ") {
+                return "导弹打击 \(coordinate)"
+            }
+            return text.displayName
+        }
+    }
+
+    static func message(_ text: String) -> String {
+        switch text {
+        case "Your first colony is online. Rival factions are already moving.":
+            return "第一座殖民地已上线，敌对势力已经开始行动。"
+        case "Combat deferred because unit rules are incomplete.":
+            return "单位规则不完整，战斗已延期。"
+        case "The attacker won and recovered loot.":
+            return "攻击方获胜并带回战利品。"
+        case "The defender held the field.":
+            return "防守方守住了战场。"
+        default:
+            if let localized = localizedFleetLaunch(text) {
+                return localized
+            }
+            if let localized = localizedFleetResolution(text) {
+                return localized
+            }
+            if let localized = localizedVictory(text) {
+                return localized
+            }
+            if let localized = localizedCompletion(text) {
+                return localized
+            }
+            if let localized = localizedMissileStrike(text) {
+                return localized
+            }
+            if let localized = localizedSimulationTick(text) {
+                return localized
+            }
+            if let localized = localizedEconomyTick(text) {
+                return localized
+            }
+            if let localized = localizedOfflineSummary(text) {
+                return localized
+            }
+            return text
+        }
+    }
+
+    static func reportSummary(_ text: String) -> String {
+        if let localized = localizedEspionageSummary(text) {
+            return localized
+        }
+        if let localized = localizedExplorationSummary(text) {
+            return localized
+        }
+        if let localized = localizedMissileSummary(text) {
+            return localized
+        }
+        return message(text)
+    }
+
+    private static func localizedFleetLaunch(_ text: String) -> String? {
+        guard let launchedRange = text.range(of: " launched a ") else {
+            return nil
+        }
+        let origin = String(text[..<launchedRange.lowerBound])
+        let rest = String(text[launchedRange.upperBound...])
+        guard let missionRange = rest.range(of: " fleet to ") else {
+            return nil
+        }
+        let mission = String(rest[..<missionRange.lowerBound]).displayName
+        let target = trimmedPeriod(String(rest[missionRange.upperBound...]))
+        return "\(origin) 派遣\(mission)舰队前往 \(target)。"
+    }
+
+    private static func localizedFleetResolution(_ text: String) -> String? {
+        guard let range = text.range(of: " fleet "),
+              let resolvedRange = text.range(of: " resolved at ")
+        else {
+            return nil
+        }
+        let mission = String(text[..<range.lowerBound]).lowercased().displayName
+        let target = trimmedPeriod(String(text[resolvedRange.upperBound...]))
+        return "\(mission)舰队已在 \(target) 结算。"
+    }
+
+    private static func localizedCompletion(_ text: String) -> String? {
+        guard let completedRange = text.range(of: " completed ") else {
+            return nil
+        }
+        let subject = String(text[..<completedRange.lowerBound])
+        let detail = trimmedPeriod(String(text[completedRange.upperBound...]))
+
+        if let levelRange = detail.range(of: " level ") {
+            let name = String(detail[..<levelRange.lowerBound]).displayName
+            let level = String(detail[levelRange.upperBound...])
+            return "\(subject) 完成\(name)等级 \(level)。"
+        }
+
+        let parts = detail.split(separator: " ", maxSplits: 1).map(String.init)
+        if parts.count == 2 {
+            return "\(subject) 完成 \(parts[0]) 个\(parts[1].displayName)。"
+        }
+
+        return nil
+    }
+
+    private static func localizedMissileStrike(_ text: String) -> String? {
+        guard let launchedRange = text.range(of: " launched "),
+              let missilesRange = text.range(of: " missiles at ")
+        else {
+            return nil
+        }
+        let origin = String(text[..<launchedRange.lowerBound])
+        let count = String(text[launchedRange.upperBound..<missilesRange.lowerBound])
+        let target = trimmedPeriod(String(text[missilesRange.upperBound...]))
+        return "\(origin) 向 \(target) 发射 \(count) 枚导弹。"
+    }
+
+    private static func localizedSimulationTick(_ text: String) -> String? {
+        guard let seconds = suffix(in: text, after: "Advanced the universe by ") else {
+            return nil
+        }
+        return "宇宙已推进 \(trimmedPeriod(seconds).replacingOccurrences(of: " seconds", with: " 秒"))。"
+    }
+
+    private static func localizedEconomyTick(_ text: String) -> String? {
+        guard text.hasPrefix("Produced resources for ") else {
+            return nil
+        }
+        return "已为己方星球结算资源生产。"
+    }
+
+    private static func localizedOfflineSummary(_ text: String) -> String? {
+        guard text.hasPrefix("Caught up ") else {
+            return nil
+        }
+        return "离线进度已补算，并汇总了期间产生的事件。"
+    }
+
+    private static func localizedVictory(_ text: String) -> String? {
+        guard let range = text.range(of: " completed the "),
+              text.hasSuffix(" victory route.")
+        else {
+            return nil
+        }
+        let faction = String(text[..<range.lowerBound])
+        let route = String(text[range.upperBound...]).replacingOccurrences(of: " victory route.", with: "").displayName
+        return "\(faction) 已完成\(route)胜利路线。"
+    }
+
+    private static func localizedEspionageSummary(_ text: String) -> String? {
+        guard text.hasPrefix("Resources ") else {
+            return nil
+        }
+        return text
+            .replacingOccurrences(of: "Resources ", with: "资源 ")
+            .replacingOccurrences(of: "; ships ", with: "；舰船 ")
+            .replacingOccurrences(of: "; defenses ", with: "；防御 ")
+            .replacingOccurrences(of: ".", with: "。")
+    }
+
+    private static func localizedExplorationSummary(_ text: String) -> String? {
+        guard text.hasPrefix("Exploration found a ") else {
+            return nil
+        }
+        return text
+            .replacingOccurrences(of: "Exploration found a neutral target", with: "探索发现中立目标")
+            .replacingOccurrences(of: "Exploration found a occupied target", with: "探索发现已占领目标")
+            .replacingOccurrences(of: "; reward ", with: "；奖励 ")
+            .replacingOccurrences(of: "; resources ", with: "；资源 ")
+            .replacingOccurrences(of: "; debris ", with: "；残骸 ")
+            .replacingOccurrences(of: ".", with: "。")
+    }
+
+    private static func localizedMissileSummary(_ text: String) -> String? {
+        guard text.hasPrefix("Interplanetary missiles damaged ") else {
+            return nil
+        }
+        return text
+            .replacingOccurrences(of: "Interplanetary missiles damaged ", with: "星际导弹摧毁 ")
+            .replacingOccurrences(of: " defensive units.", with: " 个防御单位。")
+    }
+
+    private static func suffix(in text: String, after prefix: String) -> String? {
+        guard text.hasPrefix(prefix) else {
+            return nil
+        }
+        return String(text.dropFirst(prefix.count))
+    }
+
+    private static func trimmedPeriod(_ text: String) -> String {
+        text.hasSuffix(".") ? String(text.dropLast()) : text
+    }
+}
+
+private extension GameEvent {
     var symbolName: String {
         switch kind {
         case .system:
@@ -3563,15 +3833,15 @@ private extension GameEvent {
 private enum Formatters {
     static func wholeSeconds(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite else {
-            return "unknown"
+            return "未知"
         }
 
-        return wholeNumber(seconds) + "s"
+        return wholeNumber(seconds) + " 秒"
     }
 
     static func wholeNumber(_ value: Double) -> String {
         guard value.isFinite else {
-            return "unknown"
+            return "未知"
         }
 
         return value.formatted(.number.precision(.fractionLength(0)))
@@ -3579,7 +3849,7 @@ private enum Formatters {
 
     static func signedWholeNumber(_ value: Double) -> String {
         guard value.isFinite else {
-            return "unknown"
+            return "未知"
         }
 
         let formatted = wholeNumber(abs(value))
@@ -3588,7 +3858,7 @@ private enum Formatters {
 
     static func percent(_ value: Double) -> String {
         guard value.isFinite else {
-            return "unknown"
+            return "未知"
         }
 
         return value.formatted(.percent.precision(.fractionLength(0)))
@@ -3791,17 +4061,5 @@ private extension Report.Kind {
         case .missile:
             return "scope"
         }
-    }
-}
-
-private extension String {
-    var displayName: String {
-        reduce(into: "") { result, character in
-            if character.isUppercase, !result.isEmpty {
-                result.append(" ")
-            }
-            result.append(character)
-        }
-        .capitalized
     }
 }

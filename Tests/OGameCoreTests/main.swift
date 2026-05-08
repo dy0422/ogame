@@ -239,6 +239,18 @@ func testFastSkirmishUnitRulesCoverShipsAndDefenses() {
     require((defenseRules[.rocketLauncher]?.attack ?? 0) > 0, "Rocket launcher should contribute attack to combat")
 }
 
+func testGameContentUsesChineseDisplayNames() {
+    requireEqual(BuildingKind.metalMine.localizedName, "金属矿", "Building names should be shown in Chinese")
+    requireEqual(TechnologyKind.hyperspaceDrive.localizedName, "超空间引擎", "Technology names should be shown in Chinese")
+    requireEqual(ShipKind.smallCargo.localizedName, "小型运输舰", "Ship names should be shown in Chinese")
+    requireEqual(DefenseKind.rocketLauncher.localizedName, "火箭发射器", "Defense names should be shown in Chinese")
+    requireEqual(MissileKind.interplanetaryMissile.localizedName, "星际导弹", "Missile names should be shown in Chinese")
+    requireEqual(Fleet.Mission.attack.localizedName, "攻击", "Mission names should be shown in Chinese")
+    requireEqual(VictoryRoute.technology.localizedName, "科技", "Victory routes should be shown in Chinese")
+    requireEqual(Faction.Strategy.raider.localizedName, "掠袭者", "Faction strategies should be shown in Chinese")
+    requireEqual(RelationPosture.hostile.localizedName, "敌对", "Relation postures should be shown in Chinese")
+}
+
 func testRuleSetBalanceRulesUseRawValueKeyedJSONObjects() throws {
     let data = try JSONEncoder().encode(RuleSet.fastSkirmish)
     let json = requireDictionary(try JSONSerialization.jsonObject(with: data), "RuleSet should encode as a JSON object")
@@ -3667,12 +3679,12 @@ func testUIHelpersExposeLockedReason() {
 
     requireEqual(
         technologyGate.lockedReason,
-        "Requires impulseDrive level 2",
+        "需要脉冲引擎等级 2",
         "Technology requirements should expose compact locked reason text"
     )
     requireEqual(
         buildingGate.lockedReason,
-        "Requires shipyard level 6",
+        "需要造船厂等级 6",
         "Building requirements should expose compact locked reason text"
     )
 }
@@ -5059,6 +5071,7 @@ testResourceStorageConvertsToResourceDisplayBundle()
 testFastSkirmishBuildingRulesCoverEarlyEconomy()
 testFastSkirmishResearchRulesCoverEarlyTechnologies()
 testFastSkirmishUnitRulesCoverShipsAndDefenses()
+testGameContentUsesChineseDisplayNames()
 try testRuleSetBalanceRulesUseRawValueKeyedJSONObjects()
 try testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults()
 try testBuildQueueItemRoundTripsThroughJSON()
