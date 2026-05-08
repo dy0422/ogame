@@ -251,6 +251,36 @@ func testGameContentUsesChineseDisplayNames() {
     requireEqual(RelationPosture.hostile.localizedName, "敌对", "Relation postures should be shown in Chinese")
 }
 
+func testGameContentExplainsBuildingAndTechnologyEffects() {
+    for building in BuildingKind.allCases {
+        require(
+            building.effectDescription.count >= 8,
+            "\(building.rawValue) should have a useful Chinese effect description"
+        )
+        require(
+            !building.effectDescription.contains(building.rawValue),
+            "\(building.rawValue) description should not fall back to raw values"
+        )
+    }
+
+    for technology in TechnologyKind.allCases {
+        require(
+            technology.effectDescription.count >= 8,
+            "\(technology.rawValue) should have a useful Chinese effect description"
+        )
+        require(
+            !technology.effectDescription.contains(technology.rawValue),
+            "\(technology.rawValue) description should not fall back to raw values"
+        )
+    }
+
+    require(BuildingKind.metalMine.effectDescription.contains("金属"), "Metal mine should explain metal production")
+    require(BuildingKind.shipyard.effectDescription.contains("舰船"), "Shipyard should explain ship construction")
+    require(BuildingKind.researchLab.effectDescription.contains("研究"), "Research lab should explain research usage")
+    require(TechnologyKind.espionage.effectDescription.contains("侦察"), "Espionage should explain scouting")
+    require(TechnologyKind.combustionDrive.effectDescription.contains("航速"), "Drive tech should explain travel speed")
+}
+
 func testRuleSetBalanceRulesUseRawValueKeyedJSONObjects() throws {
     let data = try JSONEncoder().encode(RuleSet.fastSkirmish)
     let json = requireDictionary(try JSONSerialization.jsonObject(with: data), "RuleSet should encode as a JSON object")
@@ -5361,6 +5391,7 @@ testFastSkirmishUnitRulesCoverShipsAndDefenses()
 testFastSkirmishLateGameRulesIncludeExpandedShipsAndInterceptors()
 testFastSkirmishMoonFacilityRulesExposeLateGameRequirements()
 testGameContentUsesChineseDisplayNames()
+testGameContentExplainsBuildingAndTechnologyEffects()
 try testRuleSetBalanceRulesUseRawValueKeyedJSONObjects()
 try testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults()
 try testBuildQueueItemRoundTripsThroughJSON()

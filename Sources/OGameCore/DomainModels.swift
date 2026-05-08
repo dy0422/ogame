@@ -1598,6 +1598,41 @@ public extension BuildingKind {
             return "跳跃门"
         }
     }
+
+    var effectDescription: String {
+        switch self {
+        case .metalMine:
+            return "提升金属产量，是早期建筑、舰船和防御扩张的基础资源来源。"
+        case .crystalMine:
+            return "提升晶体产量，支撑研究、电子设备和中后期舰船制造。"
+        case .deuteriumSynthesizer:
+            return "生产重氢，用于舰队燃料、高级研究和部分重型舰船。"
+        case .solarPlant:
+            return "提供能源，能源不足时矿场产出会下降，前期需要持续配套升级。"
+        case .roboticsFactory:
+            return "缩短建筑建造时间，并帮助更快解锁造船厂和生产节奏。"
+        case .shipyard:
+            return "解锁并建造舰船、防御和导弹，是侦察、运输、殖民与战斗的入口。"
+        case .researchLab:
+            return "开启科技研究，提高解锁速度，是舰队、导弹和后期设施的核心前置。"
+        case .metalStorage:
+            return "提高金属容量，避免离线或高产量时金属达到上限而停止增长。"
+        case .crystalStorage:
+            return "提高晶体容量，保障研究和高级舰船制造所需的晶体储备。"
+        case .deuteriumTank:
+            return "提高重氢容量，适合准备远航、殖民、攻击和高阶科技时升级。"
+        case .naniteFactory:
+            return "大幅加速建筑和造船效率，是中后期爆发生产与快速补舰的关键设施。"
+        case .missileSilo:
+            return "解锁拦截导弹和星际导弹，用于防御来袭导弹或削弱敌方防御。"
+        case .lunarBase:
+            return "扩展月球设施空间，是感应阵和跳跃门等月球系统的基础。"
+        case .sensorPhalanx:
+            return "侦测目标星球附近舰队动向，帮助判断敌军抵达和返航窗口。"
+        case .jumpGate:
+            return "连接月球之间的舰队调动，后期可快速转移主力舰队。"
+        }
+    }
 }
 
 public extension BuildingKind {
@@ -1633,6 +1668,29 @@ public extension TechnologyKind {
             return "脉冲引擎"
         case .hyperspaceDrive:
             return "超空间引擎"
+        }
+    }
+
+    var effectDescription: String {
+        switch self {
+        case .espionage:
+            return "提升侦察能力，解锁探测器并让你更清楚目标资源、舰队和防御。"
+        case .computer:
+            return "提升指挥与计算能力，是纳米工厂和高效舰队调度的重要前置。"
+        case .weapons:
+            return "提高舰船和防御的攻击表现，让突袭与正面战斗更有破坏力。"
+        case .shielding:
+            return "强化护盾承受能力，提高舰队和防御在交火中的生存时间。"
+        case .armor:
+            return "提升装甲结构，降低战损风险，适合长期冲突和防守路线。"
+        case .energy:
+            return "支撑高级设施、太阳能卫星和超空间科技，是后期科技树的能源基础。"
+        case .combustionDrive:
+            return "提升基础舰船航速，影响运输舰、回收船等早期舰队的行动效率。"
+        case .impulseDrive:
+            return "提升中型舰队航速，并解锁殖民船、巡洋舰等扩张与作战单位。"
+        case .hyperspaceDrive:
+            return "提升高级舰队航速，解锁战列舰、毁灭者、死星和月球后期设施。"
         }
     }
 }

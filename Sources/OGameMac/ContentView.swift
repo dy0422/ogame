@@ -942,6 +942,18 @@ private struct StatusMetric: View {
     }
 }
 
+private struct EffectDescriptionText: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 private struct PlanetDetailView: View {
     let planet: Planet
     @ObservedObject var model: AppModel
@@ -1292,6 +1304,8 @@ private struct BuildQueueRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
+                EffectDescriptionText(text: item.buildingKind.effectDescription)
+
                 ProgressView(value: model.queueProgress(startTime: item.startTime, finishTime: item.finishTime))
             }
         }
@@ -1356,6 +1370,8 @@ private struct BuildingUpgradeRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                EffectDescriptionText(text: kind.effectDescription)
 
                 ResourceCostLine(
                     cost: cost,
@@ -3253,6 +3269,8 @@ private struct ResearchQueueRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
+                EffectDescriptionText(text: item.technologyKind.effectDescription)
+
                 ProgressView(value: model.queueProgress(startTime: item.startTime, finishTime: item.finishTime))
             }
         }
@@ -3315,6 +3333,8 @@ private struct ResearchUpgradeRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                EffectDescriptionText(text: technology.effectDescription)
 
                 ResourceCostLine(
                     cost: cost,
