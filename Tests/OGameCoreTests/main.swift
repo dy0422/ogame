@@ -716,6 +716,7 @@ func testQueueFieldsDefaultWhenDecodingOlderUniverseJSON() throws {
     requireEqual(decoded.planets[0].defenseBuildQueue, [], "Older planet JSON should default missing defense build queue to empty")
     requireEqual(decoded.planets[0].debrisField, .zero, "Older planet JSON should default missing debris field to zero")
     requireEqual(decoded.reports, [], "Older universe JSON should default missing reports to empty")
+    requireEqual(decoded.playerObjectiveRecords, [], "Older universe JSON should default missing player objective records to empty")
     requireEqual(decoded.planets[0].buildingLevels, [.metalMine: 2], "Older planet JSON should keep raw-value building map behavior")
     requireEqual(decoded.ruleSet.buildingRules, RuleSet.fastSkirmish.buildingRules, "Older universe JSON should keep RuleSet defaults")
 }
@@ -1065,6 +1066,56 @@ func testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources() {
         requireEqual(updated.resources, planet.resources, "Resource grant should not mutate non-player resources")
         requireEqual(updated.storage, planet.storage, "Resource grant should not mutate non-player storage")
     }
+}
+
+func testPlayerObjectivesAwardRewardsOnce() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 301, playerName: "Commander")
+    universe.planets[0].buildingLevels[.solarPlant] = 4
+    let startingResources = universe.planets[0].resources
+    let startingEventCount = universe.events.count
+
+    let completed = PlayerObjectiveEngine.updatePlayerObjectives(in: &universe)
+
+    requireEqual(completed.map(\.kind), [.solarStability], "Solar stability should be the only newly completed starter objective")
+    requireEqual(universe.playerObjectiveRecords.count, 1, "Completed objective should be recorded")
+    requireEqual(universe.playerObjectiveRecords[0].kind, .solarStability, "Objective record should preserve objective kind")
+    requireEqual(universe.playerObjectiveRecords[0].completedAt, universe.gameTime, "Objective record should preserve completion time")
+    requireEqual(
+        universe.planets[0].resources,
+        startingResources.adding(completed[0].reward),
+        "Objective reward should be added to the first player planet"
+    )
+    requireEqual(universe.events.count, startingEventCount + 1, "Objective completion should create one event")
+    requireEqual(universe.events.last?.title, "阶段目标完成", "Objective completion event should be player-facing")
+
+    let resourcesAfterFirstUpdate = universe.planets[0].resources
+    let eventsAfterFirstUpdate = universe.events
+    let repeated = PlayerObjectiveEngine.updatePlayerObjectives(in: &universe)
+
+    requireEqual(repeated, [], "Completed objective rewards should not repeat")
+    requireEqual(universe.planets[0].resources, resourcesAfterFirstUpdate, "Repeated objective update should not add more resources")
+    requireEqual(universe.events, eventsAfterFirstUpdate, "Repeated objective update should not duplicate events")
+}
+
+func testPlayerObjectiveStatesExposeProgressAndCompletedRecords() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 302, playerName: "Commander")
+    universe.planets[0].buildingLevels[.solarPlant] = 2
+
+    let earlyStates = PlayerObjectiveEngine.states(in: universe)
+    guard let solarState = earlyStates.first(where: { $0.kind == .solarStability }) else {
+        fatalError("Objective states should include solar stability")
+    }
+    requireEqual(solarState.progressValue, 2, "Objective progress should reflect current solar plant level")
+    requireEqual(solarState.targetValue, 4, "Solar objective target should be level 4")
+    requireEqual(solarState.isComplete, false, "Solar objective should not be complete below target")
+    requireEqual(solarState.isClaimed, false, "Unawarded objective should not be claimed")
+
+    universe.planets[0].buildingLevels[.solarPlant] = 4
+    _ = PlayerObjectiveEngine.updatePlayerObjectives(in: &universe)
+    let completedStates = PlayerObjectiveEngine.states(in: universe)
+    let completedSolar = completedStates.first { $0.kind == .solarStability }
+    requireEqual(completedSolar?.isComplete, true, "Completed objective should report complete")
+    requireEqual(completedSolar?.isClaimed, true, "Awarded objective should report claimed")
 }
 
 func strategicPlayerID() -> FactionID {
@@ -5769,6 +5820,8 @@ testSeededGeneratorEqualityTracksSeedAndState()
 testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
 testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources()
+testPlayerObjectivesAwardRewardsOnce()
+testPlayerObjectiveStatesExposeProgressAndCompletedRecords()
 testStrategicRankingsScoreFactionStrengthsAndVictoryProgress()
 testStrategicVictoryRoutesTriggerForEconomyTechnologyDominationAndExploration()
 testLateGameObjectiveContributesToTechnologyVictory()

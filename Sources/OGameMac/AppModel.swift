@@ -102,6 +102,10 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var playerObjectiveStates: [PlayerObjectiveState] {
+        PlayerObjectiveEngine.states(in: universe)
+    }
+
     var availableBuildingKinds: [BuildingKind] {
         BuildingKind.allCases.filter { kind in
             universe.ruleSet.buildingRules[kind] != nil && !kind.isMoonFacility
@@ -1908,11 +1912,13 @@ final class AppModel: ObservableObject {
 
     private func refreshStrategicState() {
         StrategicEngine.updateStrategicState(in: &universe)
+        PlayerObjectiveEngine.updatePlayerObjectives(in: &universe)
     }
 
     private static func refreshedStrategicUniverse(_ universe: Universe) -> Universe {
         var refreshed = universe
         StrategicEngine.updateStrategicState(in: &refreshed)
+        PlayerObjectiveEngine.updatePlayerObjectives(in: &refreshed)
         return refreshed
     }
 

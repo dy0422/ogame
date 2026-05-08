@@ -139,6 +139,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
     public var rankings: [FactionScore]
     public var victoryState: VictoryState
     public var explorationRecords: [ExplorationRecord]
+    public var playerObjectiveRecords: [PlayerObjectiveRecord]
 
     public init(
         id: UniverseID = UniverseID(),
@@ -155,7 +156,8 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         ruleSet: RuleSet,
         rankings: [FactionScore] = [],
         victoryState: VictoryState = VictoryState(),
-        explorationRecords: [ExplorationRecord] = []
+        explorationRecords: [ExplorationRecord] = [],
+        playerObjectiveRecords: [PlayerObjectiveRecord] = []
     ) {
         self.id = id
         self.name = name
@@ -172,6 +174,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         self.rankings = rankings
         self.victoryState = victoryState
         self.explorationRecords = explorationRecords
+        self.playerObjectiveRecords = playerObjectiveRecords
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -190,6 +193,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         case rankings
         case victoryState
         case explorationRecords
+        case playerObjectiveRecords
     }
 
     public init(from decoder: Decoder) throws {
@@ -210,6 +214,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         self.rankings = try container.decodeIfPresentStrict([FactionScore].self, forKey: .rankings) ?? []
         self.victoryState = try container.decodeIfPresentStrict(VictoryState.self, forKey: .victoryState) ?? VictoryState()
         self.explorationRecords = try container.decodeIfPresentStrict([ExplorationRecord].self, forKey: .explorationRecords) ?? []
+        self.playerObjectiveRecords = try container.decodeIfPresentStrict([PlayerObjectiveRecord].self, forKey: .playerObjectiveRecords) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -230,6 +235,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         try container.encode(rankings, forKey: .rankings)
         try container.encode(victoryState, forKey: .victoryState)
         try container.encode(explorationRecords, forKey: .explorationRecords)
+        try container.encode(playerObjectiveRecords, forKey: .playerObjectiveRecords)
     }
 }
 
@@ -300,6 +306,63 @@ public struct ExplorationRecord: Codable, Equatable, Sendable {
         self.discoveredDebris = discoveredDebris.nonnegative
         self.discoveredOwnerID = discoveredOwnerID
         self.discoveredNeutral = discoveredNeutral
+    }
+}
+
+public enum PlayerObjectiveKind: String, Codable, CaseIterable, Sendable {
+    case solarStability
+    case industrialFoundation
+    case researchProgram
+    case orbitalLogistics
+    case firstEspionage
+    case deepSpaceSurvey
+    case secondColony
+    case lunarOutpost
+}
+
+public struct PlayerObjectiveRecord: Codable, Equatable, Sendable, Identifiable {
+    public var kind: PlayerObjectiveKind
+    public var completedAt: TimeInterval
+    public var reward: ResourceBundle
+
+    public var id: PlayerObjectiveKind { kind }
+
+    public init(kind: PlayerObjectiveKind, completedAt: TimeInterval, reward: ResourceBundle) {
+        self.kind = kind
+        self.completedAt = completedAt.isFinite ? max(completedAt, 0) : 0
+        self.reward = reward.nonnegative
+    }
+}
+
+public struct PlayerObjectiveState: Equatable, Sendable, Identifiable {
+    public var kind: PlayerObjectiveKind
+    public var title: String
+    public var detail: String
+    public var progressValue: Double
+    public var targetValue: Double
+    public var reward: ResourceBundle
+    public var isComplete: Bool
+    public var isClaimed: Bool
+
+    public var id: PlayerObjectiveKind { kind }
+
+    public init(
+        kind: PlayerObjectiveKind,
+        title: String,
+        detail: String,
+        progressValue: Double,
+        targetValue: Double,
+        reward: ResourceBundle,
+        isClaimed: Bool
+    ) {
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.progressValue = progressValue.isFinite ? max(progressValue, 0) : 0
+        self.targetValue = targetValue.isFinite ? max(targetValue, 1) : 1
+        self.reward = reward.nonnegative
+        self.isComplete = self.progressValue >= self.targetValue
+        self.isClaimed = isClaimed
     }
 }
 

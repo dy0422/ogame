@@ -170,6 +170,7 @@ private struct DashboardView: View {
             VictoryBannerView(summary: model.victoryBannerSummary, compact: true)
             CommandCenterStrip(model: model)
             CommanderBriefingPanel(model: model)
+            PlayerObjectivesPanel(states: model.playerObjectiveStates)
             if let settlement = model.victorySettlementSummary {
                 VictorySettlementPanel(summary: settlement, model: model)
             }
@@ -200,6 +201,90 @@ private struct HeaderView: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
+    }
+}
+
+private struct PlayerObjectivesPanel: View {
+    let states: [PlayerObjectiveState]
+
+    private var claimedCount: Int {
+        states.filter(\.isClaimed).count
+    }
+
+    private var visibleStates: [PlayerObjectiveState] {
+        let active = states.filter { !$0.isClaimed }
+        return Array((active.isEmpty ? states.suffix(4) : active.prefix(5)))
+    }
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: "阶段目标", detail: "\(claimedCount)/\(states.count) 已完成")
+
+                if states.isEmpty {
+                    EmptyStateView(title: "暂无阶段目标", systemImage: "flag.checkered")
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(visibleStates) { state in
+                            PlayerObjectiveRow(state: state)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct PlayerObjectiveRow: View {
+    let state: PlayerObjectiveState
+
+    private var progressValue: Double {
+        min(state.progressValue, state.targetValue)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: state.isClaimed ? "checkmark.circle.fill" : "flag")
+                    .foregroundStyle(state.isClaimed ? Color.green : Color.accentColor)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(state.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(state.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 10)
+
+                Text("\(Formatters.wholeNumber(progressValue))/\(Formatters.wholeNumber(state.targetValue))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            ProgressView(value: progressValue, total: state.targetValue)
+                .progressViewStyle(.linear)
+                .tint(state.isClaimed ? .green : .accentColor)
+
+            Text("奖励 \(rewardText(state.reward))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .padding(.vertical, 8)
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.45)
+        }
+    }
+
+    private func rewardText(_ reward: ResourceBundle) -> String {
+        "金属 \(Formatters.wholeNumber(reward.metal)) / 晶体 \(Formatters.wholeNumber(reward.crystal)) / 重氢 \(Formatters.wholeNumber(reward.deuterium))"
     }
 }
 
