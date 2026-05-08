@@ -461,10 +461,6 @@ final class AppModel: ObservableObject {
         settings.isAutosaveEnabled ? "自动保存开启" : "自动保存关闭"
     }
 
-    var autoUpgradeStatusText: String {
-        settings.isAutoUpgradeEnabled ? "托管升级开启" : "托管升级关闭"
-    }
-
     var runtimeStatusText: String {
         guard canSave else {
             return "模拟受保护"
@@ -487,14 +483,6 @@ final class AppModel: ObservableObject {
 
     var simulationControlSystemImage: String {
         isSimulationPaused ? "play.fill" : "pause.fill"
-    }
-
-    var autoUpgradeControlTitle: String {
-        settings.isAutoUpgradeEnabled ? "关闭托管升级" : "开启托管升级"
-    }
-
-    var autoUpgradeControlSystemImage: String {
-        settings.isAutoUpgradeEnabled ? "checkmark.circle.fill" : "wand.and.stars"
     }
 
     var formattedGameSpeed: String {
@@ -1379,10 +1367,6 @@ final class AppModel: ObservableObject {
         statusMessage = isEnabled
             ? "队列、舰队和实时模拟将自动保存。"
             : "自动保存已关闭，实时进度需手动保存。"
-    }
-
-    func toggleAutoUpgrade() {
-        updateAutoUpgradeEnabled(!settings.isAutoUpgradeEnabled)
     }
 
     func updateAutoUpgradeEnabled(_ isEnabled: Bool) {
