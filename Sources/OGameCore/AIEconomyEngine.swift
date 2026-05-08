@@ -1,8 +1,6 @@
 import Foundation
 
 public enum AIEconomyEngine {
-    private static let serverGrowthBase = 1.1
-
     public static func makeDecisions(in universe: inout Universe) {
         let aiFactionIDs = universe.factions
             .filter { $0.kind == .ai && $0.id != universe.playerFactionID }
@@ -52,7 +50,7 @@ public enum AIEconomyEngine {
         }
 
         let levels = normalizedBuildingLevels(for: planet)
-        let energy = energyState(for: planet, ruleSet: universe.ruleSet)
+        let energy = EconomyEngine.energyState(for: planet, ruleSet: universe.ruleSet, research: faction.technology)
 
         return BuildingKind.allCases.compactMap { kind in
             guard let rule = universe.ruleSet.buildingRules[kind] else {
@@ -199,7 +197,7 @@ public enum AIEconomyEngine {
                 return 3.7
             case .deuteriumSynthesizer:
                 return 3.2
-            case .solarPlant:
+            case .solarPlant, .fusionReactor:
                 return energy.available < 20 ? 3.4 : 2.4
             case .roboticsFactory:
                 return 0.5
@@ -220,7 +218,7 @@ public enum AIEconomyEngine {
             switch kind {
             case .researchLab:
                 return currentLevel == 0 ? 5.0 : 1.2
-            case .solarPlant:
+            case .solarPlant, .fusionReactor:
                 return energy.available < 10 ? 1.6 : 1.0
             case .metalMine, .crystalMine, .deuteriumSynthesizer:
                 return 0.8
@@ -243,7 +241,7 @@ public enum AIEconomyEngine {
                 return currentLevel == 0 ? 5.0 : 2.2
             case .shipyard:
                 return levels[.roboticsFactory, default: 0] > 0 && currentLevel == 0 ? 4.6 : 1.7
-            case .solarPlant:
+            case .solarPlant, .fusionReactor:
                 return energy.available < 10 ? 2.0 : 1.2
             case .metalMine, .crystalMine, .deuteriumSynthesizer:
                 return 1.1
@@ -260,7 +258,7 @@ public enum AIEconomyEngine {
             }
         case .balanced:
             switch kind {
-            case .solarPlant:
+            case .solarPlant, .fusionReactor:
                 return energy.available < 0 ? 4.6 : 1.4
             case .metalMine, .crystalMine, .deuteriumSynthesizer:
                 return 2.0
@@ -287,7 +285,7 @@ public enum AIEconomyEngine {
                 return currentLevel == 0 ? 4.0 : 1.6
             case .researchLab:
                 return 1.5
-            case .solarPlant:
+            case .solarPlant, .fusionReactor:
                 return energy.available < 10 ? 1.8 : 1.2
             case .metalMine, .crystalMine, .deuteriumSynthesizer:
                 return 1.1
@@ -435,31 +433,6 @@ public enum AIEconomyEngine {
     private static func deterministicScoreNudge(universe: Universe, factionID: FactionID, payload: String) -> Double {
         let value = tieBreaker(universe: universe, factionID: factionID, payload: payload) % 1_000
         return 1 + (Double(value) / 1_000_000)
-    }
-
-    private static func energyState(for planet: Planet, ruleSet: RuleSet) -> EnergyState {
-        var produced = 0.0
-        var used = 0.0
-
-        for building in BuildingKind.allCases {
-            let level = max(planet.buildingLevels[building] ?? 0, 0)
-            guard level > 0, let rule = ruleSet.buildingRules[building] else {
-                continue
-            }
-
-            produced += scaledServerCurve(rule.energyProduced, level: level)
-            used += scaledServerCurve(rule.energyUsed, level: level)
-        }
-
-        return EnergyState(produced: produced, used: used)
-    }
-
-    private static func scaledServerCurve(_ baseValue: Double, level: Int) -> Double {
-        guard level > 0, baseValue.isFinite else {
-            return 0
-        }
-
-        return max(baseValue, 0) * Double(level) * pow(serverGrowthBase, Double(level))
     }
 
     private static func buildingTerms(rule: BuildingRule, targetLevel: Int) -> (cost: ResourceBundle, duration: TimeInterval)? {

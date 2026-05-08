@@ -90,6 +90,8 @@ private enum ChineseDisplay {
             return "重氢合成厂"
         case "solarPlant":
             return "太阳能发电站"
+        case "fusionReactor":
+            return "聚变反应堆"
         case "roboticsFactory":
             return "机器人工厂"
         case "shipyard":
@@ -138,6 +140,8 @@ private enum ChineseDisplay {
             return "回收船"
         case "espionageProbe":
             return "间谍探测器"
+        case "solarSatellite":
+            return "太阳能卫星"
         case "rocketLauncher":
             return "火箭发射器"
         case "lightLaser":

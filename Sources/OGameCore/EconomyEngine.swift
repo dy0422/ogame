@@ -4,9 +4,10 @@ public enum EconomyEngine {
     private static let baseProductionPerHour = ResourceBundle(metal: 80, crystal: 40)
     private static let serverGrowthBase = 1.1
     private static let storageGrowthBase = 1.5
+    private static let fusionEnergyGrowthBase = 1.05
 
-    public static func recomputeEnergy(for planet: inout Planet, ruleSet: RuleSet) {
-        planet.energy = energyState(for: planet, ruleSet: ruleSet)
+    public static func recomputeEnergy(for planet: inout Planet, ruleSet: RuleSet, research: ResearchState = ResearchState()) {
+        planet.energy = energyState(for: planet, ruleSet: ruleSet, research: research)
     }
 
     public static func storageCapacity(for planet: Planet, ruleSet: RuleSet) -> ResourceStorage {
@@ -31,10 +32,15 @@ public enum EconomyEngine {
         return storage
     }
 
-    public static func productionPerHour(for planet: Planet, ruleSet: RuleSet) -> ResourceBundle {
-        let energy = energyState(for: planet, ruleSet: ruleSet)
+    public static func productionPerHour(
+        for planet: Planet,
+        ruleSet: RuleSet,
+        research: ResearchState = ResearchState()
+    ) -> ResourceBundle {
+        let energy = energyState(for: planet, ruleSet: ruleSet, research: research)
         let ratio = energyRatio(for: energy)
         var mineProduction = ResourceBundle.zero
+        var fixedProduction = baseProductionPerHour
 
         for building in BuildingKind.allCases {
             let level = normalizedLevel(planet.buildingLevels[building] ?? 0)
@@ -42,23 +48,37 @@ public enum EconomyEngine {
                 continue
             }
 
+            if building == .fusionReactor {
+                fixedProduction = fixedProduction.adding(fusionFuelConsumption(level: level))
+                continue
+            }
+
+            var buildingProduction = scaledProduction(rule.productionPerHour, level: level)
+            if building == .deuteriumSynthesizer {
+                buildingProduction.deuterium *= deuteriumTemperatureFactor(for: planet)
+            }
+
             mineProduction = mineProduction.adding(
-                scaledProduction(rule.productionPerHour, level: level)
-                    .scaled(by: productionScale(for: building, on: planet))
+                buildingProduction.scaled(by: productionScale(for: building, on: planet))
             )
         }
 
-        return baseProductionPerHour.adding(mineProduction.scaled(by: ratio))
+        return fixedProduction.adding(mineProduction.scaled(by: ratio))
     }
 
-    public static func applyProduction(to planet: inout Planet, delta: TimeInterval, ruleSet: RuleSet) {
+    public static func applyProduction(
+        to planet: inout Planet,
+        delta: TimeInterval,
+        ruleSet: RuleSet,
+        research: ResearchState = ResearchState()
+    ) {
         guard delta.isFinite, delta > 0 else {
             return
         }
 
-        recomputeEnergy(for: &planet, ruleSet: ruleSet)
+        recomputeEnergy(for: &planet, ruleSet: ruleSet, research: research)
 
-        let produced = productionPerHour(for: planet, ruleSet: ruleSet)
+        let produced = productionPerHour(for: planet, ruleSet: ruleSet, research: research)
             .scaled(by: delta / 3_600)
         planet.resources = planet.resources.adding(produced).clamped(to: storageCapacity(for: planet, ruleSet: ruleSet))
     }
@@ -74,7 +94,12 @@ public enum EconomyEngine {
                 continue
             }
 
-            applyProduction(to: &universe.planets[index], delta: delta, ruleSet: universe.ruleSet)
+            applyProduction(
+                to: &universe.planets[index],
+                delta: delta,
+                ruleSet: universe.ruleSet,
+                research: researchState(for: universe.planets[index], in: universe)
+            )
             updatedPlanetCount += 1
         }
 
@@ -93,7 +118,11 @@ public enum EconomyEngine {
         )
     }
 
-    private static func energyState(for planet: Planet, ruleSet: RuleSet) -> EnergyState {
+    public static func energyState(
+        for planet: Planet,
+        ruleSet: RuleSet,
+        research: ResearchState = ResearchState()
+    ) -> EnergyState {
         var produced: Double = 0
         var used: Double = 0
 
@@ -104,9 +133,15 @@ public enum EconomyEngine {
             }
 
             let productionScale = productionScale(for: building, on: planet)
-            produced += scaledEnergy(rule.energyProduced, level: level)
+            if building == .fusionReactor {
+                produced += fusionEnergy(baseEnergy: rule.energyProduced, level: level, research: research) * productionScale
+            } else {
+                produced += scaledEnergy(rule.energyProduced, level: level)
+            }
             used += scaledEnergy(rule.energyUsed, level: level) * productionScale
         }
+
+        produced += solarSatelliteEnergy(for: planet)
 
         return EnergyState(produced: produced, used: used)
     }
@@ -143,6 +178,33 @@ public enum EconomyEngine {
         return max(baseValue, 0) * Double(level) * pow(serverGrowthBase, Double(level))
     }
 
+    private static func deuteriumTemperatureFactor(for planet: Planet) -> Double {
+        max(0, -0.002 * planet.temperatureCelsius + 1.28)
+    }
+
+    private static func solarSatelliteEnergy(for planet: Planet) -> Double {
+        let count = normalizedLevel(planet.shipInventory[.solarSatellite] ?? 0)
+        guard count > 0 else {
+            return 0
+        }
+
+        let perSatellite = max(0, floor((planet.temperatureCelsius + 140) / 6))
+        return perSatellite * Double(count)
+    }
+
+    private static func fusionEnergy(baseEnergy: Double, level: Int, research: ResearchState) -> Double {
+        guard baseEnergy.isFinite, level > 0 else {
+            return 0
+        }
+
+        let energyTechnologyBonus = 1 + Double(normalizedLevel(research.levels[.energy] ?? 0)) * 0.01
+        return max(baseEnergy, 0) * Double(level) * pow(fusionEnergyGrowthBase, Double(level)) * energyTechnologyBonus
+    }
+
+    private static func fusionFuelConsumption(level: Int) -> ResourceBundle {
+        ResourceBundle(deuterium: -scaledServerCurve(40, level: level))
+    }
+
     private static func storageCapacity(base: Double, level: Int) -> Double {
         guard base.isFinite else {
             return 0
@@ -165,6 +227,16 @@ public enum EconomyEngine {
 
     private static func isDedicatedStorageBuilding(_ building: BuildingKind) -> Bool {
         building == .metalStorage || building == .crystalStorage || building == .deuteriumTank
+    }
+
+    private static func researchState(for planet: Planet, in universe: Universe) -> ResearchState {
+        guard let ownerID = planet.ownerID,
+              let faction = universe.factions.first(where: { $0.id == ownerID })
+        else {
+            return ResearchState()
+        }
+
+        return faction.technology
     }
 
     private static func productionScale(for building: BuildingKind, on planet: Planet) -> Double {

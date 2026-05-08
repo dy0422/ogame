@@ -644,7 +644,7 @@ final class AppModel: ObservableObject {
     }
 
     func productionPerHour(for planet: Planet) -> ResourceBundle {
-        EconomyEngine.productionPerHour(for: planet, ruleSet: universe.ruleSet)
+        EconomyEngine.productionPerHour(for: planet, ruleSet: universe.ruleSet, research: researchState(for: planet))
     }
 
     func storageCapacity(for planet: Planet) -> ResourceStorage {
@@ -667,8 +667,16 @@ final class AppModel: ObservableObject {
 
         let clampedValue = min(max(value.isFinite ? value : 1, 0), 1)
         universe.planets[planetIndex].productionSettings[kind] = clampedValue
-        EconomyEngine.recomputeEnergy(for: &universe.planets[planetIndex], ruleSet: universe.ruleSet)
+        EconomyEngine.recomputeEnergy(
+            for: &universe.planets[planetIndex],
+            ruleSet: universe.ruleSet,
+            research: researchState(for: universe.planets[planetIndex])
+        )
         statusMessage = "\(kind.localizedName)产能已设为 \(Self.formattedPercent(clampedValue))。保存后保留设置。"
+    }
+
+    func researchState(for planet: Planet) -> ResearchState {
+        faction(with: planet.ownerID)?.technology ?? ResearchState()
     }
 
     func energySupplyRatio(for planet: Planet) -> Double {

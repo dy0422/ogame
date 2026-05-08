@@ -326,8 +326,9 @@ private struct ResourceRateRow: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            Text("+\(Formatters.wholeNumber(value))")
+            Text(Formatters.signedWholeNumber(value))
                 .monospacedDigit()
+                .foregroundStyle(value >= 0 ? Color.secondary : Color.orange)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
@@ -1068,6 +1069,10 @@ private struct PlanetEconomyView: View {
             VStack(alignment: .leading, spacing: 14) {
                 SectionTitle(title: "经济", detail: model.energyStatusText(for: planet))
 
+                Label("温度 \(Formatters.wholeNumber(planet.temperatureCelsius))°C", systemImage: "thermometer.medium")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 EconomyResourceTable(
                     resources: planet.resources,
                     production: production,
@@ -1177,9 +1182,9 @@ private struct EconomyRateCell: View {
     let value: Double
 
     var body: some View {
-        Text("+\(Formatters.wholeNumber(value))")
+        Text(Formatters.signedWholeNumber(value))
             .font(.callout.monospacedDigit())
-            .foregroundStyle(value > 0 ? Color.green : Color.secondary)
+            .foregroundStyle(value > 0 ? Color.green : value < 0 ? Color.orange : Color.secondary)
             .frame(minWidth: 72, alignment: .trailing)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
@@ -4270,6 +4275,8 @@ private extension BuildingKind {
             return "drop"
         case .solarPlant:
             return "sun.max"
+        case .fusionReactor:
+            return "bolt.trianglebadge.exclamationmark"
         case .roboticsFactory:
             return "gearshape.2"
         case .shipyard:

@@ -4827,6 +4827,72 @@ func testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed() {
     requireApproxEqual(planet.energy.used, 68.2, "Economy energy recomputation should derive used energy from current building levels")
 }
 
+func testDeuteriumProductionUsesPlanetTemperature() {
+    let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c1")!)
+    let warmPlanet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c2")!),
+        name: "Warm Deuterium",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 4),
+        ownerID: playerID,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        temperatureCelsius: 40,
+        buildingLevels: [.deuteriumSynthesizer: 1, .solarPlant: 8]
+    )
+    let coldPlanet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c3")!),
+        name: "Cold Deuterium",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 12),
+        ownerID: playerID,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        temperatureCelsius: -40,
+        buildingLevels: [.deuteriumSynthesizer: 1, .solarPlant: 8]
+    )
+
+    let warmProduction = EconomyEngine.productionPerHour(for: warmPlanet, ruleSet: .fastSkirmish)
+    let coldProduction = EconomyEngine.productionPerHour(for: coldPlanet, ruleSet: .fastSkirmish)
+
+    requireApproxEqual(warmProduction.deuterium, 52.8, "Warm baseline should preserve the current fast deuterium curve")
+    requireApproxEqual(coldProduction.deuterium, 59.84, "Colder planets should produce more deuterium")
+    require(coldProduction.deuterium > warmProduction.deuterium, "Cold planet deuterium should exceed warm planet deuterium")
+}
+
+func testSolarSatellitesProduceTemperatureBasedEnergy() {
+    var planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c4")!),
+        name: "Orbital Solar",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 4),
+        ownerID: queuePlayerID(),
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        temperatureCelsius: 40,
+        shipInventory: [.solarSatellite: 3]
+    )
+
+    EconomyEngine.recomputeEnergy(for: &planet, ruleSet: .fastSkirmish)
+
+    requireApproxEqual(planet.energy.produced, 90, "Solar satellites should produce server-shaped temperature-based energy")
+    requireApproxEqual(planet.energy.used, 0, "Solar satellites should not consume energy")
+}
+
+func testFusionReactorProducesEnergyAndConsumesDeuteriumWithEnergyTechnology() {
+    var planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000c5")!),
+        name: "Fusion Core",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 8),
+        ownerID: queuePlayerID(),
+        resources: ResourceBundle(deuterium: 1_000),
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.fusionReactor: 2]
+    )
+    let research = ResearchState(levels: [.energy: 5])
+
+    EconomyEngine.recomputeEnergy(for: &planet, ruleSet: .fastSkirmish, research: research)
+    let production = EconomyEngine.productionPerHour(for: planet, ruleSet: .fastSkirmish, research: research)
+
+    requireApproxEqual(planet.energy.produced, 69.4575, "Fusion reactor should scale with energy technology")
+    requireApproxEqual(planet.energy.used, 0, "Fusion reactor should not use mine energy")
+    requireApproxEqual(production.deuterium, -96.8, "Fusion reactor should consume deuterium as fuel")
+}
+
 func testEconomyUniverseTickDoesNotProduceOnNonOwnedPlanets() {
     let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
     let ownedPlanet = Planet(
@@ -5477,6 +5543,9 @@ testPlanetProductionSettingsScaleMineOutputAndEnergyUse()
 testStorageBuildingsIncreaseStorageCaps()
 testRoboticsAndNaniteStyleAccelerationShortensBuildDurations()
 testEconomyRecomputesSolarEnergyProducedAndMineEnergyUsed()
+testDeuteriumProductionUsesPlanetTemperature()
+testSolarSatellitesProduceTemperatureBasedEnergy()
+testFusionReactorProducesEnergyAndConsumesDeuteriumWithEnergyTechnology()
 testEconomyUniverseTickDoesNotProduceOnNonOwnedPlanets()
 testQueueEngineStartsBuildingUpgradeAndPaysCost()
 testQueueEngineRejectsUnaffordableBuildingAndResearchWithoutMutation()

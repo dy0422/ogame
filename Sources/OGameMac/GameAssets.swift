@@ -129,6 +129,7 @@ enum GameArt {
         .crystalMine: 2,
         .deuteriumSynthesizer: 3,
         .solarPlant: 4,
+        .fusionReactor: 12,
         .roboticsFactory: 14,
         .naniteFactory: 15,
         .shipyard: 21,

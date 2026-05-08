@@ -463,7 +463,11 @@ public enum QueueEngine {
 
             let dueIDs = Set(dueItems.map(\.id))
             universe.planets[planetIndex].buildQueue.removeAll { dueIDs.contains($0.id) }
-            EconomyEngine.recomputeEnergy(for: &universe.planets[planetIndex], ruleSet: universe.ruleSet)
+            EconomyEngine.recomputeEnergy(
+                for: &universe.planets[planetIndex],
+                ruleSet: universe.ruleSet,
+                research: researchState(for: universe.planets[planetIndex], in: universe)
+            )
         }
 
         for planetIndex in universe.planets.indices {
@@ -505,6 +509,11 @@ public enum QueueEngine {
             }
 
             universe.planets[planetIndex].shipBuildQueue.removeAll { completedIDs.contains($0.id) }
+            EconomyEngine.recomputeEnergy(
+                for: &universe.planets[planetIndex],
+                ruleSet: universe.ruleSet,
+                research: researchState(for: universe.planets[planetIndex], in: universe)
+            )
         }
 
         for planetIndex in universe.planets.indices {
@@ -583,6 +592,7 @@ public enum QueueEngine {
 
             let dueIDs = Set(dueItems.map(\.id))
             universe.factions[factionIndex].researchQueue.removeAll { dueIDs.contains($0.id) }
+            recomputeEnergyForOwnedPlanets(faction: universe.factions[factionIndex], in: &universe)
         }
     }
 
@@ -602,6 +612,20 @@ public enum QueueEngine {
         }
 
         return universe.factions.first { $0.id == factionID }
+    }
+
+    private static func researchState(for planet: Planet, in universe: Universe) -> ResearchState {
+        faction(for: planet.ownerID, in: universe)?.technology ?? ResearchState()
+    }
+
+    private static func recomputeEnergyForOwnedPlanets(faction: Faction, in universe: inout Universe) {
+        for planetIndex in universe.planets.indices where universe.planets[planetIndex].ownerID == faction.id {
+            EconomyEngine.recomputeEnergy(
+                for: &universe.planets[planetIndex],
+                ruleSet: universe.ruleSet,
+                research: faction.technology
+            )
+        }
     }
 
     private static func nextBuildingTargetLevel(for kind: BuildingKind, on planet: Planet) -> Int? {

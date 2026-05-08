@@ -599,7 +599,7 @@ public extension RuleSet {
                 costMultiplier: 1.50,
                 baseDuration: 32,
                 durationMultiplier: 1.35,
-                productionPerHour: ResourceBundle(deuterium: 48),
+                productionPerHour: ResourceBundle(deuterium: 40),
                 energyUsed: 30,
                 aiPriorityWeight: 0.75
             ),
@@ -610,6 +610,15 @@ public extension RuleSet {
                 durationMultiplier: 1.25,
                 energyProduced: 20,
                 aiPriorityWeight: 0.85
+            ),
+            .fusionReactor: BuildingRule(
+                baseCost: ResourceBundle(metal: 900, crystal: 360, deuterium: 180),
+                costMultiplier: 1.80,
+                baseDuration: 42,
+                durationMultiplier: 1.40,
+                energyProduced: 30,
+                aiPriorityWeight: 0.30,
+                requirements: [.technology(.energy, level: 3)]
             ),
             .roboticsFactory: BuildingRule(
                 baseCost: ResourceBundle(metal: 400, crystal: 120, deuterium: 80),

@@ -13,6 +13,7 @@ public enum StarterUniverseFactory {
             ownerID: playerID,
             resources: startingResources,
             storage: startingStorage,
+            temperatureCelsius: temperatureCelsius(for: Coordinate(galaxy: 1, system: 1, position: 4)),
             energy: startingEnergy,
             buildingLevels: startingBuildingLevels
         )
@@ -45,18 +46,20 @@ public enum StarterUniverseFactory {
                     ownedPlanetIDs: [planetID]
                 )
             )
+            let coordinate = Coordinate(
+                galaxy: 1,
+                system: index + 1,
+                position: generator.nextInt(in: 4...12)
+            )
             planets.append(
                 Planet(
                     id: planetID,
                     name: "\(strategy.rawValue.capitalized) Prime",
-                    coordinate: Coordinate(
-                        galaxy: 1,
-                        system: index + 1,
-                        position: generator.nextInt(in: 4...12)
-                    ),
+                    coordinate: coordinate,
                     ownerID: factionID,
                     resources: startingResources,
                     storage: startingStorage,
+                    temperatureCelsius: temperatureCelsius(for: coordinate),
                     energy: startingEnergy,
                     buildingLevels: startingBuildingLevels
                 )
@@ -77,6 +80,7 @@ public enum StarterUniverseFactory {
                     ownerID: nil,
                     resources: ResourceBundle(metal: 100 + Double(offset * 50), crystal: 50, deuterium: 20),
                     storage: startingStorage,
+                    temperatureCelsius: temperatureCelsius(for: coordinate),
                     debrisField: ResourceBundle(metal: 25 + Double(offset * 10), crystal: 10)
                 )
             )
@@ -119,5 +123,9 @@ public enum StarterUniverseFactory {
 
     private static func stablePlanetID(index: Int) -> PlanetID {
         PlanetID(UUID(uuidString: String(format: "00000000-0000-0000-0001-%012d", index + 1))!)
+    }
+
+    private static func temperatureCelsius(for coordinate: Coordinate) -> Double {
+        100 - Double(coordinate.position) * 15
     }
 }

@@ -794,6 +794,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
     public var ownerID: FactionID?
     public var resources: ResourceBundle
     public var storage: ResourceStorage
+    public var temperatureCelsius: Double
     public var energy: EnergyState
     public var buildingLevels: [BuildingKind: Int]
     public var productionSettings: [BuildingKind: Double]
@@ -813,6 +814,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         ownerID: FactionID?,
         resources: ResourceBundle = .zero,
         storage: ResourceStorage = ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        temperatureCelsius: Double = 40,
         energy: EnergyState = EnergyState(),
         buildingLevels: [BuildingKind: Int] = [:],
         productionSettings: [BuildingKind: Double] = [:],
@@ -831,6 +833,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         self.ownerID = ownerID
         self.resources = resources
         self.storage = storage
+        self.temperatureCelsius = Self.normalizedTemperature(temperatureCelsius)
         self.energy = energy
         self.buildingLevels = buildingLevels
         self.productionSettings = Self.normalizedProductionSettings(productionSettings)
@@ -851,6 +854,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         case ownerID
         case resources
         case storage
+        case temperatureCelsius
         case energy
         case buildingLevels
         case productionSettings
@@ -873,6 +877,9 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         self.ownerID = try container.decodeIfPresent(FactionID.self, forKey: .ownerID)
         self.resources = try container.decode(ResourceBundle.self, forKey: .resources)
         self.storage = try container.decode(ResourceStorage.self, forKey: .storage)
+        self.temperatureCelsius = Self.normalizedTemperature(
+            try container.decodeIfPresent(Double.self, forKey: .temperatureCelsius) ?? 40
+        )
         self.energy = try container.decode(EnergyState.self, forKey: .energy)
         self.buildingLevels = try container.decodeRawValueDictionary(BuildingKind.self, forKey: .buildingLevels)
         self.productionSettings = Self.normalizedProductionSettings(
@@ -899,6 +906,7 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(ownerID, forKey: .ownerID)
         try container.encode(resources, forKey: .resources)
         try container.encode(storage, forKey: .storage)
+        try container.encode(temperatureCelsius, forKey: .temperatureCelsius)
         try container.encode(energy, forKey: .energy)
         try container.encodeRawValueDictionary(buildingLevels, forKey: .buildingLevels)
         try container.encodeRawValueDictionary(productionSettings, forKey: .productionSettings)
@@ -930,6 +938,14 @@ public struct Planet: Codable, Equatable, Sendable, Identifiable {
 
             result[element.key] = max((result[element.key] ?? 0) + element.value, 0)
         }
+    }
+
+    private static func normalizedTemperature(_ value: Double) -> Double {
+        guard value.isFinite else {
+            return 40
+        }
+
+        return min(max(value, -200), 240)
     }
 }
 
@@ -1385,6 +1401,7 @@ public enum BuildingKind: String, Codable, CaseIterable, Sendable {
     case crystalMine
     case deuteriumSynthesizer
     case solarPlant
+    case fusionReactor
     case roboticsFactory
     case shipyard
     case researchLab
@@ -1574,6 +1591,8 @@ public extension BuildingKind {
             return "重氢合成厂"
         case .solarPlant:
             return "太阳能发电站"
+        case .fusionReactor:
+            return "聚变反应堆"
         case .roboticsFactory:
             return "机器人工厂"
         case .shipyard:
@@ -1609,6 +1628,8 @@ public extension BuildingKind {
             return "生产重氢，用于舰队燃料、高级研究和部分重型舰船。"
         case .solarPlant:
             return "提供能源，能源不足时矿场产出会下降，前期需要持续配套升级。"
+        case .fusionReactor:
+            return "消耗重氢换取稳定能源，能量技术越高，单级供能越强。"
         case .roboticsFactory:
             return "缩短建筑建造时间，并帮助更快解锁造船厂和生产节奏。"
         case .shipyard:
@@ -1640,7 +1661,7 @@ public extension BuildingKind {
         switch self {
         case .lunarBase, .sensorPhalanx, .jumpGate:
             return true
-        case .metalMine, .crystalMine, .deuteriumSynthesizer, .solarPlant, .roboticsFactory, .shipyard,
+        case .metalMine, .crystalMine, .deuteriumSynthesizer, .solarPlant, .fusionReactor, .roboticsFactory, .shipyard,
              .researchLab, .metalStorage, .crystalStorage, .deuteriumTank, .naniteFactory, .missileSilo:
             return false
         }
