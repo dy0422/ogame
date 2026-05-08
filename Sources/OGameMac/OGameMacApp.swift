@@ -4,11 +4,19 @@ import SwiftUI
 @MainActor
 struct OGameMacApp: App {
     @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
+                .onChange(of: scenePhase) { phase in
+                    guard phase != .active else {
+                        return
+                    }
+
+                    model.saveForLifecycleChange()
+                }
         }
         .commands {
             CommandGroup(replacing: .saveItem) {
@@ -20,8 +28,8 @@ struct OGameMacApp: App {
             }
 
             CommandMenu("模拟") {
-                Button("推进 1 分钟") {
-                    model.advanceOneMinute()
+                Button(model.simulationControlTitle) {
+                    model.toggleSimulationPaused()
                 }
                 .keyboardShortcut("t", modifiers: [.command])
                 .disabled(!model.canSave)

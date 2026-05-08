@@ -4782,6 +4782,193 @@ func testSimulationTickEmitsAtMostOneEconomySummaryEventPerTick() {
     requireEqual(universe.events.last?.title, "Simulation Advanced", "Simulation advanced event should remain the final tick event")
 }
 
+func testSimulationDomainOnlyPolicySuppressesRoutineTickEvents() {
+    let playerID = FactionID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")!)
+    let planet = Planet(
+        id: PlanetID(UUID(uuidString: "00000000-0000-0000-0000-0000000000b9")!),
+        name: "Realtime Mine",
+        coordinate: Coordinate(galaxy: 1, system: 1, position: 12),
+        ownerID: playerID,
+        resources: .zero,
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.metalMine: 1, .solarPlant: 1]
+    )
+    var universe = makeEconomyUniverse(
+        planets: [planet],
+        factions: [
+            Faction(
+                id: playerID,
+                name: "Player",
+                kind: .player,
+                strategy: .balanced,
+                ownedPlanetIDs: [planet.id]
+            )
+        ]
+    )
+
+    SimulationEngine.tick(universe: &universe, delta: 60, eventPolicy: .domainOnly)
+
+    requireEqual(universe.gameTime, 60, "Domain-only tick should still advance game time")
+    requireApproxEqual(universe.planets[0].resources.metal, 3, "Domain-only tick should still produce resources")
+    requireEqual(universe.events, [], "Domain-only tick should suppress routine economy and system events")
+}
+
+func testSimulationDomainOnlyPolicyPreservesCompletionEvents() {
+    var universe = makeQueueUniverse(resources: ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 10_000))
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &universe, kind: .metalMine),
+        .queued,
+        "Building queue should start before domain-only completion test"
+    )
+
+    let finishTime = universe.planets[0].buildQueue[0].finishTime
+    SimulationEngine.tick(universe: &universe, delta: finishTime, eventPolicy: .domainOnly)
+
+    requireEqual(universe.planets[0].buildingLevels[.metalMine], 1, "Domain-only tick should still complete queued buildings")
+    requireEqual(universe.events.map(\.title), ["Construction Complete"], "Domain-only tick should preserve meaningful domain events")
+}
+
+func testSimulationSilentPolicySuppressesGeneratedEventsButKeepsStateChanges() {
+    var universe = makeQueueUniverse(resources: ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 10_000))
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &universe, kind: .metalMine),
+        .queued,
+        "Building queue should start before silent policy test"
+    )
+
+    let finishTime = universe.planets[0].buildQueue[0].finishTime
+    SimulationEngine.tick(universe: &universe, delta: finishTime, eventPolicy: .silent)
+
+    requireEqual(universe.planets[0].buildingLevels[.metalMine], 1, "Silent tick should still mutate simulation state")
+    requireEqual(universe.events, [], "Silent tick should suppress all generated events")
+}
+
+func testRealtimeFrameInitializesClockWithoutAdvancing() {
+    var universe = makeQueueUniverse()
+    var state = RealtimeSimulationState()
+    let now = Date(timeIntervalSince1970: 1_000)
+
+    let result = RealtimeSimulationEngine.advanceFrame(
+        universe: &universe,
+        state: &state,
+        now: now,
+        settings: GameSettings()
+    )
+
+    requireEqual(result.didAdvance, false, "First realtime frame should not advance the simulation")
+    requireEqual(result.simulatedDelta, 0, "First realtime frame should report zero simulated delta")
+    requireEqual(state.lastFrameDate, now, "First realtime frame should store the wall-clock timestamp")
+    requireEqual(universe.gameTime, 0, "First realtime frame should leave game time unchanged")
+}
+
+func testRealtimeFrameAdvancesByElapsedWallClockAtOneX() {
+    var universe = makeQueueUniverse()
+    var state = RealtimeSimulationState(lastFrameDate: Date(timeIntervalSince1970: 1_000))
+
+    let result = RealtimeSimulationEngine.advanceFrame(
+        universe: &universe,
+        state: &state,
+        now: Date(timeIntervalSince1970: 1_012),
+        settings: GameSettings(gameSpeed: 1)
+    )
+
+    requireEqual(result.didAdvance, true, "Realtime frame should report advancement")
+    requireEqual(result.wallClockElapsed, 12, "Realtime frame should expose raw wall-clock elapsed time")
+    requireEqual(result.appliedWallClockElapsed, 12, "Realtime frame should apply unclamped short elapsed time")
+    requireEqual(result.simulatedDelta, 12, "1x realtime frame should apply elapsed seconds directly")
+    requireEqual(universe.gameTime, 12, "1x realtime frame should advance game time by elapsed seconds")
+}
+
+func testRealtimeFrameAppliesGameSpeedMultiplier() {
+    var universe = makeQueueUniverse()
+    var state = RealtimeSimulationState(lastFrameDate: Date(timeIntervalSince1970: 1_000))
+
+    let result = RealtimeSimulationEngine.advanceFrame(
+        universe: &universe,
+        state: &state,
+        now: Date(timeIntervalSince1970: 1_010),
+        settings: GameSettings(gameSpeed: 4)
+    )
+
+    requireEqual(result.simulatedDelta, 40, "Realtime frame should multiply elapsed time by game speed")
+    requireEqual(universe.gameTime, 40, "Realtime frame should advance by speed-adjusted delta")
+}
+
+func testRealtimeFrameDoesNotAdvanceWhilePaused() {
+    var universe = makeQueueUniverse()
+    let now = Date(timeIntervalSince1970: 1_025)
+    var state = RealtimeSimulationState(lastFrameDate: Date(timeIntervalSince1970: 1_000))
+
+    let result = RealtimeSimulationEngine.advanceFrame(
+        universe: &universe,
+        state: &state,
+        now: now,
+        settings: GameSettings(gameSpeed: 8),
+        isPaused: true
+    )
+
+    requireEqual(result.didAdvance, false, "Paused realtime frame should not advance")
+    requireEqual(result.simulatedDelta, 0, "Paused realtime frame should report zero simulated delta")
+    requireEqual(state.lastFrameDate, now, "Paused realtime frame should refresh last frame time to avoid catch-up on resume")
+    requireEqual(universe.gameTime, 0, "Paused realtime frame should leave game time unchanged")
+}
+
+func testRealtimeFrameIgnoresBackwardWallClockTime() {
+    let lastDate = Date(timeIntervalSince1970: 1_000)
+    var universe = makeQueueUniverse()
+    var state = RealtimeSimulationState(lastFrameDate: lastDate)
+
+    let result = RealtimeSimulationEngine.advanceFrame(
+        universe: &universe,
+        state: &state,
+        now: Date(timeIntervalSince1970: 990),
+        settings: GameSettings()
+    )
+
+    requireEqual(result.didAdvance, false, "Backward realtime frame should not advance")
+    requireEqual(state.lastFrameDate, lastDate, "Backward realtime frame should keep the previous valid timestamp")
+    requireEqual(universe.gameTime, 0, "Backward realtime frame should leave game time unchanged")
+}
+
+func testRealtimeFrameClampsLargeWallClockElapsedBeforeSpeedMultiplier() {
+    var universe = makeQueueUniverse()
+    var state = RealtimeSimulationState(lastFrameDate: Date(timeIntervalSince1970: 1_000))
+
+    let result = RealtimeSimulationEngine.advanceFrame(
+        universe: &universe,
+        state: &state,
+        now: Date(timeIntervalSince1970: 1_120),
+        settings: GameSettings(gameSpeed: 2),
+        maximumWallClockElapsed: 30
+    )
+
+    requireEqual(result.wallClockElapsed, 120, "Realtime frame should expose raw large elapsed time")
+    requireEqual(result.appliedWallClockElapsed, 30, "Realtime frame should clamp large wall-clock elapsed time")
+    requireEqual(result.simulatedDelta, 60, "Realtime frame should apply speed after wall-clock clamp")
+    requireEqual(universe.gameTime, 60, "Realtime frame should advance by clamped speed-adjusted delta")
+}
+
+func testRealtimeFrameUsesDomainOnlyEventPolicy() {
+    var universe = makeQueueUniverse(resources: ResourceBundle(metal: 10_000, crystal: 10_000, deuterium: 10_000))
+    requireEqual(
+        QueueEngine.startBuildingUpgrade(on: queuePlanetID(), in: &universe, kind: .metalMine),
+        .queued,
+        "Building queue should start before realtime event-policy test"
+    )
+    let finishTime = universe.planets[0].buildQueue[0].finishTime
+    var state = RealtimeSimulationState(lastFrameDate: Date(timeIntervalSince1970: 1_000))
+
+    let result = RealtimeSimulationEngine.advanceFrame(
+        universe: &universe,
+        state: &state,
+        now: Date(timeIntervalSince1970: 1_000 + finishTime),
+        settings: GameSettings()
+    )
+
+    requireEqual(result.simulatedDelta, finishTime, "Realtime frame should advance to the queued finish time")
+    requireEqual(universe.events.map(\.title), ["Construction Complete"], "Realtime frame should preserve domain events without routine tick spam")
+}
+
 func testSimulationTickAdvancesGameTimeAndRecordsEvent() {
     var universe = StarterUniverseFactory.makeNewGame(seed: 9, playerName: "Commander")
     let previousEventCount = universe.events.count
@@ -5276,6 +5463,16 @@ testSimulationTickResolvesDueFleetArrivalsBeforeSystemEvent()
 testSimulationTickCompletesResearchQueueAndRecordsEvent()
 try testQueueCompletionIsDeterministicAcrossSaveLoadEquality()
 testSimulationTickEmitsAtMostOneEconomySummaryEventPerTick()
+testSimulationDomainOnlyPolicySuppressesRoutineTickEvents()
+testSimulationDomainOnlyPolicyPreservesCompletionEvents()
+testSimulationSilentPolicySuppressesGeneratedEventsButKeepsStateChanges()
+testRealtimeFrameInitializesClockWithoutAdvancing()
+testRealtimeFrameAdvancesByElapsedWallClockAtOneX()
+testRealtimeFrameAppliesGameSpeedMultiplier()
+testRealtimeFrameDoesNotAdvanceWhilePaused()
+testRealtimeFrameIgnoresBackwardWallClockTime()
+testRealtimeFrameClampsLargeWallClockElapsedBeforeSpeedMultiplier()
+testRealtimeFrameUsesDomainOnlyEventPolicy()
 testSimulationTickAdvancesGameTimeAndRecordsEvent()
 testSimulationTickIgnoresNonPositiveDeltas()
 testSimulationTickIgnoresNonFiniteDeltas()

@@ -13,6 +13,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var canSave: Bool
     @Published private(set) var offlineSummary: OfflineCatchUpSummary? = nil
     @Published private(set) var hasPendingOfflineCatchUpSave = false
+    @Published private(set) var isSimulationPaused = false
+    @Published private(set) var lastRealtimeTickDate: Date? = nil
+    @Published private(set) var lastPeriodicAutosaveDate: Date? = nil
     @Published var settings: GameSettings
     @Published private(set) var saveSlots: [JSONSaveRepository.SaveSlot] = []
     @Published private(set) var isOnboardingVisible: Bool
@@ -20,6 +23,7 @@ final class AppModel: ObservableObject {
 
     private let repository: JSONSaveRepository
     private let currentDate: () -> Date
+    private let periodicAutosaveInterval: TimeInterval = 45
 
     init(
         repository: JSONSaveRepository? = nil,
@@ -449,16 +453,49 @@ final class AppModel: ObservableObject {
         )
     }
 
-    var advanceActionTitle: String {
-        "推进 \(Self.formattedDuration(advanceDelta))"
-    }
-
     var settingsStatusText: String {
-        "速度 \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x - 离线 \(settings.offlineIntensity.displayName) - \(settings.difficulty.displayName)"
+        "实时 \(formattedGameSpeed) - 离线 \(settings.offlineIntensity.displayName) - \(settings.difficulty.displayName)"
     }
 
     var autosaveStatusText: String {
         settings.isAutosaveEnabled ? "自动保存开启" : "自动保存关闭"
+    }
+
+    var runtimeStatusText: String {
+        guard canSave else {
+            return "模拟受保护"
+        }
+
+        if isSimulationPaused {
+            return "已暂停"
+        }
+
+        if hasPendingOfflineCatchUpSave {
+            return "运行中 - 离线进度待保存"
+        }
+
+        return "运行中"
+    }
+
+    var simulationControlTitle: String {
+        isSimulationPaused ? "继续模拟" : "暂停模拟"
+    }
+
+    var simulationControlSystemImage: String {
+        isSimulationPaused ? "play.fill" : "pause.fill"
+    }
+
+    var formattedGameSpeed: String {
+        "\(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x"
+    }
+
+    var nextSimulationEventText: String {
+        guard let event = nextSimulationEvent else {
+            return "暂无队列或舰队"
+        }
+
+        let remaining = max(0, event.time - universe.gameTime)
+        return "\(event.title) - \(Self.formattedDuration(remaining))"
     }
 
     func startBuildingUpgrade(planetID: PlanetID, kind: BuildingKind) {
@@ -1251,15 +1288,40 @@ final class AppModel: ObservableObject {
         return elapsed / duration
     }
 
-    func advanceOneMinute() {
+    func handleRealtimeFrame(now: Date) {
         guard canSave else {
-            statusMessage = "自动存档载入失败。请先开始新游戏再推进或保存。"
+            lastRealtimeTickDate = now
             return
         }
 
-        SimulationEngine.tick(universe: &universe, delta: advanceDelta, aiDifficulty: settings.difficulty)
+        var realtimeState = RealtimeSimulationState(lastFrameDate: lastRealtimeTickDate)
+        let result = RealtimeSimulationEngine.advanceFrame(
+            universe: &universe,
+            state: &realtimeState,
+            now: now,
+            settings: settings,
+            isPaused: isSimulationPaused
+        )
+        lastRealtimeTickDate = realtimeState.lastFrameDate
+
+        guard result.didAdvance else {
+            return
+        }
+
         refreshStrategicState()
-        statusMessage = "以 \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x 速度推进 \(Self.formattedDuration(advanceDelta))，当前 T+\(Self.formattedWholeSeconds(universe.gameTime))。"
+        autosaveAfterRealtimeAdvanceIfNeeded(now: now)
+    }
+
+    func toggleSimulationPaused() {
+        setSimulationPaused(!isSimulationPaused)
+    }
+
+    func setSimulationPaused(_ isPaused: Bool) {
+        isSimulationPaused = isPaused
+        lastRealtimeTickDate = currentDate()
+        statusMessage = isPaused
+            ? "实时模拟已暂停。离线补算仍由离线强度控制。"
+            : "实时模拟已继续，以 \(formattedGameSpeed) 运行。"
     }
 
     func save() {
@@ -1271,8 +1333,10 @@ final class AppModel: ObservableObject {
         do {
             refreshStrategicState()
             let savedPendingOfflineCatchUp = hasPendingOfflineCatchUpSave
-            try repository.save(universe, wallClockDate: currentDate(), settings: settings)
+            let savedAt = currentDate()
+            try repository.save(universe, wallClockDate: savedAt, settings: settings)
             hasPendingOfflineCatchUpSave = false
+            lastPeriodicAutosaveDate = savedAt
             statusMessage = savedPendingOfflineCatchUp
                 ? "宇宙已保存，离线进度也已写入。"
                 : "宇宙已保存。"
@@ -1287,6 +1351,9 @@ final class AppModel: ObservableObject {
         refreshStrategicState()
         offlineSummary = nil
         hasPendingOfflineCatchUpSave = false
+        isSimulationPaused = false
+        lastRealtimeTickDate = nil
+        lastPeriodicAutosaveDate = nil
         canSave = true
         isOnboardingVisible = true
         statusMessage = "新游戏已开始。保存后会替换当前自动存档。"
@@ -1299,7 +1366,7 @@ final class AppModel: ObservableObject {
 
     func updateGameSpeed(_ gameSpeed: Double) {
         settings.gameSpeed = GameSettings.clampedGameSpeed(gameSpeed)
-        statusMessage = "游戏速度已设为 \(settings.gameSpeed.formatted(.number.precision(.fractionLength(2))))x。手动推进会使用该速度。"
+        statusMessage = "实时模拟速度已设为 \(formattedGameSpeed)。"
     }
 
     func updateOfflineIntensity(_ offlineIntensity: GameSettings.OfflineIntensity) {
@@ -1310,8 +1377,8 @@ final class AppModel: ObservableObject {
     func updateAutosaveEnabled(_ isEnabled: Bool) {
         settings.isAutosaveEnabled = isEnabled
         statusMessage = isEnabled
-            ? "队列和舰队操作将自动保存。"
-            : "自动保存已关闭，队列和舰队操作需手动保存。"
+            ? "队列、舰队和实时模拟将自动保存。"
+            : "自动保存已关闭，实时进度需手动保存。"
     }
 
     func updateDifficulty(_ difficulty: GameSettings.Difficulty) {
@@ -1334,6 +1401,22 @@ final class AppModel: ObservableObject {
             statusMessage = "已创建备份 \(slot.name)，自动存档未修改。"
         } catch {
             statusMessage = "备份失败：\(Self.loadFailureDescription(for: error))"
+        }
+    }
+
+    func saveForLifecycleChange() {
+        guard canSave, settings.isAutosaveEnabled, !hasPendingOfflineCatchUpSave else {
+            return
+        }
+
+        do {
+            refreshStrategicState()
+            let savedAt = currentDate()
+            try repository.save(universe, wallClockDate: savedAt, settings: settings)
+            lastPeriodicAutosaveDate = savedAt
+            refreshSaveSlots()
+        } catch {
+            statusMessage = "离开前自动保存失败：\(error.localizedDescription)"
         }
     }
 
@@ -1551,10 +1634,6 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    private var advanceDelta: TimeInterval {
-        60 * GameSettings.clampedGameSpeed(settings.gameSpeed)
-    }
-
     private func autosaveAfterQueueing(successStatus: String) {
         refreshStrategicState()
 
@@ -1569,11 +1648,34 @@ final class AppModel: ObservableObject {
         }
 
         do {
-            try repository.save(universe, wallClockDate: currentDate(), settings: settings)
+            let savedAt = currentDate()
+            try repository.save(universe, wallClockDate: savedAt, settings: settings)
+            lastPeriodicAutosaveDate = savedAt
             refreshSaveSlots()
             statusMessage = "\(successStatus) 已自动保存。"
         } catch {
             statusMessage = "\(successStatus) 自动保存失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func autosaveAfterRealtimeAdvanceIfNeeded(now: Date) {
+        guard settings.isAutosaveEnabled, !hasPendingOfflineCatchUpSave else {
+            return
+        }
+
+        if let lastPeriodicAutosaveDate {
+            let elapsed = now.timeIntervalSince(lastPeriodicAutosaveDate)
+            guard elapsed.isFinite, elapsed >= periodicAutosaveInterval else {
+                return
+            }
+        }
+
+        do {
+            try repository.save(universe, wallClockDate: now, settings: settings)
+            lastPeriodicAutosaveDate = now
+            refreshSaveSlots()
+        } catch {
+            statusMessage = "实时自动保存失败：\(error.localizedDescription)"
         }
     }
 
@@ -2085,6 +2187,63 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private var nextSimulationEvent: UpcomingSimulationEvent? {
+        var events: [UpcomingSimulationEvent] = []
+
+        for planet in playerPlanets {
+            for item in planet.buildQueue {
+                events.append(
+                    UpcomingSimulationEvent(
+                        time: item.finishTime,
+                        title: "\(planet.name.displayName) \(item.buildingKind.localizedName)完成"
+                    )
+                )
+            }
+
+            for item in planet.shipBuildQueue {
+                events.append(
+                    UpcomingSimulationEvent(
+                        time: item.finishTime,
+                        title: "\(planet.name.displayName) \(unitQueueTitle(item))完成"
+                    )
+                )
+            }
+
+            for item in planet.defenseBuildQueue {
+                events.append(
+                    UpcomingSimulationEvent(
+                        time: item.finishTime,
+                        title: "\(planet.name.displayName) \(unitQueueTitle(item))完成"
+                    )
+                )
+            }
+        }
+
+        if let playerFaction {
+            for item in playerFaction.researchQueue {
+                events.append(
+                    UpcomingSimulationEvent(
+                        time: item.finishTime,
+                        title: "\(item.technologyKind.localizedName)研究完成"
+                    )
+                )
+            }
+        }
+
+        for fleet in activeFleets where fleet.ownerID == universe.playerFactionID {
+            events.append(
+                UpcomingSimulationEvent(
+                    time: fleetNextTime(fleet),
+                    title: "\(fleet.mission.localizedName)舰队\(fleet.phase == .returning ? "返航" : "抵达")"
+                )
+            )
+        }
+
+        return events
+            .filter { $0.time.isFinite && $0.time >= universe.gameTime }
+            .min { lhs, rhs in lhs.time < rhs.time }
+    }
+
     private func normalizedShips(_ ships: [ShipKind: Int]) -> [ShipKind: Int] {
         ships.reduce(into: [:]) { result, element in
             guard element.value > 0 else {
@@ -2322,6 +2481,11 @@ struct ExplorationSummary: Identifiable {
     var id: String {
         "\(planet.id.rawValue.uuidString)-\(exploredAt)"
     }
+}
+
+private struct UpcomingSimulationEvent {
+    let time: TimeInterval
+    let title: String
 }
 
 private extension RelationPosture {

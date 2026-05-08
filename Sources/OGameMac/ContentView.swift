@@ -7,12 +7,20 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView(selection: $model.selectedDestination, planets: model.playerPlanets)
-        } detail: {
-            DetailView(selection: model.selectedDestination, model: model)
+        TimelineView(.periodic(from: Date(), by: 1)) { context in
+            NavigationSplitView {
+                SidebarView(selection: $model.selectedDestination, planets: model.playerPlanets)
+            } detail: {
+                DetailView(selection: model.selectedDestination, model: model)
+            }
+            .frame(minWidth: 980, minHeight: 640)
+            .onAppear {
+                model.handleRealtimeFrame(now: context.date)
+            }
+            .onChange(of: context.date) { date in
+                model.handleRealtimeFrame(now: date)
+            }
         }
-        .frame(minWidth: 980, minHeight: 640)
     }
 }
 
@@ -497,10 +505,22 @@ private struct EventRow: View {
 private struct ActivityPanel: View {
     @ObservedObject var model: AppModel
 
+    private var speedBinding: Binding<Double> {
+        Binding(
+            get: { model.settings.gameSpeed },
+            set: { model.updateGameSpeed($0) }
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("活动")
                 .font(.headline)
+
+            Label(model.runtimeStatusText, systemImage: model.isSimulationPaused ? "pause.circle" : "play.circle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(model.isSimulationPaused ? Color.orange : Color.green)
+                .lineLimit(1)
 
             Text(model.statusMessage)
                 .font(.callout)
@@ -513,15 +533,25 @@ private struct ActivityPanel: View {
 
             VStack(spacing: 8) {
                 Button {
-                    model.advanceOneMinute()
+                    model.toggleSimulationPaused()
                 } label: {
-                    Label(model.advanceActionTitle, systemImage: "clock.arrow.circlepath")
+                    Label(model.simulationControlTitle, systemImage: model.simulationControlSystemImage)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut("t", modifiers: [.command])
                 .disabled(!model.canSave)
-                .help(model.canSave ? model.advanceActionTitle : "推进前请先开始新游戏")
+                .help(model.canSave ? model.simulationControlTitle : "开始新游戏前模拟不可用")
+
+                Picker("速度", selection: speedBinding) {
+                    ForEach(Self.speedPresets, id: \.self) { speed in
+                        Text("\(speed.formatted(.number.precision(.fractionLength(speed < 1 ? 2 : 0))))x")
+                            .tag(speed)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .disabled(!model.canSave)
 
                 Button {
                     model.save()
@@ -546,6 +576,8 @@ private struct ActivityPanel: View {
             Divider()
 
             StatusMetric(title: "游戏时间", value: "T+\(Formatters.wholeSeconds(model.universe.gameTime))")
+            StatusMetric(title: "状态", value: model.runtimeStatusText)
+            StatusMetric(title: "下一事件", value: model.nextSimulationEventText)
             StatusMetric(title: "势力", value: Formatters.wholeNumber(Double(model.universe.factions.count)))
             StatusMetric(title: "舰队", value: Formatters.wholeNumber(Double(model.universe.fleets.count)))
             StatusMetric(title: "存档", value: model.canSave ? model.autosaveStatusText : "受保护")
@@ -556,6 +588,8 @@ private struct ActivityPanel: View {
         .padding(20)
         .frame(width: 280, alignment: .topLeading)
     }
+
+    private static let speedPresets: [Double] = [0.25, 0.5, 1, 2, 4, 8]
 }
 
 private struct OnboardingPanel: View {
@@ -566,7 +600,7 @@ private struct OnboardingPanel: View {
             VStack(alignment: .leading, spacing: 12) {
                 SectionTitle(title: "首次启动", detail: "快速设置")
 
-                Text("新的指挥官档案已经就绪。确认自动保存和模拟速度后，可以将这个宇宙写入当前自动存档。")
+                Text("新的指挥官档案已经就绪。确认自动保存和实时模拟速度后，可以将这个宇宙写入当前自动存档。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -661,7 +695,7 @@ private struct SettingsPanel: View {
                 SectionTitle(title: "模拟", detail: model.settingsStatusText)
 
                 Toggle(isOn: autosaveBinding) {
-                    Label("队列和舰队操作自动保存", systemImage: "externaldrive.badge.checkmark")
+                    Label("队列、舰队和实时模拟自动保存", systemImage: "externaldrive.badge.checkmark")
                 }
                 .toggleStyle(.checkbox)
                 .disabled(!model.canSave)

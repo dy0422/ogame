@@ -1,5 +1,11 @@
 import Foundation
 
+public enum SimulationEventPolicy: Equatable, Sendable {
+    case full
+    case domainOnly
+    case silent
+}
+
 public enum SimulationEngine {
     private static let minimumAIDecisionInterval: TimeInterval = 60
     private static let minimumAIStrategyInterval: TimeInterval = 120
@@ -8,13 +14,15 @@ public enum SimulationEngine {
         universe: inout Universe,
         delta: TimeInterval,
         allowAggressiveAIStrategy: Bool = true,
-        aiDifficulty: GameSettings.Difficulty = .standard
+        aiDifficulty: GameSettings.Difficulty = .standard,
+        eventPolicy: SimulationEventPolicy = .full
     ) {
         guard delta.isFinite, delta > 0 else {
             return
         }
 
         let initialGameTime = universe.gameTime
+        let eventStartIndex = universe.events.count
 
         QueueEngine.completeDueItems(in: &universe)
         EconomyEngine.tick(universe: &universe, delta: delta)
@@ -31,15 +39,46 @@ public enum SimulationEngine {
         )
         StrategicEngine.updateStrategicState(in: &universe)
 
-        universe.events.append(
-            GameEvent(
-                id: simulationEventID(index: universe.events.count + 1),
-                time: universe.gameTime,
-                kind: .system,
-                title: "Simulation Advanced",
-                message: "Advanced the universe by \(delta) seconds."
+        if eventPolicy == .full {
+            universe.events.append(
+                GameEvent(
+                    id: simulationEventID(index: universe.events.count + 1),
+                    time: universe.gameTime,
+                    kind: .system,
+                    title: "Simulation Advanced",
+                    message: "Advanced the universe by \(delta) seconds."
+                )
             )
-        )
+        }
+
+        applyEventPolicy(eventPolicy, to: &universe, eventStartIndex: eventStartIndex)
+    }
+
+    private static func applyEventPolicy(
+        _ policy: SimulationEventPolicy,
+        to universe: inout Universe,
+        eventStartIndex: Int
+    ) {
+        guard eventStartIndex < universe.events.count else {
+            return
+        }
+
+        switch policy {
+        case .full:
+            return
+        case .domainOnly:
+            let retainedEvents = universe.events[eventStartIndex..<universe.events.count].filter { event in
+                !isRoutineTickEvent(event)
+            }
+            universe.events.replaceSubrange(eventStartIndex..<universe.events.count, with: retainedEvents)
+        case .silent:
+            universe.events.removeSubrange(eventStartIndex..<universe.events.count)
+        }
+    }
+
+    private static func isRoutineTickEvent(_ event: GameEvent) -> Bool {
+        (event.kind == .system && event.title == "Simulation Advanced") ||
+            (event.kind == .economy && event.title == "Economy Updated")
     }
 
     private static func runAIEconomyDecisionsIfNeeded(in universe: inout Universe, from initialGameTime: TimeInterval) {
