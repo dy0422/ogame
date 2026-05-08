@@ -461,6 +461,10 @@ final class AppModel: ObservableObject {
         settings.isAutosaveEnabled ? "自动保存开启" : "自动保存关闭"
     }
 
+    var autoUpgradeStatusText: String {
+        settings.isAutoUpgradeEnabled ? "托管升级开启" : "托管升级关闭"
+    }
+
     var runtimeStatusText: String {
         guard canSave else {
             return "模拟受保护"
@@ -483,6 +487,14 @@ final class AppModel: ObservableObject {
 
     var simulationControlSystemImage: String {
         isSimulationPaused ? "play.fill" : "pause.fill"
+    }
+
+    var autoUpgradeControlTitle: String {
+        settings.isAutoUpgradeEnabled ? "关闭托管升级" : "开启托管升级"
+    }
+
+    var autoUpgradeControlSystemImage: String {
+        settings.isAutoUpgradeEnabled ? "checkmark.circle.fill" : "wand.and.stars"
     }
 
     var formattedGameSpeed: String {
@@ -1369,6 +1381,44 @@ final class AppModel: ObservableObject {
             : "自动保存已关闭，实时进度需手动保存。"
     }
 
+    func toggleAutoUpgrade() {
+        updateAutoUpgradeEnabled(!settings.isAutoUpgradeEnabled)
+    }
+
+    func updateAutoUpgradeEnabled(_ isEnabled: Bool) {
+        settings.isAutoUpgradeEnabled = isEnabled
+
+        guard isEnabled else {
+            autosaveSettingsChange(successStatus: "托管升级已关闭。")
+            return
+        }
+
+        runAutoUpgradeNow()
+    }
+
+    func runAutoUpgradeNow() {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再启用托管升级。"
+            return
+        }
+
+        let result = PlayerAutoUpgradeEngine.makeDecisions(in: &universe)
+        guard result.didQueue else {
+            let noActionStatus = settings.isAutoUpgradeEnabled
+                ? "托管升级已开启：当前资源、前置或队列状态不足，空闲时会继续尝试。"
+                : "当前没有可自动加入的建筑或科技。"
+            if settings.isAutoUpgradeEnabled {
+                autosaveSettingsChange(successStatus: noActionStatus)
+            } else {
+                refreshStrategicState()
+                statusMessage = noActionStatus
+            }
+            return
+        }
+
+        autosaveAfterQueueing(successStatus: Self.autoUpgradeQueuedStatus(for: result))
+    }
+
     func updateDifficulty(_ difficulty: GameSettings.Difficulty) {
         settings.difficulty = difficulty
         statusMessage = "难度已设为\(difficulty.displayName)。\(difficulty.behaviorDescription)"
@@ -1646,6 +1696,30 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func autosaveSettingsChange(successStatus: String) {
+        refreshStrategicState()
+
+        if hasPendingOfflineCatchUpSave {
+            statusMessage = "\(successStatus) 离线进度和设置等待保存。"
+            return
+        }
+
+        guard settings.isAutosaveEnabled else {
+            statusMessage = "\(successStatus) 自动保存已关闭，需要时请手动保存。"
+            return
+        }
+
+        do {
+            let savedAt = currentDate()
+            try repository.save(universe, wallClockDate: savedAt, settings: settings)
+            lastPeriodicAutosaveDate = savedAt
+            refreshSaveSlots()
+            statusMessage = "\(successStatus) 已自动保存。"
+        } catch {
+            statusMessage = "\(successStatus) 自动保存失败：\(error.localizedDescription)"
+        }
+    }
+
     private func autosaveAfterRealtimeAdvanceIfNeeded(now: Date) {
         guard settings.isAutosaveEnabled, !hasPendingOfflineCatchUpSave else {
             return
@@ -1868,6 +1942,19 @@ final class AppModel: ObservableObject {
     private static func researchQueuedStatus(technology: TechnologyKind, targetLevel: Int?) -> String {
         let levelText = targetLevel.map { "等级 \($0)" } ?? ""
         return "已加入\(technology.localizedName)\(levelText)。"
+    }
+
+    private static func autoUpgradeQueuedStatus(for result: PlayerAutoUpgradeResult) -> String {
+        var queuedItems: [String] = []
+        if result.queuedBuildings > 0 {
+            queuedItems.append("\(result.queuedBuildings) 项建筑")
+        }
+        if result.queuedResearch > 0 {
+            queuedItems.append("\(result.queuedResearch) 项科技")
+        }
+
+        let detail = queuedItems.isEmpty ? "升级" : queuedItems.joined(separator: "和")
+        return "托管升级已加入\(detail)。"
     }
 
     private func fleetLaunchStatus(for fleet: Fleet) -> String {

@@ -15,6 +15,7 @@ public enum SimulationEngine {
         delta: TimeInterval,
         allowAggressiveAIStrategy: Bool = true,
         aiDifficulty: GameSettings.Difficulty = .standard,
+        isPlayerAutoUpgradeEnabled: Bool = false,
         eventPolicy: SimulationEventPolicy = .full
     ) {
         guard delta.isFinite, delta > 0 else {
@@ -29,6 +30,9 @@ public enum SimulationEngine {
 
         universe.gameTime += delta
         QueueEngine.completeDueItems(in: &universe)
+        if isPlayerAutoUpgradeEnabled {
+            PlayerAutoUpgradeEngine.makeDecisions(in: &universe)
+        }
         FleetEngine.resolveDueFleets(in: &universe)
         runAIEconomyDecisionsIfNeeded(in: &universe, from: initialGameTime)
         runAIStrategyDecisionsIfNeeded(

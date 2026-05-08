@@ -377,7 +377,8 @@ func testSaveEnvelopeRoundTripsSettingsAndDefaultsMissingSettings() throws {
         offlineIntensity: .reduced,
         gameSpeed: 4,
         isAutosaveEnabled: false,
-        difficulty: .hard
+        difficulty: .hard,
+        isAutoUpgradeEnabled: true
     )
     let envelope = SaveEnvelope(
         lastSavedAt: Date(timeIntervalSince1970: 7_500),
@@ -421,6 +422,7 @@ func testGameSettingsDecodesPartialSettingsWithDefaults() throws {
     requireEqual(settings.offlineIntensity, .normal, "Settings should default invalid offline intensity")
     requireEqual(settings.isAutosaveEnabled, true, "Settings should default missing autosave flag")
     requireEqual(settings.difficulty, .standard, "Settings should default missing difficulty")
+    requireEqual(settings.isAutoUpgradeEnabled, false, "Settings should default missing auto upgrade flag")
 }
 
 func testGameSettingsClampsOutOfRangeSpeed() throws {

@@ -31,17 +31,20 @@ public struct GameSettings: Codable, Equatable, Sendable {
     public var gameSpeed: Double
     public var isAutosaveEnabled: Bool
     public var difficulty: Difficulty
+    public var isAutoUpgradeEnabled: Bool
 
     public init(
         offlineIntensity: OfflineIntensity = .normal,
         gameSpeed: Double = 1,
         isAutosaveEnabled: Bool = true,
-        difficulty: Difficulty = .standard
+        difficulty: Difficulty = .standard,
+        isAutoUpgradeEnabled: Bool = false
     ) {
         self.offlineIntensity = offlineIntensity
         self.gameSpeed = Self.clampedGameSpeed(gameSpeed)
         self.isAutosaveEnabled = isAutosaveEnabled
         self.difficulty = difficulty
+        self.isAutoUpgradeEnabled = isAutoUpgradeEnabled
     }
 
     public static func clampedGameSpeed(_ value: Double) -> Double {
@@ -57,6 +60,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         case gameSpeed
         case isAutosaveEnabled
         case difficulty
+        case isAutoUpgradeEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -66,12 +70,14 @@ public struct GameSettings: Codable, Equatable, Sendable {
         let difficultyValue = try? container.decodeIfPresent(String.self, forKey: .difficulty)
         let gameSpeedValue = try? container.decodeIfPresent(Double.self, forKey: .gameSpeed)
         let autosaveValue = try? container.decodeIfPresent(Bool.self, forKey: .isAutosaveEnabled)
+        let autoUpgradeValue = try? container.decodeIfPresent(Bool.self, forKey: .isAutoUpgradeEnabled)
 
         self.offlineIntensity = offlineIntensityValue
             .flatMap(OfflineIntensity.init(rawValue:)) ?? defaults.offlineIntensity
         self.gameSpeed = Self.clampedGameSpeed(gameSpeedValue ?? defaults.gameSpeed)
         self.isAutosaveEnabled = autosaveValue ?? defaults.isAutosaveEnabled
         self.difficulty = difficultyValue.flatMap(Difficulty.init(rawValue:)) ?? defaults.difficulty
+        self.isAutoUpgradeEnabled = autoUpgradeValue ?? defaults.isAutoUpgradeEnabled
     }
 }
 

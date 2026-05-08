@@ -544,6 +544,17 @@ private struct ActivityPanel: View {
                 .disabled(!model.canSave)
                 .help(model.canSave ? model.simulationControlTitle : "开始新游戏前模拟不可用")
 
+                Button {
+                    model.toggleAutoUpgrade()
+                } label: {
+                    Label(model.autoUpgradeControlTitle, systemImage: model.autoUpgradeControlSystemImage)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(model.settings.isAutoUpgradeEnabled ? Color.green : Color.accentColor)
+                .disabled(!model.canSave)
+                .help(model.canSave ? "自动为玩家排入建筑和科技升级，不会派遣舰队。" : "开始新游戏前托管升级不可用")
+
                 Picker("速度", selection: speedBinding) {
                     ForEach(Self.speedPresets, id: \.self) { speed in
                         Text("\(speed.formatted(.number.precision(.fractionLength(speed < 1 ? 2 : 0))))x")
@@ -582,6 +593,7 @@ private struct ActivityPanel: View {
             StatusMetric(title: "势力", value: Formatters.wholeNumber(Double(model.universe.factions.count)))
             StatusMetric(title: "舰队", value: Formatters.wholeNumber(Double(model.universe.fleets.count)))
             StatusMetric(title: "存档", value: model.canSave ? model.autosaveStatusText : "受保护")
+            StatusMetric(title: "托管", value: model.canSave ? model.autoUpgradeStatusText : "受保护")
             StatusMetric(title: "设置", value: model.settingsStatusText)
 
             Spacer()
@@ -676,6 +688,13 @@ private struct SettingsPanel: View {
         )
     }
 
+    private var autoUpgradeBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.isAutoUpgradeEnabled },
+            set: { model.updateAutoUpgradeEnabled($0) }
+        )
+    }
+
     private var offlineIntensityBinding: Binding<GameSettings.OfflineIntensity> {
         Binding(
             get: { model.settings.offlineIntensity },
@@ -700,6 +719,13 @@ private struct SettingsPanel: View {
                 }
                 .toggleStyle(.checkbox)
                 .disabled(!model.canSave)
+
+                Toggle(isOn: autoUpgradeBinding) {
+                    Label("托管升级建筑和科技", systemImage: "wand.and.stars")
+                }
+                .toggleStyle(.checkbox)
+                .disabled(!model.canSave)
+                .help("开启后队列空闲时自动为玩家排入建筑和科技，不会派遣舰队。")
 
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) {

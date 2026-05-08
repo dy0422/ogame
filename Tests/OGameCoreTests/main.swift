@@ -3244,6 +3244,48 @@ func testAIEconomyDoesNotMutatePlayerState() {
     requireEqual(queuedAIActionCount(for: ai.id, in: universe), 1, "AI decision call should still act for AI factions")
 }
 
+func testPlayerAutoUpgradeQueuesBuildingAndResearchWhenEnabledDuringTick() {
+    let player = makeAIEconomyFaction(
+        index: 0,
+        kind: .player,
+        strategy: .balanced,
+        researchLevels: [.energy: 3]
+    )
+    let playerPlanet = makeAIEconomyPlanet(
+        index: 0,
+        ownerID: player.id,
+        resources: ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.metalMine: 2, .crystalMine: 2, .solarPlant: 4, .researchLab: 1]
+    )
+    var universe = makeAIEconomyUniverse(factions: [player], planets: [playerPlanet])
+
+    SimulationEngine.tick(universe: &universe, delta: 60, isPlayerAutoUpgradeEnabled: true, eventPolicy: .domainOnly)
+
+    let updatedPlanet = requirePlanet(playerPlanet.id, in: universe, "Player planet should remain")
+    let updatedPlayer = requireFaction(player.id, in: universe, "Player faction should remain")
+    requireEqual(updatedPlanet.buildQueue.count, 1, "Auto upgrade should queue one player building when enabled")
+    requireEqual(updatedPlayer.researchQueue.count, 1, "Auto upgrade should queue one player research when enabled")
+    requireEqual(universe.fleets, [], "Auto upgrade should not launch fleets")
+}
+
+func testPlayerAutoUpgradeDoesNotQueueWhenDisabled() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let playerPlanet = makeAIEconomyPlanet(
+        index: 0,
+        ownerID: player.id,
+        resources: ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.metalMine: 2, .crystalMine: 2, .solarPlant: 4, .researchLab: 1]
+    )
+    var universe = makeAIEconomyUniverse(factions: [player], planets: [playerPlanet])
+
+    SimulationEngine.tick(universe: &universe, delta: 60, eventPolicy: .domainOnly)
+
+    let updatedPlanet = requirePlanet(playerPlanet.id, in: universe, "Player planet should remain")
+    let updatedPlayer = requireFaction(player.id, in: universe, "Player faction should remain")
+    requireEqual(updatedPlanet.buildQueue, [], "Disabled auto upgrade should leave player building queue unchanged")
+    requireEqual(updatedPlayer.researchQueue, [], "Disabled auto upgrade should leave player research queue unchanged")
+}
+
 func testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState() throws {
     let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
     let miner = makeAIEconomyFaction(index: 1, strategy: .miner)
@@ -5557,6 +5599,8 @@ testAIEconomyQueuesOneAffordableUpgradePerAIFaction()
 testAIEconomyStrategyPrioritiesChooseDistinctEarlyGrowthPaths()
 testAIEconomyResearchPreviewUsesQueueEnginePaymentPlanetOrder()
 testAIEconomyDoesNotMutatePlayerState()
+testPlayerAutoUpgradeQueuesBuildingAndResearchWhenEnabledDuringTick()
+testPlayerAutoUpgradeDoesNotQueueWhenDisabled()
 try testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState()
 testAIStrategyBuildsShipsForRaiderFactions()
 testAIStrategyBuildsDefensesForThreatenedFactions()

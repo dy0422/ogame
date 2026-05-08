@@ -38,7 +38,8 @@ public enum OfflineSimulationEngine {
         universe: inout Universe,
         elapsed: TimeInterval,
         now: Date,
-        aiDifficulty: GameSettings.Difficulty = .standard
+        aiDifficulty: GameSettings.Difficulty = .standard,
+        isPlayerAutoUpgradeEnabled: Bool = false
     ) -> OfflineCatchUpSummary {
         guard elapsed.isFinite, elapsed > 0 else {
             return emptySummary()
@@ -69,7 +70,8 @@ public enum OfflineSimulationEngine {
                 universe: &universe,
                 delta: delta,
                 allowAggressiveAIStrategy: allowAggressiveAI,
-                aiDifficulty: aiDifficulty
+                aiDifficulty: aiDifficulty,
+                isPlayerAutoUpgradeEnabled: isPlayerAutoUpgradeEnabled
             )
 
             let generatedEvents = Array(universe.events[eventStartCount..<universe.events.count])
