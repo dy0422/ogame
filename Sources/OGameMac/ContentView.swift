@@ -111,6 +111,25 @@ private struct DetailView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
+        VStack(spacing: 0) {
+            if !isSettingsSelection {
+                SimulationCommandBar(model: model)
+                Divider()
+            }
+
+            content
+        }
+    }
+
+    private var isSettingsSelection: Bool {
+        if case .settings = selection {
+            return true
+        }
+        return false
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch selection {
         case .dashboard, .none:
             DashboardView(model: model)
@@ -506,22 +525,10 @@ private struct EventRow: View {
 private struct ActivityPanel: View {
     @ObservedObject var model: AppModel
 
-    private var speedBinding: Binding<Double> {
-        Binding(
-            get: { model.settings.gameSpeed },
-            set: { model.updateGameSpeed($0) }
-        )
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("活动")
                 .font(.headline)
-
-            Label(model.runtimeStatusText, systemImage: model.isSimulationPaused ? "pause.circle" : "play.circle")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(model.isSimulationPaused ? Color.orange : Color.green)
-                .lineLimit(1)
 
             Text(model.statusMessage)
                 .font(.callout)
@@ -532,53 +539,9 @@ private struct ActivityPanel: View {
                 OfflineSummaryLine(summaryText: offlineSummaryText)
             }
 
-            VStack(spacing: 8) {
-                Button {
-                    model.toggleSimulationPaused()
-                } label: {
-                    Label(model.simulationControlTitle, systemImage: model.simulationControlSystemImage)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut("t", modifiers: [.command])
-                .disabled(!model.canSave)
-                .help(model.canSave ? model.simulationControlTitle : "开始新游戏前模拟不可用")
-
-                Picker("速度", selection: speedBinding) {
-                    ForEach(Self.speedPresets, id: \.self) { speed in
-                        Text("\(speed.formatted(.number.precision(.fractionLength(speed < 1 ? 2 : 0))))x")
-                            .tag(speed)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .disabled(!model.canSave)
-
-                Button {
-                    model.save()
-                } label: {
-                    Label("保存", systemImage: "square.and.arrow.down")
-                        .frame(maxWidth: .infinity)
-                }
-                .keyboardShortcut("s", modifiers: [.command])
-                .disabled(!model.canSave)
-                .help(model.canSave ? "保存宇宙" : "开始新游戏前保存不可用")
-
-                if !model.canSave {
-                    Button {
-                        model.startNewGame()
-                    } label: {
-                        Label("新游戏", systemImage: "plus")
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-            }
-
             Divider()
 
             StatusMetric(title: "游戏时间", value: "T+\(Formatters.wholeSeconds(model.universe.gameTime))")
-            StatusMetric(title: "状态", value: model.runtimeStatusText)
-            StatusMetric(title: "下一事件", value: model.nextSimulationEventText)
             StatusMetric(title: "势力", value: Formatters.wholeNumber(Double(model.universe.factions.count)))
             StatusMetric(title: "舰队", value: Formatters.wholeNumber(Double(model.universe.fleets.count)))
             StatusMetric(title: "存档", value: model.canSave ? model.autosaveStatusText : "受保护")
@@ -588,6 +551,80 @@ private struct ActivityPanel: View {
         }
         .padding(20)
         .frame(width: 280, alignment: .topLeading)
+    }
+}
+
+private struct SimulationCommandBar: View {
+    @ObservedObject var model: AppModel
+
+    private var speedBinding: Binding<Double> {
+        Binding(
+            get: { model.settings.gameSpeed },
+            set: { model.updateGameSpeed($0) }
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Label(model.runtimeStatusText, systemImage: model.isSimulationPaused ? "pause.circle" : "play.circle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(model.isSimulationPaused ? Color.orange : Color.green)
+                .lineLimit(1)
+                .frame(minWidth: 170, alignment: .leading)
+
+            Divider()
+                .frame(height: 22)
+
+            Label(model.nextSimulationEventText, systemImage: "clock")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                model.toggleSimulationPaused()
+            } label: {
+                Label(model.simulationControlTitle, systemImage: model.simulationControlSystemImage)
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut("t", modifiers: [.command])
+            .disabled(!model.canSave)
+            .help(model.canSave ? model.simulationControlTitle : "开始新游戏前模拟不可用")
+
+            Picker("速度", selection: speedBinding) {
+                ForEach(Self.speedPresets, id: \.self) { speed in
+                    Text("\(speed.formatted(.number.precision(.fractionLength(speed < 1 ? 2 : 0))))x")
+                        .tag(speed)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 300)
+            .disabled(!model.canSave)
+
+            Button {
+                model.save()
+            } label: {
+                Label("保存", systemImage: "square.and.arrow.down")
+                    .labelStyle(.iconOnly)
+            }
+            .keyboardShortcut("s", modifiers: [.command])
+            .disabled(!model.canSave)
+            .help(model.canSave ? "保存宇宙" : "开始新游戏前保存不可用")
+
+            if !model.canSave {
+                Button {
+                    model.startNewGame()
+                } label: {
+                    Label("新游戏", systemImage: "plus")
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(.regularMaterial)
     }
 
     private static let speedPresets: [Double] = [0.25, 0.5, 1, 2, 4, 8]
@@ -633,24 +670,18 @@ private struct SettingsAndSavesView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("设置")
-                        .font(.largeTitle.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("设置")
+                    .font(.largeTitle.bold())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
-                    SettingsPanel(model: model)
-                    SaveManagementPanel(model: model)
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                SettingsPanel(model: model)
+                SaveManagementPanel(model: model)
             }
-
-            Divider()
-
-            ActivityPanel(model: model)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .navigationTitle("设置")
         .onAppear {
