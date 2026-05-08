@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import OGameCore
 import OGamePersistence
@@ -5,21 +6,20 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    private let realtimeTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        TimelineView(.periodic(from: Date(), by: 1)) { context in
-            NavigationSplitView {
-                SidebarView(selection: $model.selectedDestination, planets: model.playerPlanets)
-            } detail: {
-                DetailView(selection: model.selectedDestination, model: model)
-            }
-            .frame(minWidth: 980, minHeight: 640)
-            .onAppear {
-                model.handleRealtimeFrame(now: context.date)
-            }
-            .onChange(of: context.date) { date in
-                model.handleRealtimeFrame(now: date)
-            }
+        NavigationSplitView {
+            SidebarView(selection: $model.selectedDestination, planets: model.playerPlanets)
+        } detail: {
+            DetailView(selection: model.selectedDestination, model: model)
+        }
+        .frame(minWidth: 980, minHeight: 640)
+        .onAppear {
+            model.handleRealtimeFrame(now: Date())
+        }
+        .onReceive(realtimeTimer) { date in
+            model.handleRealtimeFrame(now: date)
         }
     }
 }

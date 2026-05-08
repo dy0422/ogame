@@ -1,8 +1,30 @@
+import AppKit
 import SwiftUI
+
+final class OGameAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            sender.windows.first?.makeKeyAndOrderFront(nil)
+        }
+
+        sender.activate(ignoringOtherApps: true)
+        return true
+    }
+}
 
 @main
 @MainActor
 struct OGameMacApp: App {
+    @NSApplicationDelegateAdaptor(OGameAppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
