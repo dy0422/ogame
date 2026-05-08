@@ -1055,34 +1055,244 @@ private struct PlanetEconomyView: View {
     let planet: Planet
     @ObservedObject var model: AppModel
 
+    private var production: ResourceBundle {
+        model.productionPerHour(for: planet)
+    }
+
+    private var storage: ResourceStorage {
+        model.storageCapacity(for: planet)
+    }
+
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 14) {
                 SectionTitle(title: "经济", detail: model.energyStatusText(for: planet))
 
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 180), alignment: .topLeading)],
-                    alignment: .leading,
-                    spacing: 16
-                ) {
-                    EconomyColumn(title: "资源") {
-                        ResourceGrid(resources: planet.resources)
-                    }
+                EconomyResourceTable(
+                    resources: planet.resources,
+                    production: production,
+                    storage: storage
+                )
 
-                    EconomyColumn(title: "每小时产量") {
-                        ResourceRateGrid(rates: model.productionPerHour(for: planet))
-                    }
-
-                    EconomyColumn(title: "仓储") {
-                        ResourceGrid(resources: model.storageCapacity(for: planet).resourceBundle)
-                    }
-                }
-
-                ProductionControlsView(planet: planet, model: model)
                 EnergyMeterView(planet: planet, model: model)
+                ProductionControlsView(planet: planet, model: model)
             }
         }
         .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private struct EconomyResourceTable: View {
+    let resources: ResourceBundle
+    let production: ResourceBundle
+    let storage: ResourceStorage
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+            GridRow {
+                EconomyHeaderCell("资源")
+                    .gridColumnAlignment(.leading)
+                EconomyHeaderCell("库存")
+                    .gridColumnAlignment(.trailing)
+                EconomyHeaderCell("每小时")
+                    .gridColumnAlignment(.trailing)
+                EconomyHeaderCell("仓库")
+                    .gridColumnAlignment(.leading)
+            }
+
+            ForEach(EconomyResourceLane.allCases) { lane in
+                GridRow {
+                    EconomyResourceNameCell(lane: lane)
+                    EconomyNumberCell(Formatters.wholeNumber(lane.value(in: resources)))
+                    EconomyRateCell(value: lane.value(in: production))
+                    EconomyStorageCell(
+                        current: lane.value(in: resources),
+                        capacity: lane.value(in: storage),
+                        accent: lane.accentColor
+                    )
+                }
+
+                if lane != EconomyResourceLane.allCases.last {
+                    Divider()
+                        .gridCellUnsizedAxes(.horizontal)
+                        .gridCellColumns(4)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct EconomyHeaderCell: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+    }
+}
+
+private struct EconomyResourceNameCell: View {
+    let lane: EconomyResourceLane
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ServerAssetImage(
+                url: GameArt.resourceImageURL(lane.art),
+                fallbackSystemImage: "circle.hexagongrid"
+            )
+            .frame(width: 28, height: 18)
+
+            Text(lane.title)
+                .font(.callout.weight(.semibold))
+                .lineLimit(1)
+        }
+        .frame(minWidth: 86, alignment: .leading)
+    }
+}
+
+private struct EconomyNumberCell: View {
+    let value: String
+
+    init(_ value: String) {
+        self.value = value
+    }
+
+    var body: some View {
+        Text(value)
+            .font(.callout.weight(.semibold).monospacedDigit())
+            .frame(minWidth: 84, alignment: .trailing)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+    }
+}
+
+private struct EconomyRateCell: View {
+    let value: Double
+
+    var body: some View {
+        Text("+\(Formatters.wholeNumber(value))")
+            .font(.callout.monospacedDigit())
+            .foregroundStyle(value > 0 ? Color.green : Color.secondary)
+            .frame(minWidth: 72, alignment: .trailing)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+    }
+}
+
+private struct EconomyStorageCell: View {
+    let current: Double
+    let capacity: Double
+    let accent: Color
+
+    private var fillRatio: Double {
+        guard capacity.isFinite, capacity > 0, current.isFinite else {
+            return 0
+        }
+
+        return min(max(current / capacity, 0), 1)
+    }
+
+    private var tint: Color {
+        if fillRatio >= 0.9 {
+            return .red
+        }
+
+        if fillRatio >= 0.75 {
+            return .orange
+        }
+
+        return accent
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(Formatters.wholeNumber(capacity))
+                    .font(.caption.monospacedDigit())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Text(Formatters.percent(fillRatio))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+            }
+
+            ProgressView(value: fillRatio)
+                .tint(tint)
+                .frame(width: 128)
+        }
+        .frame(minWidth: 142, alignment: .leading)
+    }
+}
+
+private enum EconomyResourceLane: CaseIterable, Identifiable {
+    case metal
+    case crystal
+    case deuterium
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .metal:
+            return "金属"
+        case .crystal:
+            return "晶体"
+        case .deuterium:
+            return "重氢"
+        }
+    }
+
+    var art: GameResourceArt {
+        switch self {
+        case .metal:
+            return .metal
+        case .crystal:
+            return .crystal
+        case .deuterium:
+            return .deuterium
+        }
+    }
+
+    var accentColor: Color {
+        switch self {
+        case .metal:
+            return .gray
+        case .crystal:
+            return .cyan
+        case .deuterium:
+            return .blue
+        }
+    }
+
+    func value(in resources: ResourceBundle) -> Double {
+        switch self {
+        case .metal:
+            return resources.metal
+        case .crystal:
+            return resources.crystal
+        case .deuterium:
+            return resources.deuterium
+        }
+    }
+
+    func value(in storage: ResourceStorage) -> Double {
+        switch self {
+        case .metal:
+            return storage.metal
+        case .crystal:
+            return storage.crystal
+        case .deuterium:
+            return storage.deuterium
+        }
     }
 }
 
@@ -1094,6 +1304,9 @@ private struct ProductionControlsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Label("矿场产能", systemImage: "slider.horizontal.3")
+                .font(.callout.weight(.semibold))
+
             ForEach(mineKinds, id: \.self) { kind in
                 HStack(spacing: 10) {
                     Image(systemName: kind.systemImage)
@@ -1116,33 +1329,11 @@ private struct ProductionControlsView: View {
 
                     Text(Formatters.percent(model.productionSetting(for: kind, on: planet)))
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(model.productionSetting(for: kind, on: planet) >= 1 ? Color.secondary : Color.orange)
                         .frame(width: 44, alignment: .trailing)
                 }
             }
         }
-    }
-}
-
-private struct EconomyColumn<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1151,23 +1342,53 @@ private struct EnergyMeterView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Label("能源", systemImage: "bolt.fill")
                     .font(.callout.weight(.semibold))
 
                 Spacer(minLength: 12)
 
-                Text(model.energyStatusText(for: planet))
-                    .font(.caption)
-                    .foregroundStyle(planet.energy.available >= 0 ? Color.secondary : Color.red)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                Text(Formatters.percent(model.energySupplyRatio(for: planet)))
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(planet.energy.available >= 0 ? Color.green : Color.red)
+            }
+
+            HStack(spacing: 16) {
+                EnergyMetric(label: "产出", value: Formatters.wholeNumber(planet.energy.produced), color: .green)
+                EnergyMetric(label: "消耗", value: Formatters.wholeNumber(planet.energy.used), color: .secondary)
+                EnergyMetric(
+                    label: "余量",
+                    value: Formatters.signedWholeNumber(planet.energy.available),
+                    color: planet.energy.available >= 0 ? .green : .red
+                )
             }
 
             ProgressView(value: model.energySupplyRatio(for: planet))
                 .tint(planet.energy.available >= 0 ? Color.green : Color.red)
         }
+    }
+}
+
+private struct EnergyMetric: View {
+    let label: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text(value)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(minWidth: 64, alignment: .leading)
     }
 }
 
@@ -4035,12 +4256,6 @@ private enum Formatters {
         }
 
         return value.formatted(.percent.precision(.fractionLength(0)))
-    }
-}
-
-private extension ResourceStorage {
-    var resourceBundle: ResourceBundle {
-        ResourceBundle(metal: metal, crystal: crystal, deuterium: deuterium)
     }
 }
 

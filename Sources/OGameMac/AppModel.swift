@@ -689,10 +689,10 @@ final class AppModel: ObservableObject {
         let available = Self.formattedSignedWholeNumber(planet.energy.available)
 
         guard planet.energy.used > 0 else {
-            return "产出 \(produced) - 空闲"
+            return "产出 \(produced) · 空闲"
         }
 
-        return "供能 \(Self.formattedPercent(energySupplyRatio(for: planet))) - \(produced)/\(used) - \(available)"
+        return "供能 \(Self.formattedPercent(energySupplyRatio(for: planet))) · 产出 \(produced) / 消耗 \(used) · 余量 \(available)"
     }
 
     func buildingLevel(for kind: BuildingKind, on planet: Planet) -> Int {
