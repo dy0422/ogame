@@ -252,9 +252,12 @@ public enum CombatEngine {
 
         let originBefore = universe.planets[originIndex]
         let targetBefore = universe.planets[targetIndex]
+        let availableInterceptors = max(targetBefore.missileInventory[.antiBallisticMissile] ?? 0, 0)
+        let interceptedMissiles = min(missileCount, availableInterceptors)
+        let effectiveMissileCount = max(missileCount - interceptedMissiles, 0)
         let destroyedDefenses = missileDestroyedDefenses(
             from: targetBeforeDefenses,
-            missileCount: missileCount
+            missileCount: effectiveMissileCount
         )
         let targetAfterDefenses = defenseInventory(
             before: targetBeforeDefenses,
@@ -275,7 +278,10 @@ public enum CombatEngine {
             time: universe.gameTime,
             kind: .missile,
             title: "Missile strike at \(targetBefore.coordinate.displayText)",
-            summary: "Interplanetary missiles damaged \(unitCount(destroyedDefenses)) defensive units.",
+            summary: missileStrikeSummary(
+                destroyedDefenses: destroyedDefenses,
+                interceptedMissiles: interceptedMissiles
+            ),
             participants: [
                 ReportParticipant(
                     role: .attacker,
@@ -303,6 +309,12 @@ public enum CombatEngine {
             universe.planets[originIndex].missileInventory[.interplanetaryMissile] = remainingMissiles
         } else {
             universe.planets[originIndex].missileInventory[.interplanetaryMissile] = nil
+        }
+        let remainingInterceptors = availableInterceptors - interceptedMissiles
+        if remainingInterceptors > 0 {
+            universe.planets[targetIndex].missileInventory[.antiBallisticMissile] = remainingInterceptors
+        } else if interceptedMissiles > 0 {
+            universe.planets[targetIndex].missileInventory[.antiBallisticMissile] = nil
         }
         universe.planets[targetIndex].defenseInventory = targetAfterDefenses
         universe.reports.append(report)
@@ -563,6 +575,18 @@ public enum CombatEngine {
         }
 
         return destroyed
+    }
+
+    private static func missileStrikeSummary(
+        destroyedDefenses: [DefenseKind: Int],
+        interceptedMissiles: Int
+    ) -> String {
+        let damageText = "Interplanetary missiles damaged \(unitCount(destroyedDefenses)) defensive units"
+        guard interceptedMissiles > 0 else {
+            return "\(damageText)."
+        }
+
+        return "\(damageText), \(interceptedMissiles) intercepted."
     }
 
     private static var missileTargetPriority: [DefenseKind] {

@@ -209,6 +209,10 @@ public enum AIEconomyEngine {
                 return 0.4
             case .naniteFactory:
                 return 0.1
+            case .missileSilo:
+                return 0.08
+            case .lunarBase, .sensorPhalanx, .jumpGate:
+                return 0.02
             }
         case .technologist:
             switch kind {
@@ -226,6 +230,10 @@ public enum AIEconomyEngine {
                 return 0.2
             case .naniteFactory:
                 return levels[.roboticsFactory, default: 0] >= 2 ? 1.0 : 0.1
+            case .missileSilo:
+                return 0.12
+            case .lunarBase, .sensorPhalanx, .jumpGate:
+                return 0.05
             }
         case .expansionist:
             switch kind {
@@ -243,6 +251,10 @@ public enum AIEconomyEngine {
                 return 0.3
             case .naniteFactory:
                 return levels[.roboticsFactory, default: 0] >= 2 ? 1.2 : 0.1
+            case .missileSilo:
+                return 0.10
+            case .lunarBase, .sensorPhalanx, .jumpGate:
+                return 0.04
             }
         case .balanced:
             switch kind {
@@ -260,6 +272,10 @@ public enum AIEconomyEngine {
                 return 0.35
             case .naniteFactory:
                 return levels[.roboticsFactory, default: 0] >= 2 ? 0.8 : 0.1
+            case .missileSilo:
+                return 0.12
+            case .lunarBase, .sensorPhalanx, .jumpGate:
+                return 0.04
             }
         case .raider:
             switch kind {
@@ -277,6 +293,10 @@ public enum AIEconomyEngine {
                 return 0.25
             case .naniteFactory:
                 return levels[.roboticsFactory, default: 0] >= 2 ? 1.1 : 0.1
+            case .missileSilo:
+                return 0.18
+            case .lunarBase, .sensorPhalanx, .jumpGate:
+                return 0.03
             }
         }
     }

@@ -82,14 +82,7 @@ public struct JSONSaveRepository: Sendable {
 
         let data = try Data(contentsOf: saveURL)
 
-        let decoder = Self.makeDecoder()
-        let header = try decoder.decode(SaveHeader.self, from: data)
-        guard header.schemaVersion == SaveEnvelope.currentSchemaVersion else {
-            throw RepositoryError.unsupportedSchema(header.schemaVersion)
-        }
-
-        let envelope = try decoder.decode(SaveEnvelope.self, from: data)
-        return envelope
+        return try SaveMigrator.migrate(data)
     }
 
     public func listSaveSlots() throws -> [SaveSlot] {
@@ -178,6 +171,41 @@ public struct JSONSaveRepository: Sendable {
         try deleteSlot(named: backupName)
     }
 
+    public func exportCurrentSave(to destinationURL: URL) throws {
+        let envelope = try load()
+        let data = try Self.makePortableEncoder().encode(envelope)
+        let parent = destinationURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        try data.write(to: destinationURL, options: [.atomic])
+    }
+
+    public func importSave(from sourceURL: URL, as slotName: String? = nil) throws {
+        let resolvedSlotName = slotName ?? fileName
+        let saveURL = try validatedSaveURL(resolvedSlotName)
+        let data = try Data(contentsOf: sourceURL)
+        let envelope = try SaveMigrator.migrate(data)
+        let portableData = try Self.makePortableEncoder().encode(envelope)
+
+        try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
+        try portableData.write(to: saveURL, options: [.atomic])
+    }
+
+    public func validateBackup(named backupName: String) throws -> SaveSlot {
+        guard Self.isBackupFileName(backupName) else {
+            throw RepositoryError.invalidFileName(backupName)
+        }
+
+        _ = try loadSlot(named: backupName)
+        let backupURL = try validatedSaveURL(backupName)
+        let attributes = try FileManager.default.attributesOfItem(atPath: backupURL.path)
+        return SaveSlot(
+            name: backupName,
+            isAutosave: false,
+            lastModifiedAt: attributes[.modificationDate] as? Date,
+            byteCount: attributes[.size] as? Int64 ?? 0
+        )
+    }
+
     private func validatedSaveURL(_ slotName: String) throws -> URL {
         guard Self.isValidFileName(slotName) else {
             throw RepositoryError.invalidFileName(slotName)
@@ -221,23 +249,23 @@ public struct JSONSaveRepository: Sendable {
         isValidFileName(fileName) && fileName.hasPrefix("backup-") && fileName.hasSuffix(".json")
     }
 
-    private struct SaveHeader: Decodable {
-        var schemaVersion: Int
-    }
-
     private static let autosaveSlotName = "autosave.json"
 
-    private static func makeEncoder() -> JSONEncoder {
+    public static func makePortableEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         return encoder
     }
 
-    private static func makeDecoder() -> JSONDecoder {
+    public static func makePortableDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
+    }
+
+    private static func makeEncoder() -> JSONEncoder {
+        makePortableEncoder()
     }
 
     private static func backupDateStamp(for date: Date) -> String {

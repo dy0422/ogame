@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
     @Published var settings: GameSettings
     @Published private(set) var saveSlots: [JSONSaveRepository.SaveSlot] = []
     @Published private(set) var isOnboardingVisible: Bool
+    @Published var selectedDestination: SidebarDestination? = .dashboard
 
     private let repository: JSONSaveRepository
     private let currentDate: () -> Date
@@ -99,7 +100,13 @@ final class AppModel: ObservableObject {
 
     var availableBuildingKinds: [BuildingKind] {
         BuildingKind.allCases.filter { kind in
-            universe.ruleSet.buildingRules[kind] != nil
+            universe.ruleSet.buildingRules[kind] != nil && !kind.isMoonFacility
+        }
+    }
+
+    var availableMoonFacilityKinds: [BuildingKind] {
+        BuildingKind.allCases.filter { kind in
+            universe.ruleSet.buildingRules[kind] != nil && kind.isMoonFacility
         }
     }
 

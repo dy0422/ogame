@@ -1826,6 +1826,37 @@ func testFastSkirmishFleetRulesCoverAllShips() {
     require((shipRules[.colonyShip]?.cargoCapacity ?? 0) > 0, "Colony ship should carry settlement supplies")
 }
 
+func testFastSkirmishLateGameRulesIncludeExpandedShipsAndInterceptors() {
+    let rules = RuleSet.fastSkirmish
+
+    for ship in [ShipKind.bomber, .destroyer, .deathstar, .battlecruiser, .solarSatellite] {
+        guard let rule = rules.shipRules[ship] else {
+            fatalError("Fast skirmish should define \(ship.rawValue)")
+        }
+
+        require(resourceTotal(rule.baseCost) > 0, "\(ship.rawValue) should have a positive cost")
+        require(rule.requirements.isEmpty == false, "\(ship.rawValue) should expose visible requirements")
+    }
+
+    require(
+        rules.missileRules[.antiBallisticMissile] != nil,
+        "Fast skirmish should define anti-ballistic missiles"
+    )
+}
+
+func testFastSkirmishMoonFacilityRulesExposeLateGameRequirements() {
+    let rules = RuleSet.fastSkirmish
+
+    for building in [BuildingKind.missileSilo, .lunarBase, .sensorPhalanx, .jumpGate] {
+        guard let rule = rules.buildingRules[building] else {
+            fatalError("Fast skirmish should define \(building.rawValue)")
+        }
+
+        require(resourceTotal(rule.baseCost) > 0, "\(building.rawValue) should have a positive cost")
+        require(rule.requirements.isEmpty == false, "\(building.rawValue) should expose late-game requirements")
+    }
+}
+
 func testLegacyFullShipRulesDecodeWithFleetDefaultsByShipKind() throws {
     let legacyRuleSetJSON = """
     {
@@ -2728,6 +2759,29 @@ func testMissileStrikeDamagesDefensesWithoutLoot() {
     requireEqual(report.participants[1].beforeDefenses, targetBefore.defenseInventory, "Missile report should include starting defenses")
     requireEqual(report.participants[1].afterDefenses, targetAfter.defenseInventory, "Missile report should include damaged defenses")
     requireEqual(universe.events.last?.kind, .combat, "Missile strike should record a combat event")
+}
+
+func testAntiBallisticMissilesInterceptIncomingMissiles() {
+    var universe = makeCombatUniverse()
+    universe.planets[0].missileInventory = [.interplanetaryMissile: 3]
+    universe.planets[1].missileInventory = [.antiBallisticMissile: 2]
+    universe.planets[1].defenseInventory = [.rocketLauncher: 8]
+
+    let result = CombatEngine.launchMissileStrike(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        missileCount: 3
+    )
+
+    guard case .resolved(let report) = result else {
+        fatalError("Missile strike with interceptors should resolve")
+    }
+
+    requireEqual(universe.planets[0].missileInventory[.interplanetaryMissile], nil, "Launched missiles should be consumed")
+    requireEqual(universe.planets[1].missileInventory[.antiBallisticMissile], nil, "Interceptors should be consumed first")
+    requireEqual(universe.planets[1].defenseInventory[.rocketLauncher], 4, "Only one missile should pass through two interceptors")
+    require(report.summary.contains("2 intercepted"), "Missile report should mention intercepted missiles")
 }
 
 func testMissileStrikeRejectsInvalidCoreTargets() {
@@ -5063,6 +5117,52 @@ func testOfflineCatchUpSummaryIsCodableEquatableAndDeterministic() throws {
     requireEqual(firstSummary.didMutate, true, "Offline catch-up summary should expose whether catch-up mutated the universe")
 }
 
+func testBalanceScenarioReachesFirstFleetWithinTargetWindow() {
+    let result = BalanceScenarioRunner.run(
+        seed: 1,
+        duration: 14_400,
+        settings: GameSettings(difficulty: .standard)
+    )
+
+    guard let firstShipAt = result.firstShipAt,
+          let firstFleetLaunchAt = result.firstFleetLaunchAt
+    else {
+        fatalError("Balance scenario should record first ship and first fleet launch")
+    }
+
+    require(firstShipAt >= 600 && firstShipAt <= 1_500, "First ship should land in the 10-25 minute target window")
+    require(firstFleetLaunchAt >= 1_200 && firstFleetLaunchAt <= 2_700, "First fleet launch should land in the 20-45 minute target window")
+}
+
+func testBalanceScenarioReachesFirstConflictWithinTargetWindow() {
+    let result = BalanceScenarioRunner.run(
+        seed: 1,
+        duration: 14_400,
+        settings: GameSettings(difficulty: .standard)
+    )
+
+    guard let firstCombatAt = result.firstCombatAt else {
+        fatalError("Balance scenario should record first combat")
+    }
+
+    require(firstCombatAt >= 2_700 && firstCombatAt <= 5_400, "First conflict should land in the 45-90 minute target window")
+}
+
+func testBalanceScenarioVictoryOccursWithinFastRunWindow() {
+    let result = BalanceScenarioRunner.run(
+        seed: 1,
+        duration: 14_400,
+        settings: GameSettings(difficulty: .standard)
+    )
+
+    guard let victoryAt = result.victoryAt else {
+        fatalError("Balance scenario should record a fast-skirmish victory")
+    }
+
+    require(victoryAt >= 7_200 && victoryAt <= 14_400, "Fast skirmish victory should occur in 2-4 hours")
+    require(result.finalRankings.isEmpty == false, "Balance scenario should return final rankings")
+}
+
 try testEntityIDsAreCodableAndEquatable()
 testResourceBundleClampsToStorageLimits()
 testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
@@ -5071,6 +5171,8 @@ testResourceStorageConvertsToResourceDisplayBundle()
 testFastSkirmishBuildingRulesCoverEarlyEconomy()
 testFastSkirmishResearchRulesCoverEarlyTechnologies()
 testFastSkirmishUnitRulesCoverShipsAndDefenses()
+testFastSkirmishLateGameRulesIncludeExpandedShipsAndInterceptors()
+testFastSkirmishMoonFacilityRulesExposeLateGameRequirements()
 testGameContentUsesChineseDisplayNames()
 try testRuleSetBalanceRulesUseRawValueKeyedJSONObjects()
 try testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults()
@@ -5163,6 +5265,7 @@ try testFactionRelationsNormalizeDuplicatesOnDecodeAndAttackUpdate()
 testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense()
 testMoonChanceCanCreateMoonFromLargeDebrisBattle()
 testMissileStrikeDamagesDefensesWithoutLoot()
+testAntiBallisticMissilesInterceptIncomingMissiles()
 testMissileStrikeRejectsInvalidCoreTargets()
 testAttackReturnCargoIsCappedAfterCargoShipLosses()
 testAttackWithMissingCombatRulesDoesNotMutateTargetOrCreateUnbalancedReport()
@@ -5186,4 +5289,7 @@ testOfflineCatchUpOneDayWithAIAndFleetsUsesBoundedChunksAndSummarizedFeed()
 testOfflineCatchUpIgnoresInvalidElapsedValues()
 testOfflineCatchUpCapsHugeElapsedValuesToOneDay()
 try testOfflineCatchUpSummaryIsCodableEquatableAndDeterministic()
+testBalanceScenarioReachesFirstFleetWithinTargetWindow()
+testBalanceScenarioReachesFirstConflictWithinTargetWindow()
+testBalanceScenarioVictoryOccursWithinFastRunWindow()
 print("OGameCoreTests passed")

@@ -668,6 +668,38 @@ public extension RuleSet {
                 shipyardSpeedBonus: 1.00,
                 aiPriorityWeight: 0.12,
                 requirements: [.building(.roboticsFactory, level: 2), .technology(.computer, level: 2)]
+            ),
+            .missileSilo: BuildingRule(
+                baseCost: ResourceBundle(metal: 20_000, crystal: 20_000, deuterium: 1_000),
+                costMultiplier: 1.70,
+                baseDuration: 80,
+                durationMultiplier: 1.45,
+                aiPriorityWeight: 0.10,
+                requirements: [.building(.shipyard, level: 2)]
+            ),
+            .lunarBase: BuildingRule(
+                baseCost: ResourceBundle(metal: 20_000, crystal: 40_000, deuterium: 20_000),
+                costMultiplier: 1.80,
+                baseDuration: 100,
+                durationMultiplier: 1.45,
+                aiPriorityWeight: 0.04,
+                requirements: [.technology(.hyperspaceDrive, level: 1)]
+            ),
+            .sensorPhalanx: BuildingRule(
+                baseCost: ResourceBundle(metal: 20_000, crystal: 40_000, deuterium: 20_000),
+                costMultiplier: 1.80,
+                baseDuration: 90,
+                durationMultiplier: 1.45,
+                aiPriorityWeight: 0.03,
+                requirements: [.building(.lunarBase, level: 1), .technology(.espionage, level: 2)]
+            ),
+            .jumpGate: BuildingRule(
+                baseCost: ResourceBundle(metal: 200_000, crystal: 400_000, deuterium: 200_000),
+                costMultiplier: 2.00,
+                baseDuration: 160,
+                durationMultiplier: 1.55,
+                aiPriorityWeight: 0.02,
+                requirements: [.building(.lunarBase, level: 2), .technology(.hyperspaceDrive, level: 3)]
             )
         ]
     }
@@ -849,6 +881,66 @@ public extension RuleSet {
                 shield: 0,
                 hull: 1_000,
                 requirements: [.technology(.espionage, level: 1)]
+            ),
+            .bomber: ShipRule(
+                baseCost: ResourceBundle(metal: 50_000, crystal: 25_000, deuterium: 15_000),
+                baseDuration: 90,
+                aiPriorityWeight: 0.22,
+                speed: 6_000,
+                cargoCapacity: 500,
+                fuelCost: 700,
+                attack: 1_000,
+                shield: 500,
+                hull: 75_000,
+                requirements: [.building(.shipyard, level: 5), .technology(.impulseDrive, level: 3), .technology(.weapons, level: 3)]
+            ),
+            .solarSatellite: ShipRule(
+                baseCost: ResourceBundle(crystal: 2_000, deuterium: 500),
+                baseDuration: 12,
+                aiPriorityWeight: 0.08,
+                speed: 1,
+                cargoCapacity: 0,
+                fuelCost: 0,
+                attack: 1,
+                shield: 1,
+                hull: 2_000,
+                requirements: [.building(.shipyard, level: 1), .technology(.energy, level: 1)]
+            ),
+            .destroyer: ShipRule(
+                baseCost: ResourceBundle(metal: 60_000, crystal: 50_000, deuterium: 15_000),
+                baseDuration: 110,
+                aiPriorityWeight: 0.18,
+                speed: 5_000,
+                cargoCapacity: 2_000,
+                fuelCost: 1_000,
+                attack: 2_000,
+                shield: 500,
+                hull: 110_000,
+                requirements: [.building(.shipyard, level: 7), .technology(.hyperspaceDrive, level: 3), .technology(.weapons, level: 4)]
+            ),
+            .deathstar: ShipRule(
+                baseCost: ResourceBundle(metal: 1_000_000, crystal: 800_000, deuterium: 200_000),
+                baseDuration: 600,
+                aiPriorityWeight: 0.04,
+                speed: 100,
+                cargoCapacity: 1_000_000,
+                fuelCost: 1,
+                attack: 200_000,
+                shield: 50_000,
+                hull: 9_000_000,
+                requirements: [.building(.shipyard, level: 8), .building(.naniteFactory, level: 2), .technology(.hyperspaceDrive, level: 5), .technology(.energy, level: 6)]
+            ),
+            .battlecruiser: ShipRule(
+                baseCost: ResourceBundle(metal: 30_000, crystal: 40_000, deuterium: 15_000),
+                baseDuration: 85,
+                aiPriorityWeight: 0.24,
+                speed: 10_000,
+                cargoCapacity: 750,
+                fuelCost: 250,
+                attack: 700,
+                shield: 400,
+                hull: 70_000,
+                requirements: [.building(.shipyard, level: 6), .technology(.hyperspaceDrive, level: 4), .technology(.computer, level: 4)]
             )
         ]
     }
@@ -913,6 +1005,11 @@ public extension RuleSet {
 
     static var fastSkirmishMissileRules: [MissileKind: MissileRule] {
         [
+            .antiBallisticMissile: MissileRule(
+                baseCost: ResourceBundle(metal: 800, crystal: 200),
+                baseDuration: 12,
+                requirements: [.building(.shipyard, level: 2)]
+            ),
             .interplanetaryMissile: MissileRule(
                 baseCost: ResourceBundle(metal: 2_500, crystal: 1_000, deuterium: 2_000),
                 baseDuration: 30,

@@ -438,6 +438,58 @@ func testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode() throws {
     }
 }
 
+func testSaveMigratorPreservesCurrentSchemaEnvelope() throws {
+    let envelope = SaveEnvelope(
+        lastSavedAt: Date(timeIntervalSince1970: 9_000),
+        universe: StarterUniverseFactory.makeNewGame(seed: 88, playerName: "Commander"),
+        settings: GameSettings(offlineIntensity: .intense, gameSpeed: 3, isAutosaveEnabled: false, difficulty: .hard)
+    )
+    let data = try JSONSaveRepository.makePortableEncoder().encode(envelope)
+
+    let migrated = try SaveMigrator.migrate(data)
+
+    requireEqual(migrated, envelope, "Migrating current schema should preserve the envelope")
+}
+
+func testExportImportPreservesEnvelopeAndSettings() throws {
+    let sourceDirectory = uniqueTemporaryDirectory()
+    let destinationDirectory = uniqueTemporaryDirectory()
+    let sourceRepository = JSONSaveRepository(saveDirectory: sourceDirectory)
+    let destinationRepository = JSONSaveRepository(saveDirectory: destinationDirectory)
+    let universe = StarterUniverseFactory.makeNewGame(seed: 91, playerName: "Commander")
+    let settings = GameSettings(offlineIntensity: .reduced, gameSpeed: 2, isAutosaveEnabled: false, difficulty: .easy)
+    let exportURL = sourceDirectory.appendingPathComponent("portable-save.json")
+
+    try sourceRepository.save(universe, wallClockDate: Date(timeIntervalSince1970: 9_100), settings: settings)
+    try sourceRepository.exportCurrentSave(to: exportURL)
+    try destinationRepository.importSave(from: exportURL, as: "imported.json")
+
+    let imported = try destinationRepository.loadSlot(named: "imported.json")
+
+    requireEqual(imported.universe, universe, "Imported save should preserve universe")
+    requireEqual(imported.settings, settings, "Imported save should preserve settings")
+}
+
+func testBackupIntegrityCheckRejectsWrongSchema() throws {
+    let directory = uniqueTemporaryDirectory()
+    let repository = JSONSaveRepository(saveDirectory: directory)
+    let unsupportedVersion = SaveEnvelope.currentSchemaVersion + 99
+    let badBackup = """
+    {
+      "schemaVersion": \(unsupportedVersion),
+      "appVersion": "future",
+      "lastSavedAt": "2026-05-08T00:00:00Z"
+    }
+    """
+
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try Data(badBackup.utf8).write(to: directory.appendingPathComponent("backup-bad.json"), options: [.atomic])
+
+    requireRepositoryError(.unsupportedSchema(unsupportedVersion), "Backup validation should reject wrong schema") {
+        _ = try repository.validateBackup(named: "backup-bad.json")
+    }
+}
+
 try testRepositorySavesAndLoadsUniverse()
 try testRepositorySavesAndLoadsQueueMetadata()
 try testRepositorySavesAndLoadsFleetsReportsAndSettings()
@@ -454,4 +506,7 @@ try testSaveEnvelopeRoundTripsSettingsAndDefaultsMissingSettings()
 try testGameSettingsDecodesPartialSettingsWithDefaults()
 try testGameSettingsClampsOutOfRangeSpeed()
 try testRepositoryRejectsUnsupportedSchemaBeforeFullEnvelopeDecode()
+try testSaveMigratorPreservesCurrentSchemaEnvelope()
+try testExportImportPreservesEnvelopeAndSettings()
+try testBackupIntegrityCheckRejectsWrongSchema()
 print("OGamePersistenceTests passed")

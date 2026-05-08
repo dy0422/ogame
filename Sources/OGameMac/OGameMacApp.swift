@@ -30,6 +30,28 @@ struct OGameMacApp: App {
                     model.startNewGame()
                 }
             }
+
+            CommandMenu("导航") {
+                Button("总览") {
+                    model.selectedDestination = .dashboard
+                }
+                .keyboardShortcut("1", modifiers: [.command])
+
+                Button("舰队") {
+                    model.selectedDestination = .fleets
+                }
+                .keyboardShortcut("2", modifiers: [.command])
+
+                Button("星图") {
+                    model.selectedDestination = .starMap
+                }
+                .keyboardShortcut("3", modifiers: [.command])
+
+                Button("设置") {
+                    model.selectedDestination = .settings
+                }
+                .keyboardShortcut(",", modifiers: [.command])
+            }
         }
     }
 }

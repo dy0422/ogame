@@ -135,7 +135,11 @@ enum GameArt {
         .metalStorage: 22,
         .crystalStorage: 23,
         .deuteriumTank: 24,
-        .researchLab: 31
+        .researchLab: 31,
+        .lunarBase: 41,
+        .sensorPhalanx: 42,
+        .jumpGate: 43,
+        .missileSilo: 44
     ]
 
     private static let technologyAssetIDs: [TechnologyKind: Int] = [
@@ -159,7 +163,12 @@ enum GameArt {
         .battleship: 207,
         .colonyShip: 208,
         .recycler: 209,
-        .espionageProbe: 210
+        .espionageProbe: 210,
+        .bomber: 211,
+        .solarSatellite: 212,
+        .destroyer: 213,
+        .deathstar: 214,
+        .battlecruiser: 215
     ]
 
     private static let defenseAssetIDs: [DefenseKind: Int] = [
@@ -172,6 +181,7 @@ enum GameArt {
     ]
 
     private static let missileAssetIDs: [MissileKind: Int] = [
+        .antiBallisticMissile: 502,
         .interplanetaryMissile: 503
     ]
 

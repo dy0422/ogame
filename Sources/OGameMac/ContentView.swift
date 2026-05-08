@@ -5,19 +5,18 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var selection: SidebarDestination? = .dashboard
 
     var body: some View {
         NavigationSplitView {
-            SidebarView(selection: $selection, planets: model.playerPlanets)
+            SidebarView(selection: $model.selectedDestination, planets: model.playerPlanets)
         } detail: {
-            DetailView(selection: selection, model: model)
+            DetailView(selection: model.selectedDestination, model: model)
         }
         .frame(minWidth: 980, minHeight: 640)
     }
 }
 
-private enum SidebarDestination: Hashable {
+enum SidebarDestination: Hashable {
     case dashboard
     case fleets
     case starMap
@@ -183,104 +182,6 @@ private struct HeaderView: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
-    }
-}
-
-private struct CommanderBriefingPanel: View {
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        PanelSurface {
-            VStack(alignment: .leading, spacing: 12) {
-                SectionTitle(title: "指挥官简报", detail: "下一步建议")
-
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 220), alignment: .topLeading)],
-                    alignment: .leading,
-                    spacing: 10
-                ) {
-                    ForEach(model.commanderBriefingItems) { item in
-                        CommanderBriefingCard(item: item)
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: 860, alignment: .leading)
-    }
-}
-
-private struct CommanderBriefingCard: View {
-    let item: CommanderBriefingItem
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: item.systemImage)
-                .foregroundStyle(item.urgency.tint)
-                .frame(width: 18)
-
-            VStack(alignment: .leading, spacing: 5) {
-                Text(item.title)
-                    .font(.callout.weight(.semibold))
-                    .lineLimit(1)
-
-                Text(item.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(item.urgency.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(item.urgency.tint.opacity(0.16))
-        }
-    }
-}
-
-private struct VictorySettlementPanel: View {
-    let summary: VictorySettlementSummary
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        PanelSurface {
-            HStack(alignment: .top, spacing: 14) {
-                Image(systemName: summary.isPlayerVictory ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                    .font(.title3)
-                    .foregroundStyle(summary.isPlayerVictory ? Color.green : Color.orange)
-                    .frame(width: 24)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(summary.title)
-                        .font(.title3.bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    Text(summary.detail)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    HStack(spacing: 10) {
-                        Label(summary.routeText, systemImage: "flag")
-                        Label(summary.timeText, systemImage: "clock")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 12)
-
-                Button {
-                    model.startNewGame()
-                } label: {
-                    Label("重新开局", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .frame(maxWidth: 860, alignment: .leading)
     }
 }
 
@@ -1041,7 +942,7 @@ private struct PlanetDetailView: View {
                     }
 
                     if let moon = planet.moon {
-                        MoonSummaryCard(moon: moon)
+                        MoonSummaryCard(moon: moon, model: model)
                     }
 
                     PlanetEconomyView(planet: planet, model: model)
@@ -1069,6 +970,7 @@ private struct PlanetDetailView: View {
 
 private struct MoonSummaryCard: View {
     let moon: Moon
+    @ObservedObject var model: AppModel
 
     var body: some View {
         PanelSurface {
@@ -1089,6 +991,12 @@ private struct MoonSummaryCard: View {
                     ) {
                         DispatchMetric(title: "创建时间", value: "T+\(Formatters.wholeSeconds(moon.createdAt))")
                         DispatchMetric(title: "设施", value: Formatters.wholeNumber(Double(moon.buildingLevels.values.reduce(0, +))))
+                        ForEach(model.availableMoonFacilityKinds, id: \.self) { facility in
+                            DispatchMetric(
+                                title: facility.localizedName,
+                                value: "等级 \(moon.buildingLevels[facility, default: 0])"
+                            )
+                        }
                     }
                 }
             }
@@ -3596,7 +3504,7 @@ private struct QueueEmptyLine: View {
     }
 }
 
-private struct PanelSurface<Content: View>: View {
+struct PanelSurface<Content: View>: View {
     let content: Content
 
     init(@ViewBuilder content: () -> Content) {
@@ -3690,7 +3598,7 @@ private struct InventoryCard<Key: RawRepresentable & Hashable>: View where Key.R
     }
 }
 
-private struct SectionTitle: View {
+struct SectionTitle: View {
     let title: String
     let detail: String?
 
@@ -4080,6 +3988,14 @@ private extension BuildingKind {
             return "cylinder"
         case .naniteFactory:
             return "cpu"
+        case .missileSilo:
+            return "scope"
+        case .lunarBase:
+            return "moon.stars"
+        case .sensorPhalanx:
+            return "dot.radiowaves.left.and.right"
+        case .jumpGate:
+            return "arrow.left.arrow.right.circle"
         }
     }
 }
@@ -4139,6 +4055,16 @@ private extension ShipKind {
             return "arrow.triangle.2.circlepath"
         case .espionageProbe:
             return "eye"
+        case .bomber:
+            return "flame"
+        case .solarSatellite:
+            return "sun.max"
+        case .destroyer:
+            return "burst"
+        case .deathstar:
+            return "circle.hexagongrid.circle"
+        case .battlecruiser:
+            return "paperplane.circle"
         }
     }
 }
@@ -4163,6 +4089,8 @@ private extension DefenseKind {
 private extension MissileKind {
     var systemImage: String {
         switch self {
+        case .antiBallisticMissile:
+            return "shield"
         case .interplanetaryMissile:
             return "scope"
         }
@@ -4229,19 +4157,6 @@ private extension RelationPosture {
             return .red
         case .pressured:
             return .purple
-        }
-    }
-}
-
-private extension BriefingUrgency {
-    var tint: Color {
-        switch self {
-        case .info:
-            return .blue
-        case .good:
-            return .green
-        case .warning:
-            return .orange
         }
     }
 }

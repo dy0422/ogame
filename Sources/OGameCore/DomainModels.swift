@@ -1392,6 +1392,10 @@ public enum BuildingKind: String, Codable, CaseIterable, Sendable {
     case crystalStorage
     case deuteriumTank
     case naniteFactory
+    case missileSilo
+    case lunarBase
+    case sensorPhalanx
+    case jumpGate
 }
 
 public enum TechnologyKind: String, Codable, CaseIterable, Sendable {
@@ -1416,6 +1420,11 @@ public enum ShipKind: String, Codable, CaseIterable, Sendable {
     case colonyShip
     case recycler
     case espionageProbe
+    case bomber
+    case solarSatellite
+    case destroyer
+    case deathstar
+    case battlecruiser
 }
 
 public enum DefenseKind: String, Codable, CaseIterable, Sendable {
@@ -1428,6 +1437,7 @@ public enum DefenseKind: String, Codable, CaseIterable, Sendable {
 }
 
 public enum MissileKind: String, Codable, CaseIterable, Sendable {
+    case antiBallisticMissile
     case interplanetaryMissile
 }
 
@@ -1578,6 +1588,26 @@ public extension BuildingKind {
             return "重氢储罐"
         case .naniteFactory:
             return "纳米工厂"
+        case .missileSilo:
+            return "导弹发射井"
+        case .lunarBase:
+            return "月球基地"
+        case .sensorPhalanx:
+            return "感应阵"
+        case .jumpGate:
+            return "跳跃门"
+        }
+    }
+}
+
+public extension BuildingKind {
+    var isMoonFacility: Bool {
+        switch self {
+        case .lunarBase, .sensorPhalanx, .jumpGate:
+            return true
+        case .metalMine, .crystalMine, .deuteriumSynthesizer, .solarPlant, .roboticsFactory, .shipyard,
+             .researchLab, .metalStorage, .crystalStorage, .deuteriumTank, .naniteFactory, .missileSilo:
+            return false
         }
     }
 }
@@ -1628,6 +1658,16 @@ public extension ShipKind {
             return "回收船"
         case .espionageProbe:
             return "间谍探测器"
+        case .bomber:
+            return "轰炸机"
+        case .solarSatellite:
+            return "太阳能卫星"
+        case .destroyer:
+            return "毁灭者"
+        case .deathstar:
+            return "死星"
+        case .battlecruiser:
+            return "战斗巡洋舰"
         }
     }
 }
@@ -1654,6 +1694,8 @@ public extension DefenseKind {
 public extension MissileKind {
     var localizedName: String {
         switch self {
+        case .antiBallisticMissile:
+            return "拦截导弹"
         case .interplanetaryMissile:
             return "星际导弹"
         }
