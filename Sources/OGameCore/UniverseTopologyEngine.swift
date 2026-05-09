@@ -21,6 +21,36 @@ public enum UniverseTopologyEngine {
         }
     }
 
+    public struct ColonySlotProfile: Equatable, Sendable {
+        public var position: Int
+        public var solarEnergyFactor: Double
+        public var deuteriumFactor: Double
+        public var fieldFactor: Double
+        public var strategyHint: String
+
+        public init(
+            position: Int,
+            solarEnergyFactor: Double,
+            deuteriumFactor: Double,
+            fieldFactor: Double,
+            strategyHint: String
+        ) {
+            self.position = min(max(position, 1), UniverseTopologyEngine.planetSlotsPerSystem)
+            self.solarEnergyFactor = Self.normalizedFactor(solarEnergyFactor)
+            self.deuteriumFactor = Self.normalizedFactor(deuteriumFactor)
+            self.fieldFactor = Self.normalizedFactor(fieldFactor)
+            self.strategyHint = strategyHint
+        }
+
+        private static func normalizedFactor(_ value: Double) -> Double {
+            guard value.isFinite else {
+                return 1
+            }
+
+            return min(max(value, 0), 2)
+        }
+    }
+
     public static let defaultGalaxyCount = 9
     public static let defaultSystemsPerGalaxy = 499
     public static let planetSlotsPerSystem = 15
@@ -63,6 +93,33 @@ public enum UniverseTopologyEngine {
         )
     }
 
+    public static func colonySlotProfile(forPosition position: Int) -> ColonySlotProfile {
+        let slot = min(max(position, 1), planetSlotsPerSystem)
+        let temperature = baseTemperature(for: slot)
+        let fields = fieldRange(for: slot)
+        let fieldMidpoint = Double(fields.lowerBound + fields.upperBound) / 2
+        let solarFactor = min(max(0.55 + (temperature + 100) / 260, 0.45), 1.45)
+        let deuteriumFactor = min(max(0.65 + (90 - temperature) / 230, 0.55), 1.45)
+        let fieldFactor = min(max(fieldMidpoint / 220, 0.45), 1.45)
+        let hint: String
+        switch slot {
+        case 1...3:
+            hint = "近星位适合太阳能卫星和早期能源，但方圆偏小。"
+        case 4...9:
+            hint = "中星位方圆更大，适合作为长期主力殖民地。"
+        default:
+            hint = "远星位温度低，重氢收益更好，但太阳能偏弱。"
+        }
+
+        return ColonySlotProfile(
+            position: slot,
+            solarEnergyFactor: solarFactor,
+            deuteriumFactor: deuteriumFactor,
+            fieldFactor: fieldFactor,
+            strategyHint: hint
+        )
+    }
+
     public static func moonChancePercent(forDebris debris: ResourceBundle) -> Int {
         let total = max(safe(debris.metal) + safe(debris.crystal), 0)
         guard total >= serviceMoonDebrisPerPercent else {
@@ -81,6 +138,9 @@ public enum UniverseTopologyEngine {
     ) -> Bool {
         guard chancePercent > 0 else {
             return false
+        }
+        guard chancePercent < maximumMoonChancePercent else {
+            return true
         }
         guard chancePercent < 100 else {
             return true

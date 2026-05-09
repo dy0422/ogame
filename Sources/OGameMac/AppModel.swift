@@ -1555,7 +1555,16 @@ final class AppModel: ObservableObject {
         let loot = fleetCargoSummary(report.loot)
         let debris = fleetCargoSummary(report.debris)
         let losses = fleetCargoSummary(report.losses)
-        return "战利品 \(loot) - 残骸 \(debris) - 损失 \(losses)"
+        guard report.kind == .battle, !report.battleRounds.isEmpty else {
+            return "战利品 \(loot) - 残骸 \(debris) - 损失 \(losses)"
+        }
+
+        let attackerShots = report.battleRounds.reduce(0) { $0 + $1.attackerShots }
+        let defenderShots = report.battleRounds.reduce(0) { $0 + $1.defenderShots }
+        let rapidFire = report.battleRounds.reduce(0) { $0 + $1.rapidFireShots }
+        let explosions = report.battleRounds.reduce(0) { $0 + $1.explodedUnits }
+        let moonChance = UniverseTopologyEngine.moonChancePercent(forDebris: report.debris)
+        return "\(report.battleRounds.count) 回合 - 射击 \(attackerShots)/\(defenderShots) - RF \(rapidFire) - 爆炸 \(explosions) - 月球 \(moonChance)% - 战利品 \(loot) - 残骸 \(debris)"
     }
 
     func queueRemainingText(until finishTime: TimeInterval) -> String {

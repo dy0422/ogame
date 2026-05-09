@@ -146,6 +146,7 @@ enum GameArt {
     private static let technologyAssetIDs: [TechnologyKind: Int] = [
         .espionage: 106,
         .computer: 108,
+        .astrophysics: 124,
         .weapons: 109,
         .shielding: 110,
         .armor: 111,

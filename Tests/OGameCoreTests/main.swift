@@ -1077,6 +1077,18 @@ func testUniverseTopologyPlanetProfilesVaryBySlot() {
     requireEqual(outer.habitat, .ice, "Outer slots should receive an ice habitat profile")
 }
 
+func testUniverseTopologyColonySlotProfilesExposeLongTermTradeoffs() {
+    let inner = UniverseTopologyEngine.colonySlotProfile(forPosition: 2)
+    let middle = UniverseTopologyEngine.colonySlotProfile(forPosition: 7)
+    let outer = UniverseTopologyEngine.colonySlotProfile(forPosition: 14)
+
+    require(inner.solarEnergyFactor > outer.solarEnergyFactor, "Inner slots should be better for solar energy")
+    require(outer.deuteriumFactor > inner.deuteriumFactor, "Outer cold slots should be better for deuterium")
+    require(middle.fieldFactor > inner.fieldFactor && middle.fieldFactor > outer.fieldFactor, "Middle slots should be strongest for planet fields")
+    require(inner.strategyHint.contains("太阳能"), "Inner slot hint should explain solar value")
+    require(outer.strategyHint.contains("重氢"), "Outer slot hint should explain deuterium value")
+}
+
 func testStarterUniverseProvidesServiceStyleColonyPool() {
     let universe = StarterUniverseFactory.makeNewGame(seed: 23, playerName: "Commander")
     let neutralPlanets = universe.planets.filter { $0.ownerID == nil }
@@ -1173,6 +1185,20 @@ func testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized() 
         cargo: .zero
     )
     requireEqual(cappedColonize, .failure(.invalidMission), "Faction at colony cap should not launch another colonization fleet")
+
+    var astrophysicsUniverse = cappedUniverse
+    astrophysicsUniverse.factions[0].technology.levels[.astrophysics] = 2
+    let expandedCapColonize = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &astrophysicsUniverse,
+        mission: .colonize,
+        ships: [.colonyShip: 1],
+        cargo: .zero
+    )
+    guard case .launched = expandedCapColonize else {
+        fatalError("Astrophysics should raise the colony cap beyond the service baseline")
+    }
 }
 
 func testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources() {
@@ -2509,6 +2535,26 @@ func testBattleSimulationProducesAtMostSixRounds() {
     require(result.rounds.contains { $0.attackerLosses.isEmpty == false || $0.defenderShipLosses.isEmpty == false || $0.defenderDefenseLosses.isEmpty == false }, "Battle rounds should record losses")
 }
 
+func testBattleSimulationRecordsRapidFireShieldHullAndExplosions() {
+    let input = BattleSimulationInput(
+        attackerShips: [.cruiser: 8],
+        defenderShips: [.lightFighter: 48],
+        defenderDefenses: [:],
+        attackerResearch: ResearchState(levels: [.weapons: 3, .shielding: 2, .armor: 2]),
+        defenderResearch: ResearchState(levels: [.weapons: 1, .shielding: 1, .armor: 1]),
+        ruleSet: .fastSkirmish,
+        seed: 9_901
+    )
+
+    let result = BattleSimulationEngine.resolve(input)
+
+    require(result.rounds.count >= 1 && result.rounds.count <= 6, "Battle V2 should still stay inside the OGame-style six-round cap")
+    require(result.rounds.contains { $0.rapidFireShots > 0 }, "Cruisers should trigger rapid fire against light fighters")
+    require(result.rounds.contains { $0.shieldDamage > 0 && $0.hullDamage > 0 }, "Battle report rounds should expose shield and hull damage")
+    require(result.rounds.contains { $0.explodedUnits > 0 }, "Damaged units should be able to explode after hull integrity drops")
+    require(result.rounds.contains { ($0.defenderShipLosses[.lightFighter] ?? 0) > 0 }, "Rapid fire battle should destroy some light fighters")
+}
+
 func testFleetLaunchRespectsComputerFleetSlots() {
     var universe = makeFleetUniverse(originShips: [.smallCargo: 3])
     universe.factions[0].technology = ResearchState()
@@ -2553,6 +2599,96 @@ func testOutboundFleetCanBeRecalled() {
     requireEqual(recalled, true, "Recall should succeed")
     requireEqual(universe.fleets[0].phase, .returning, "Recalled fleet should return")
     require(universe.fleets[0].returnTime < fleet.returnTime, "Recall should shorten return time")
+}
+
+func testSensorPhalanxHidesRecalledAndMoonOriginFleets() {
+    let playerID = fleetPlayerID()
+    let rivalID = fleetEnemyID()
+    let moonPlanetID = fleetPlanetID(1)
+    let targetPlanetID = fleetPlanetID(2)
+    let raidTargetID = fleetPlanetID(3)
+    let visibleFleetID = FleetID(UUID(uuidString: "00000000-0000-0000-0000-00000000f101")!)
+    let recalledFleetID = FleetID(UUID(uuidString: "00000000-0000-0000-0000-00000000f102")!)
+    let moonOriginFleetID = FleetID(UUID(uuidString: "00000000-0000-0000-0000-00000000f103")!)
+    let scanMoon = Moon(
+        id: UUID(uuidString: "00000000-0000-0000-0000-00000000f201")!,
+        name: "Scanner",
+        createdAt: 0,
+        buildingLevels: [.sensorPhalanx: 3]
+    )
+    let targetMoon = Moon(
+        id: UUID(uuidString: "00000000-0000-0000-0000-00000000f202")!,
+        name: "Hidden Yard",
+        createdAt: 0,
+        buildingLevels: [.lunarBase: 1]
+    )
+    let visibleFleet = Fleet(
+        id: visibleFleetID,
+        ownerID: rivalID,
+        mission: .attack,
+        origin: Coordinate(galaxy: 1, system: 2, position: 6),
+        target: Coordinate(galaxy: 1, system: 3, position: 6),
+        ships: [.lightFighter: 1],
+        launchTime: 10,
+        arrivalTime: 120,
+        returnTime: 240,
+        originPlanetID: targetPlanetID,
+        targetPlanetID: raidTargetID
+    )
+    let recalledFleet = Fleet(
+        id: recalledFleetID,
+        ownerID: rivalID,
+        mission: .attack,
+        origin: Coordinate(galaxy: 1, system: 2, position: 6),
+        target: Coordinate(galaxy: 1, system: 3, position: 6),
+        ships: [.lightFighter: 1],
+        launchTime: 10,
+        arrivalTime: 120,
+        returnTime: 80,
+        phase: .returning,
+        originPlanetID: targetPlanetID,
+        targetPlanetID: raidTargetID,
+        recalledAt: 40
+    )
+    let moonOriginFleet = Fleet(
+        id: moonOriginFleetID,
+        ownerID: rivalID,
+        mission: .transport,
+        origin: Coordinate(galaxy: 1, system: 2, position: 6),
+        target: Coordinate(galaxy: 1, system: 3, position: 6),
+        ships: [.smallCargo: 1],
+        launchTime: 20,
+        arrivalTime: 150,
+        returnTime: 280,
+        originPlanetID: targetPlanetID,
+        targetPlanetID: raidTargetID,
+        originSite: .moon
+    )
+    let universe = Universe(
+        id: UniverseID(UUID(uuidString: "00000000-0000-0000-0000-00000000f300")!),
+        name: "Phalanx Test",
+        seed: 91,
+        gameTime: 50,
+        playerFactionID: playerID,
+        factions: [
+            Faction(id: playerID, name: "Player", kind: .player, strategy: .balanced, ownedPlanetIDs: [moonPlanetID]),
+            Faction(id: rivalID, name: "Rival", kind: .ai, strategy: .raider, ownedPlanetIDs: [targetPlanetID, raidTargetID])
+        ],
+        planets: [
+            Planet(id: moonPlanetID, name: "Moon Base", coordinate: Coordinate(galaxy: 1, system: 1, position: 4), ownerID: playerID, moon: scanMoon),
+            Planet(id: targetPlanetID, name: "Target", coordinate: Coordinate(galaxy: 1, system: 2, position: 6), ownerID: rivalID, moon: targetMoon),
+            Planet(id: raidTargetID, name: "Raid Target", coordinate: Coordinate(galaxy: 1, system: 3, position: 6), ownerID: rivalID)
+        ],
+        fleets: [visibleFleet, recalledFleet, moonOriginFleet],
+        events: [],
+        ruleSet: .fastSkirmish
+    )
+
+    let scans = MoonEngine.sensorScan(from: moonPlanetID, targetPlanetID: targetPlanetID, ownerID: playerID, in: universe)
+
+    require(scans.contains { $0.id == visibleFleetID }, "Phalanx should still show normal planet-origin movement")
+    require(!scans.contains { $0.id == recalledFleetID }, "Phalanx should hide recalled fleets")
+    require(!scans.contains { $0.id == moonOriginFleetID }, "Phalanx should hide fleets launched from a moon")
 }
 
 func testTransportMissionDeliversCargoAndReturnsShips() {
@@ -2747,6 +2883,31 @@ func testExploreMissionCreatesDeterministicEventAndReward() throws {
     requireEqual(first, second, "Exploration arrival should be deterministic across save/load equality")
     requireEqual(first.events.last?.kind, .exploration, "Exploration should record an exploration event")
     require(first.fleets[0].cargo != .zero, "Exploration should generate a resource reward to return")
+}
+
+func testExplorationEventPoolIncludesOGameStyleFindsRisksAndTimingEvents() {
+    let kinds = Set(ExplorationOutcomeKind.allCases)
+
+    for expected in [
+        ExplorationOutcomeKind.resourceCache,
+        .debrisField,
+        .derelictShips,
+        .largeDerelictFleet,
+        .darkMatter,
+        .pirateAmbush,
+        .alienEncounter,
+        .earlyReturn,
+        .delayedReturn,
+        .blackHole,
+        .emptySignal
+    ] {
+        require(kinds.contains(expected), "Exploration event pool should include \(expected.rawValue)")
+    }
+
+    let delay = ExplorationOutcome(kind: .delayedReturn, timeShift: 300, messageKey: "delay")
+    let early = ExplorationOutcome(kind: .earlyReturn, timeShift: -120, messageKey: "early")
+    require(delay.timeShift > 0, "Delayed expedition events should be able to extend return timing")
+    require(early.timeShift < 0, "Early expedition events should be able to shorten return timing")
 }
 
 func testExploreMissionAdvancesStrategicExplorationVictoryThroughSimulationTick() {
@@ -3123,21 +3284,56 @@ func testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense() {
     requireEqual(universe.events.last?.kind, .combat, "Attack should record a combat event")
 }
 
+func testStrongAttackAgainstWeakTargetHasReducedLootAndProtectionSummary() {
+    var universe = makeCombatUniverse()
+    universe.planets[0].resources = ResourceBundle(metal: 250_000, crystal: 120_000, deuterium: 120_000)
+    universe.planets[0].shipInventory = [.cruiser: 12, .smallCargo: 4]
+    universe.planets[1].shipInventory = [:]
+    universe.planets[1].defenseInventory = [.rocketLauncher: 1]
+    universe.planets[1].resources = ResourceBundle(metal: 20_000, crystal: 10_000, deuterium: 4_000)
+    universe.rankings = [
+        FactionScore(factionID: fleetPlayerID(), factionName: "Attacker", totalScore: 250_000),
+        FactionScore(factionID: fleetEnemyID(), factionName: "Defender", totalScore: 8_000)
+    ]
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .attack,
+        ships: [.cruiser: 12, .smallCargo: 4],
+        cargo: .zero
+    )
+    guard case .launched(let launchedFleet) = launch else {
+        fatalError("Strong attack fleet should launch")
+    }
+
+    universe.gameTime = launchedFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    guard let report = universe.reports.last else {
+        fatalError("Attack should create a battle report")
+    }
+
+    let baselineHalfLoot = ResourceBundle(metal: 10_000, crystal: 5_000, deuterium: 2_000)
+    require(resourceTotal(report.loot) < resourceTotal(baselineHalfLoot), "Strong-vs-weak attacks should loot less than the standard fifty percent")
+    require(report.summary.contains("非荣誉"), "Battle report should flag non-honorable attacks for review")
+}
+
 func testMoonChanceCanCreateMoonFromLargeDebrisBattle() {
     var universe = makeCombatUniverse()
-    universe.planets[0].shipInventory = [.battleship: 36]
-    universe.planets[1].shipInventory = [.battleship: 18, .cruiser: 12, .lightFighter: 40]
-    universe.planets[1].defenseInventory = [.rocketLauncher: 60, .lightLaser: 20, .heavyLaser: 6]
+    universe.planets[0].shipInventory = [.deathstar: 2, .battleship: 80]
+    universe.planets[1].shipInventory = [.battleship: 80, .cruiser: 40, .lightFighter: 160]
+    universe.planets[1].defenseInventory = [.rocketLauncher: 120, .lightLaser: 60, .heavyLaser: 20]
     let fleet = Fleet(
         id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-000000000003")!),
         ownerID: fleetPlayerID(),
         mission: .attack,
         origin: universe.planets[0].coordinate,
         target: universe.planets[1].coordinate,
-        ships: [.battleship: 36],
+        ships: [.deathstar: 2, .battleship: 80],
         launchTime: universe.gameTime,
-        arrivalTime: universe.gameTime + 120,
-        returnTime: universe.gameTime + 240,
+        arrivalTime: 120,
+        returnTime: 240,
         originPlanetID: fleetPlanetID(1),
         targetPlanetID: fleetPlanetID(2)
     )
@@ -3272,13 +3468,15 @@ func testMissileStrikeRejectsInvalidCoreTargets() {
 
 func testAttackReturnCargoIsCappedAfterCargoShipLosses() {
     var universe = makeCombatUniverse()
+    universe.planets[0].shipInventory[.battleship] = 2
+    universe.planets[1].defenseInventory = [.rocketLauncher: 10, .lightLaser: 4]
     let launchCargo = ResourceBundle(metal: 8_000)
     let launch = FleetEngine.launchFleet(
         from: fleetPlanetID(1),
         to: fleetPlanetID(2),
         in: &universe,
         mission: .attack,
-        ships: [.lightFighter: 8, .smallCargo: 2],
+        ships: [.battleship: 2, .lightFighter: 8, .smallCargo: 2],
         cargo: launchCargo
     )
     guard case .launched(let launchedFleet) = launch else {
@@ -6041,6 +6239,7 @@ testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
 testUniverseTopologyUsesServiceStyleCoordinateLimits()
 testUniverseTopologyPlanetProfilesVaryBySlot()
+testUniverseTopologyColonySlotProfilesExposeLongTermTradeoffs()
 testStarterUniverseProvidesServiceStyleColonyPool()
 testServiceStyleMoonChanceUsesDebrisThresholdAndCap()
 testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized()
@@ -6116,14 +6315,17 @@ testInvalidFleetLaunchFailsWithoutMutation()
 testFleetTravelTimeIsDeterministicFromCoordinatesAndSpeedRules()
 testSlowerFleetTakesLongerAndUsesLessFuel()
 testBattleSimulationProducesAtMostSixRounds()
+testBattleSimulationRecordsRapidFireShieldHullAndExplosions()
 testFleetLaunchRespectsComputerFleetSlots()
 testOutboundFleetCanBeRecalled()
+testSensorPhalanxHidesRecalledAndMoonOriginFleets()
 testTransportMissionDeliversCargoAndReturnsShips()
 testLargeSimulationTickCompletesOutboundArrivalAndReturnTogether()
 testTransportOverflowCargoStaysWithReturningFleet()
 testReturningFleetDoesNotLoseCargoWhenOriginStorageIsFull()
 testRecycleMissionCollectsDebrisFromTargetPlanet()
 try testExploreMissionCreatesDeterministicEventAndReward()
+testExplorationEventPoolIncludesOGameStyleFindsRisksAndTimingEvents()
 testExploreMissionAdvancesStrategicExplorationVictoryThroughSimulationTick()
 testExplorationMissionRecordsBoundedDiscoveriesAndFeedsProgress()
 testExploreMissionCreatesExplorationReport()
@@ -6133,6 +6335,7 @@ testAttackShiftsFactionRelationsWithoutHiddenTargetDetails()
 testRepeatedAttacksIncrementThreatWithoutDuplicateRelations()
 try testFactionRelationsNormalizeDuplicatesOnDecodeAndAttackUpdate()
 testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense()
+testStrongAttackAgainstWeakTargetHasReducedLootAndProtectionSummary()
 testMoonChanceCanCreateMoonFromLargeDebrisBattle()
 testMissileStrikeDamagesDefensesWithoutLoot()
 testAntiBallisticMissilesInterceptIncomingMissiles()

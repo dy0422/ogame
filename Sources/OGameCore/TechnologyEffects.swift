@@ -9,6 +9,10 @@ public enum TechnologyEffects {
         max(1, 1 + level(.computer, in: research))
     }
 
+    public static func maxColonies(for research: ResearchState) -> Int {
+        UniverseTopologyEngine.defaultMaxPlayerPlanets + max(level(.astrophysics, in: research), 0) / 2
+    }
+
     public static func driveTechnology(for ship: ShipKind) -> TechnologyKind? {
         switch ship {
         case .smallCargo, .largeCargo, .recycler:

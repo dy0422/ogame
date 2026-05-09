@@ -45,6 +45,8 @@ public enum MoonEngine {
 
         return universe.fleets.filter { fleet in
             fleet.phase != .completed &&
+                fleet.recalledAt == nil &&
+                !(fleet.originPlanetID == targetPlanetID && fleet.originSite == .moon) &&
                 (fleet.originPlanetID == targetPlanetID || fleet.targetPlanetID == targetPlanetID)
         }
     }

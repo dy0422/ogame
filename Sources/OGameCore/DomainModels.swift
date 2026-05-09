@@ -1046,7 +1046,13 @@ public enum ExplorationOutcomeKind: String, Codable, CaseIterable, Sendable {
     case resourceCache
     case debrisField
     case derelictShips
+    case largeDerelictFleet
+    case darkMatter
     case pirateAmbush
+    case alienEncounter
+    case earlyReturn
+    case delayedReturn
+    case blackHole
     case emptySignal
 }
 
@@ -1055,6 +1061,7 @@ public struct ExplorationOutcome: Codable, Equatable, Sendable {
     public var reward: ResourceBundle
     public var foundShips: [ShipKind: Int]
     public var lostShips: [ShipKind: Int]
+    public var timeShift: TimeInterval
     public var messageKey: String
 
     public init(
@@ -1062,12 +1069,14 @@ public struct ExplorationOutcome: Codable, Equatable, Sendable {
         reward: ResourceBundle = .zero,
         foundShips: [ShipKind: Int] = [:],
         lostShips: [ShipKind: Int] = [:],
+        timeShift: TimeInterval = 0,
         messageKey: String
     ) {
         self.kind = kind
         self.reward = reward.nonnegative
         self.foundShips = Self.normalizedShips(foundShips)
         self.lostShips = Self.normalizedShips(lostShips)
+        self.timeShift = timeShift.isFinite ? timeShift : 0
         self.messageKey = messageKey
     }
 
@@ -1100,6 +1109,11 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         case completed
     }
 
+    public enum OriginSite: String, Codable, Sendable {
+        case planet
+        case moon
+    }
+
     public var id: FleetID
     public var ownerID: FactionID
     public var mission: Mission
@@ -1115,6 +1129,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
     public var targetPlanetID: PlanetID?
     public var speedPercent: Double
     public var recalledAt: TimeInterval?
+    public var originSite: OriginSite
 
     public init(
         id: FleetID = FleetID(),
@@ -1131,7 +1146,8 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         originPlanetID: PlanetID? = nil,
         targetPlanetID: PlanetID? = nil,
         speedPercent: Double = 1,
-        recalledAt: TimeInterval? = nil
+        recalledAt: TimeInterval? = nil,
+        originSite: OriginSite = .planet
     ) {
         self.id = id
         self.ownerID = ownerID
@@ -1148,6 +1164,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         self.targetPlanetID = targetPlanetID
         self.speedPercent = Self.normalizedSpeedPercent(speedPercent)
         self.recalledAt = recalledAt.flatMap(Self.normalizedOptionalTime)
+        self.originSite = originSite
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1166,6 +1183,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         case targetPlanetID
         case speedPercent
         case recalledAt
+        case originSite
     }
 
     public init(from decoder: Decoder) throws {
@@ -1189,6 +1207,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         )
         self.recalledAt = try container.decodeIfPresentStrict(TimeInterval.self, forKey: .recalledAt)
             .flatMap(Self.normalizedOptionalTime)
+        self.originSite = try container.decodeIfPresentStrict(OriginSite.self, forKey: .originSite) ?? .planet
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1209,6 +1228,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         try container.encodeIfPresent(targetPlanetID, forKey: .targetPlanetID)
         try container.encode(speedPercent, forKey: .speedPercent)
         try container.encodeIfPresent(recalledAt, forKey: .recalledAt)
+        try container.encode(originSite, forKey: .originSite)
     }
 
     private static func normalizedSpeedPercent(_ value: Double) -> Double {
@@ -1364,6 +1384,12 @@ public struct BattleRoundSummary: Codable, Equatable, Sendable {
     public var attackerLosses: [ShipKind: Int]
     public var defenderShipLosses: [ShipKind: Int]
     public var defenderDefenseLosses: [DefenseKind: Int]
+    public var attackerShots: Int
+    public var defenderShots: Int
+    public var rapidFireShots: Int
+    public var shieldDamage: Double
+    public var hullDamage: Double
+    public var explodedUnits: Int
 
     public init(
         round: Int,
@@ -1371,7 +1397,13 @@ public struct BattleRoundSummary: Codable, Equatable, Sendable {
         defenderPower: Double,
         attackerLosses: [ShipKind: Int] = [:],
         defenderShipLosses: [ShipKind: Int] = [:],
-        defenderDefenseLosses: [DefenseKind: Int] = [:]
+        defenderDefenseLosses: [DefenseKind: Int] = [:],
+        attackerShots: Int = 0,
+        defenderShots: Int = 0,
+        rapidFireShots: Int = 0,
+        shieldDamage: Double = 0,
+        hullDamage: Double = 0,
+        explodedUnits: Int = 0
     ) {
         self.round = max(round, 0)
         self.attackerPower = attackerPower.isFinite ? max(attackerPower, 0) : 0
@@ -1379,6 +1411,62 @@ public struct BattleRoundSummary: Codable, Equatable, Sendable {
         self.attackerLosses = attackerLosses.filter { $0.value > 0 }
         self.defenderShipLosses = defenderShipLosses.filter { $0.value > 0 }
         self.defenderDefenseLosses = defenderDefenseLosses.filter { $0.value > 0 }
+        self.attackerShots = max(attackerShots, 0)
+        self.defenderShots = max(defenderShots, 0)
+        self.rapidFireShots = max(rapidFireShots, 0)
+        self.shieldDamage = shieldDamage.isFinite ? max(shieldDamage, 0) : 0
+        self.hullDamage = hullDamage.isFinite ? max(hullDamage, 0) : 0
+        self.explodedUnits = max(explodedUnits, 0)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case round
+        case attackerPower
+        case defenderPower
+        case attackerLosses
+        case defenderShipLosses
+        case defenderDefenseLosses
+        case attackerShots
+        case defenderShots
+        case rapidFireShots
+        case shieldDamage
+        case hullDamage
+        case explodedUnits
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            round: try container.decode(Int.self, forKey: .round),
+            attackerPower: try container.decode(Double.self, forKey: .attackerPower),
+            defenderPower: try container.decode(Double.self, forKey: .defenderPower),
+            attackerLosses: try container.decodeRawValueDictionary(ShipKind.self, forKey: .attackerLosses),
+            defenderShipLosses: try container.decodeRawValueDictionary(ShipKind.self, forKey: .defenderShipLosses),
+            defenderDefenseLosses: try container.decodeRawValueDictionary(DefenseKind.self, forKey: .defenderDefenseLosses),
+            attackerShots: try container.decodeIfPresentStrict(Int.self, forKey: .attackerShots) ?? 0,
+            defenderShots: try container.decodeIfPresentStrict(Int.self, forKey: .defenderShots) ?? 0,
+            rapidFireShots: try container.decodeIfPresentStrict(Int.self, forKey: .rapidFireShots) ?? 0,
+            shieldDamage: try container.decodeIfPresentStrict(Double.self, forKey: .shieldDamage) ?? 0,
+            hullDamage: try container.decodeIfPresentStrict(Double.self, forKey: .hullDamage) ?? 0,
+            explodedUnits: try container.decodeIfPresentStrict(Int.self, forKey: .explodedUnits) ?? 0
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        try container.encode(round, forKey: .round)
+        try container.encode(attackerPower, forKey: .attackerPower)
+        try container.encode(defenderPower, forKey: .defenderPower)
+        try container.encodeRawValueDictionary(attackerLosses, forKey: .attackerLosses)
+        try container.encodeRawValueDictionary(defenderShipLosses, forKey: .defenderShipLosses)
+        try container.encodeRawValueDictionary(defenderDefenseLosses, forKey: .defenderDefenseLosses)
+        try container.encode(attackerShots, forKey: .attackerShots)
+        try container.encode(defenderShots, forKey: .defenderShots)
+        try container.encode(rapidFireShots, forKey: .rapidFireShots)
+        try container.encode(shieldDamage, forKey: .shieldDamage)
+        try container.encode(hullDamage, forKey: .hullDamage)
+        try container.encode(explodedUnits, forKey: .explodedUnits)
     }
 }
 
@@ -1665,6 +1753,7 @@ public enum BuildingKind: String, Codable, CaseIterable, Sendable {
 public enum TechnologyKind: String, Codable, CaseIterable, Sendable {
     case espionage
     case computer
+    case astrophysics
     case weapons
     case shielding
     case armor
@@ -1958,6 +2047,8 @@ public extension TechnologyKind {
             return "间谍技术"
         case .computer:
             return "计算机技术"
+        case .astrophysics:
+            return "天体物理学"
         case .weapons:
             return "武器技术"
         case .shielding:
@@ -1981,6 +2072,8 @@ public extension TechnologyKind {
             return "提升侦察能力，解锁探测器并让你更清楚目标资源、舰队和防御。"
         case .computer:
             return "提升指挥与计算能力，是纳米工厂和高效舰队调度的重要前置。"
+        case .astrophysics:
+            return "提升深空测绘与殖民能力，让帝国可以稳定管理更多星球。"
         case .weapons:
             return "提高舰船和防御的攻击表现，让突袭与正面战斗更有破坏力。"
         case .shielding:

@@ -39,7 +39,7 @@ public enum FleetEngine {
         }
         let ownerFaction = universe.factions.first { $0.id == ownerID }
         if mission == .colonize,
-           (ownerFaction?.ownedPlanetIDs.count ?? 0) >= UniverseTopologyEngine.defaultMaxPlayerPlanets
+           (ownerFaction?.ownedPlanetIDs.count ?? 0) >= TechnologyEffects.maxColonies(for: ownerFaction?.technology ?? ResearchState())
         {
             return .failure(.invalidMission)
         }
@@ -344,15 +344,19 @@ public enum FleetEngine {
             let outcome = ExplorationEventEngine.resolve(fleet: fleet, universe: universe)
             returningFleet.cargo = safeAdding(fleet.cargo, outcome.reward)
             returningFleet.ships = applyExplorationShipOutcome(outcome, to: returningFleet.ships)
+            returningFleet.returnTime = adjustedExplorationReturnTime(for: returningFleet, outcome: outcome)
             if let record = recordExploredTarget(for: fleet, reward: outcome.reward, in: &universe) {
                 universe.reports.append(explorationReport(for: fleet, record: record, in: universe))
             }
             universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .exploration, title: "Exploration \(outcome.kind.rawValue)"))
+            if returningFleet.ships.isEmpty {
+                return nil
+            }
         case .colonize:
             if let targetIndex = targetPlanetIndex(for: fleet, in: universe),
                universe.planets[targetIndex].ownerID == nil,
                UniverseTopologyEngine.isValidPlanetCoordinate(universe.planets[targetIndex].coordinate),
-               (universe.factions.first { $0.id == fleet.ownerID }?.ownedPlanetIDs.count ?? 0) < UniverseTopologyEngine.defaultMaxPlayerPlanets,
+               canFactionColonizeMorePlanets(fleet.ownerID, in: universe),
                (fleet.ships[.colonyShip] ?? 0) > 0
             {
                 let profile = UniverseTopologyEngine.planetProfile(
@@ -433,6 +437,14 @@ public enum FleetEngine {
         }
     }
 
+    private static func canFactionColonizeMorePlanets(_ factionID: FactionID, in universe: Universe) -> Bool {
+        guard let faction = universe.factions.first(where: { $0.id == factionID }) else {
+            return false
+        }
+
+        return faction.ownedPlanetIDs.count < TechnologyEffects.maxColonies(for: faction.technology)
+    }
+
     private static func normalizedShips(_ ships: [ShipKind: Int]) -> [ShipKind: Int] {
         ships.reduce(into: [:]) { result, element in
             guard element.value > 0 else {
@@ -464,6 +476,14 @@ public enum FleetEngine {
         }
 
         return adjusted
+    }
+
+    private static func adjustedExplorationReturnTime(for fleet: Fleet, outcome: ExplorationOutcome) -> TimeInterval {
+        guard outcome.timeShift.isFinite, outcome.timeShift != 0 else {
+            return fleet.returnTime
+        }
+
+        return max(fleet.arrivalTime + 1, fleet.returnTime + outcome.timeShift)
     }
 
     private static func normalizedSpeedPercent(_ value: Double) -> Double {

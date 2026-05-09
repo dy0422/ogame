@@ -726,6 +726,14 @@ public extension RuleSet {
                 durationMultiplier: 1.50,
                 aiPriorityWeight: 0.65
             ),
+            .astrophysics: ResearchRule(
+                baseCost: ResourceBundle(metal: 1_000, crystal: 2_000, deuterium: 1_000),
+                costMultiplier: 2.00,
+                baseDuration: 70,
+                durationMultiplier: 1.55,
+                aiPriorityWeight: 0.42,
+                requirements: [.technology(.espionage, level: 1), .technology(.impulseDrive, level: 1)]
+            ),
             .weapons: ResearchRule(
                 baseCost: ResourceBundle(metal: 800, crystal: 200),
                 costMultiplier: 2.00,

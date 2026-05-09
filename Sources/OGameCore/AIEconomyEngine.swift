@@ -320,6 +320,8 @@ public enum AIEconomyEngine {
                 return 4.2
             case .espionage:
                 return 3.6
+            case .astrophysics:
+                return 3.2
             case .weapons, .shielding, .armor:
                 return 2.2
             case .combustionDrive, .impulseDrive, .hyperspaceDrive:
@@ -329,6 +331,8 @@ public enum AIEconomyEngine {
             switch technology {
             case .computer:
                 return 2.0
+            case .astrophysics:
+                return 2.6
             case .combustionDrive, .impulseDrive, .hyperspaceDrive:
                 return 1.8
             case .energy:
@@ -340,6 +344,8 @@ public enum AIEconomyEngine {
             switch technology {
             case .computer:
                 return 2.2
+            case .astrophysics:
+                return 1.6
             case .energy:
                 return 1.9
             case .weapons, .shielding, .armor:

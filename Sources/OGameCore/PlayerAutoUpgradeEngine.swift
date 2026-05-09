@@ -280,13 +280,13 @@ public enum PlayerAutoUpgradeEngine {
     private static func researchPriorities(for strategy: AutoUpgradeStrategy) -> [TechnologyKind] {
         switch strategy {
         case .research:
-            return [.computer, .energy, .espionage, .impulseDrive, .hyperspaceDrive, .weapons, .shielding, .armor, .combustionDrive]
+            return [.computer, .energy, .espionage, .astrophysics, .impulseDrive, .hyperspaceDrive, .weapons, .shielding, .armor, .combustionDrive]
         case .fleet:
-            return [.combustionDrive, .impulseDrive, .weapons, .armor, .shielding, .computer, .espionage, .energy, .hyperspaceDrive]
+            return [.combustionDrive, .impulseDrive, .weapons, .armor, .shielding, .computer, .espionage, .astrophysics, .energy, .hyperspaceDrive]
         case .defense, .lowRiskOffline:
-            return [.energy, .weapons, .shielding, .armor, .computer, .espionage, .combustionDrive, .impulseDrive, .hyperspaceDrive]
+            return [.energy, .weapons, .shielding, .armor, .computer, .espionage, .astrophysics, .combustionDrive, .impulseDrive, .hyperspaceDrive]
         case .economy, .balanced:
-            return [.energy, .computer, .espionage, .combustionDrive, .impulseDrive, .weapons, .shielding, .armor, .hyperspaceDrive]
+            return [.energy, .computer, .espionage, .astrophysics, .combustionDrive, .impulseDrive, .weapons, .shielding, .armor, .hyperspaceDrive]
         }
     }
 

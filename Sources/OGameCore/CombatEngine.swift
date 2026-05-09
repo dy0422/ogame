@@ -86,12 +86,20 @@ public enum CombatEngine {
         let defenderLosses = safeAdding(defenderShipLosses, defenderDefenseLosses)
         let debris = debrisFromLosses(safeAdding(attackerLosses, defenderLosses))
         let attackerWon = simulation.attackerWon && !attackerAfterShips.isEmpty
+        let protection = CombatProtectionEngine.evaluate(
+            attackerID: fleet.ownerID,
+            defenderID: universe.planets[targetIndex].ownerID,
+            attackerFaction: attackerFaction,
+            defenderFaction: defenderFaction,
+            universe: universe
+        )
         let survivingCapacity = cargoCapacity(for: attackerAfterShips, ruleSet: universe.ruleSet)
         let cappedExistingCargo = collectCargo(from: fleet.cargo, limit: survivingCapacity)
         let loot = attackerWon
             ? collectLoot(
                 from: universe.planets[targetIndex].resources,
-                limit: max(survivingCapacity - cappedExistingCargo.totalAmount, 0)
+                limit: max(survivingCapacity - cappedExistingCargo.totalAmount, 0),
+                fraction: protection.lootFraction
             )
             : .zero
 
@@ -109,7 +117,13 @@ public enum CombatEngine {
             time: fleet.arrivalTime,
             kind: .battle,
             title: "Battle at \(universe.planets[targetIndex].coordinate.displayText)",
-            summary: attackerWon ? "The attacker won and recovered loot." : "The defender held the field.",
+            summary: battleSummary(
+                attackerWon: attackerWon,
+                protection: protection,
+                debris: debris,
+                moonChance: UniverseTopologyEngine.moonChancePercent(forDebris: debris),
+                recoveredDefenses: recoveredDefenses
+            ),
             participants: [
                 ReportParticipant(
                     role: .attacker,
@@ -550,14 +564,7 @@ public enum CombatEngine {
                 return
             }
 
-            let payload = [
-                "defense-recovery",
-                String(universe.seed),
-                fleet.id.rawValue.uuidString,
-                element.key.rawValue,
-                String(fleet.arrivalTime)
-            ].joined(separator: "|")
-            let recoveryRate = 0.35 + Double(stableHash(payload) % 21) / 100
+            let recoveryRate = 0.70
             let recovered = min(element.value - 1, max(1, Int(floor(Double(element.value) * recoveryRate))))
             if recovered > 0 {
                 result[element.key] = recovered
@@ -726,15 +733,16 @@ public enum CombatEngine {
         )
     }
 
-    private static func collectLoot(from resources: ResourceBundle, limit: Double) -> ResourceBundle {
+    private static func collectLoot(from resources: ResourceBundle, limit: Double, fraction: Double = 0.5) -> ResourceBundle {
         guard limit.isFinite, limit > 0 else {
             return .zero
         }
 
+        let lootFraction = min(max(fraction.isFinite ? fraction : 0.5, 0), 1)
         let lootable = ResourceBundle(
-            metal: max(resources.metal, 0) * 0.5,
-            crystal: max(resources.crystal, 0) * 0.5,
-            deuterium: max(resources.deuterium, 0) * 0.5
+            metal: max(resources.metal, 0) * lootFraction,
+            crystal: max(resources.crystal, 0) * lootFraction,
+            deuterium: max(resources.deuterium, 0) * lootFraction
         )
         var remaining = limit
         let metal = min(lootable.metal, remaining)
@@ -893,6 +901,20 @@ public enum CombatEngine {
         }
 
         return parts.joined(separator: "; ") + "."
+    }
+
+    private static func battleSummary(
+        attackerWon: Bool,
+        protection: CombatProtectionEngine.ProtectionResult,
+        debris: ResourceBundle,
+        moonChance: Int,
+        recoveredDefenses: [DefenseKind: Int]
+    ) -> String {
+        let outcome = attackerWon ? "攻击方获胜" : "防守方守住战场"
+        let recoveryText = unitCount(recoveredDefenses) > 0
+            ? "防御修复 \(unitCount(recoveredDefenses))"
+            : "无防御修复"
+        return "\(outcome)。\(protection.label)，掠夺上限 \(Int((protection.lootFraction * 100).rounded()))%。残骸 \(resourceSummary(debris))，月球概率 \(moonChance)%，\(recoveryText)。"
     }
 
     private static func safeAdding(_ lhs: ResourceBundle, _ rhs: ResourceBundle) -> ResourceBundle {

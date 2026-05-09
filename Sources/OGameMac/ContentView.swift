@@ -4851,6 +4851,8 @@ private extension TechnologyKind {
             return "eye"
         case .computer:
             return "desktopcomputer"
+        case .astrophysics:
+            return "globe.europe.africa"
         case .weapons:
             return "scope"
         case .shielding:

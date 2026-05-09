@@ -108,6 +108,8 @@ private enum ChineseDisplay {
             return "纳米工厂"
         case "computer":
             return "计算机技术"
+        case "astrophysics":
+            return "天体物理学"
         case "weapons":
             return "武器技术"
         case "shielding":
