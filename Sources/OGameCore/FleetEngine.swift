@@ -17,6 +17,13 @@ public enum FleetLaunchResult: Equatable, Sendable {
 }
 
 public enum FleetEngine {
+    private struct JointAttackKey: Hashable {
+        var ownerID: FactionID
+        var targetPlanetID: PlanetID?
+        var target: Coordinate
+        var arrivalTime: Int
+    }
+
     public static func launchFleet(
         from originPlanetID: PlanetID,
         to targetPlanetID: PlanetID,
@@ -177,9 +184,25 @@ public enum FleetEngine {
             return
         }
 
+        let startingFleets = universe.fleets
+        let jointAttackGroups = dueJointAttackGroups(in: startingFleets, universe: universe)
+        let jointAttackFleetIDs = Set(jointAttackGroups.flatMap { $0.map(\.id) })
         var unresolvedFleets: [Fleet] = []
 
-        for fleet in universe.fleets {
+        for group in jointAttackGroups {
+            for returningFleet in resolveJointAttack(group, in: &universe) {
+                if returningFleet.phase == .returning,
+                   returningFleet.returnTime.isFinite,
+                   returningFleet.returnTime <= universe.gameTime
+                {
+                    resolveReturn(returningFleet, in: &universe)
+                } else {
+                    unresolvedFleets.append(returningFleet)
+                }
+            }
+        }
+
+        for fleet in startingFleets where !jointAttackFleetIDs.contains(fleet.id) {
             switch fleet.phase {
             case .outbound, .holding:
                 if fleet.arrivalTime.isFinite, fleet.arrivalTime <= universe.gameTime {
@@ -208,6 +231,39 @@ public enum FleetEngine {
         }
 
         universe.fleets = unresolvedFleets
+    }
+
+    private static func dueJointAttackGroups(in fleets: [Fleet], universe: Universe) -> [[Fleet]] {
+        let dueAttackFleets = fleets.filter { fleet in
+            fleet.mission == .attack &&
+                (fleet.phase == .outbound || fleet.phase == .holding) &&
+                fleet.arrivalTime.isFinite &&
+                fleet.arrivalTime <= universe.gameTime
+        }
+        let grouped = Dictionary(grouping: dueAttackFleets) { fleet in
+            JointAttackKey(
+                ownerID: fleet.ownerID,
+                targetPlanetID: fleet.targetPlanetID,
+                target: fleet.target,
+                arrivalTime: Int(fleet.arrivalTime.rounded())
+            )
+        }
+
+        return grouped.values
+            .filter { $0.count > 1 }
+            .map { group in
+                group.sorted { lhs, rhs in
+                    lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString
+                }
+            }
+            .sorted { lhs, rhs in
+                let left = lhs.first?.arrivalTime ?? 0
+                let right = rhs.first?.arrivalTime ?? 0
+                if left != right {
+                    return left < right
+                }
+                return (lhs.first?.id.rawValue.uuidString ?? "") < (rhs.first?.id.rawValue.uuidString ?? "")
+            }
     }
 
     public static func travelDuration(
@@ -400,6 +456,151 @@ public enum FleetEngine {
         }
 
         return returningFleet
+    }
+
+    private static func resolveJointAttack(_ fleets: [Fleet], in universe: inout Universe) -> [Fleet] {
+        let group = fleets
+            .filter { $0.mission == .attack }
+            .sorted { lhs, rhs in lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString }
+        guard let primaryFleet = group.first else {
+            return []
+        }
+
+        let defenderID = targetPlanetIndex(for: primaryFleet, in: universe).flatMap { universe.planets[$0].ownerID }
+        let combinedFleet = jointAttackFleet(from: group, primaryFleet: primaryFleet, in: universe)
+        guard let combinedReturn = CombatEngine.resolveAttack(combinedFleet, in: &universe) else {
+            recordAttackRelations(attackerID: primaryFleet.ownerID, defenderID: defenderID, time: primaryFleet.arrivalTime, in: &universe)
+            universe.events.append(missionEvent(for: combinedFleet, time: primaryFleet.arrivalTime, kind: .combat, title: "Joint Combat Resolved"))
+            return []
+        }
+
+        recordAttackRelations(attackerID: primaryFleet.ownerID, defenderID: defenderID, time: primaryFleet.arrivalTime, in: &universe)
+        universe.events.append(missionEvent(for: combinedFleet, time: primaryFleet.arrivalTime, kind: .combat, title: "Joint Combat Resolved"))
+        return splitJointAttackReturn(combinedReturn, among: group, ruleSet: universe.ruleSet)
+    }
+
+    private static func jointAttackFleet(from fleets: [Fleet], primaryFleet: Fleet, in universe: Universe) -> Fleet {
+        Fleet(
+            id: FleetID(
+                stableUUID(
+                    namespace: "0016",
+                    payload: [
+                        "joint-attack",
+                        universe.id.rawValue.uuidString,
+                        primaryFleet.ownerID.rawValue.uuidString,
+                        primaryFleet.targetPlanetID?.rawValue.uuidString ?? primaryFleet.target.displayText,
+                        String(primaryFleet.arrivalTime),
+                        fleets.map { $0.id.rawValue.uuidString }.joined(separator: ",")
+                    ].joined(separator: "|")
+                )
+            ),
+            ownerID: primaryFleet.ownerID,
+            mission: .attack,
+            origin: primaryFleet.origin,
+            target: primaryFleet.target,
+            ships: fleets.reduce(into: [:]) { result, fleet in
+                for (kind, quantity) in normalizedShips(fleet.ships) {
+                    result[kind, default: 0] += quantity
+                }
+            },
+            cargo: fleets.reduce(.zero) { partial, fleet in safeAdding(partial, fleet.cargo) },
+            launchTime: fleets.map(\.launchTime).min() ?? primaryFleet.launchTime,
+            arrivalTime: primaryFleet.arrivalTime,
+            returnTime: fleets.map(\.returnTime).max() ?? primaryFleet.returnTime,
+            phase: .outbound,
+            originPlanetID: primaryFleet.originPlanetID,
+            targetPlanetID: primaryFleet.targetPlanetID,
+            speedPercent: primaryFleet.speedPercent,
+            originSite: primaryFleet.originSite
+        )
+    }
+
+    private static func splitJointAttackReturn(
+        _ combinedReturn: Fleet,
+        among originalFleets: [Fleet],
+        ruleSet: RuleSet
+    ) -> [Fleet] {
+        let shipAllocations = splitShips(combinedReturn.ships, among: originalFleets)
+        let cargoAllocations = splitCargo(combinedReturn.cargo, among: shipAllocations, ruleSet: ruleSet)
+        return originalFleets.indices.compactMap { index in
+            let ships = shipAllocations[index]
+            guard !ships.isEmpty else {
+                return nil
+            }
+
+            var fleet = originalFleets[index]
+            fleet.phase = .returning
+            fleet.ships = ships
+            fleet.cargo = cargoAllocations[index]
+            return fleet
+        }
+    }
+
+    private static func splitShips(_ remainingShips: [ShipKind: Int], among fleets: [Fleet]) -> [[ShipKind: Int]] {
+        var allocations = Array(repeating: [ShipKind: Int](), count: fleets.count)
+        guard !fleets.isEmpty else {
+            return allocations
+        }
+
+        for kind in ShipKind.allCases {
+            let remaining = max(remainingShips[kind] ?? 0, 0)
+            guard remaining > 0 else {
+                continue
+            }
+            let contributed = fleets.map { max($0.ships[kind] ?? 0, 0) }
+            let totalContributed = contributed.reduce(0, +)
+            guard totalContributed > 0 else {
+                continue
+            }
+
+            var assigned = 0
+            var remainders: [(index: Int, remainder: Double)] = []
+            for index in fleets.indices {
+                let rawShare = Double(remaining) * Double(contributed[index]) / Double(totalContributed)
+                let wholeShare = min(contributed[index], Int(floor(rawShare)))
+                if wholeShare > 0 {
+                    allocations[index][kind] = wholeShare
+                    assigned += wholeShare
+                }
+                remainders.append((index, rawShare - Double(wholeShare)))
+            }
+
+            let sortedRemainders = remainders.sorted { lhs, rhs in
+                if lhs.remainder != rhs.remainder {
+                    return lhs.remainder > rhs.remainder
+                }
+                return fleets[lhs.index].id.rawValue.uuidString < fleets[rhs.index].id.rawValue.uuidString
+            }
+            var remainderIndex = 0
+            while assigned < remaining && !sortedRemainders.isEmpty {
+                let index = sortedRemainders[remainderIndex % sortedRemainders.count].index
+                let current = allocations[index][kind] ?? 0
+                if current < contributed[index] {
+                    allocations[index][kind] = current + 1
+                    assigned += 1
+                }
+                remainderIndex += 1
+                if remainderIndex > sortedRemainders.count * 2 && sortedRemainders.allSatisfy({ (allocations[$0.index][kind] ?? 0) >= contributed[$0.index] }) {
+                    break
+                }
+            }
+        }
+
+        return allocations
+    }
+
+    private static func splitCargo(
+        _ cargo: ResourceBundle,
+        among shipAllocations: [[ShipKind: Int]],
+        ruleSet: RuleSet
+    ) -> [ResourceBundle] {
+        var remainingCargo = cargo.nonnegative
+        return shipAllocations.map { ships in
+            let capacity = max(cargoCapacity(for: ships, ruleSet: ruleSet), 0)
+            let allocation = collectResources(from: remainingCargo, limit: capacity)
+            remainingCargo = remainingCargo.subtracting(allocation).nonnegative
+            return allocation
+        }
     }
 
     private static func resolveReturn(_ fleet: Fleet, in universe: inout Universe) {

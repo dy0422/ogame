@@ -696,14 +696,15 @@ final class AppModel: ObservableObject {
         var seenFleetIDs = Set<FleetID>()
         var summaries: [MoonScanSummary] = []
         for target in universe.planets.sorted(by: Self.sortPlanetsByCoordinate) where target.id != moonPlanetID {
-            let scannedFleets = MoonEngine.sensorScan(
+            let scannedTraces = MoonEngine.sensorTrace(
                 from: moonPlanetID,
                 targetPlanetID: target.id,
                 ownerID: universe.playerFactionID,
                 in: universe
             )
 
-            for fleet in scannedFleets where !seenFleetIDs.contains(fleet.id) {
+            for trace in scannedTraces where !seenFleetIDs.contains(trace.fleet.id) {
+                let fleet = trace.fleet
                 seenFleetIDs.insert(fleet.id)
                 summaries.append(
                     MoonScanSummary(
@@ -712,7 +713,9 @@ final class AppModel: ObservableObject {
                         missionText: fleet.mission.localizedName,
                         phaseText: fleet.phase.localizedName,
                         routeText: "\(fleet.origin.displayText) -> \(fleet.target.displayText)",
-                        remainingText: fleetRemainingText(fleet)
+                        remainingText: fleetRemainingText(fleet),
+                        interceptText: trace.interceptTime.map { "追秒 T+\(Self.formattedWholeNumber($0))" } ?? "无追秒窗口",
+                        tacticalText: trace.tacticalNote
                     )
                 )
             }
@@ -3046,6 +3049,8 @@ struct MoonScanSummary: Identifiable {
     let phaseText: String
     let routeText: String
     let remainingText: String
+    let interceptText: String
+    let tacticalText: String
 
     var id: FleetID { fleetID }
 }

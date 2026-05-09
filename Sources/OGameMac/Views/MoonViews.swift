@@ -138,6 +138,12 @@ private struct MoonScanRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+
+                Text("\(scan.interceptText) · \(scan.tacticalText)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.vertical, 7)

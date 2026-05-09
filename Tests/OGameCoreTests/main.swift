@@ -2691,6 +2691,114 @@ func testSensorPhalanxHidesRecalledAndMoonOriginFleets() {
     require(!scans.contains { $0.id == moonOriginFleetID }, "Phalanx should hide fleets launched from a moon")
 }
 
+func testJointAttackCombinesSameOwnerFleetsArrivingTogether() {
+    var universe = makeCombatUniverse()
+    let secondOriginID = fleetPlanetID(3)
+    universe.factions[0].ownedPlanetIDs.append(secondOriginID)
+    universe.planets.append(
+        Planet(
+            id: secondOriginID,
+            name: "Second Sword",
+            coordinate: Coordinate(galaxy: 1, system: 1, position: 5),
+            ownerID: fleetPlayerID(),
+            resources: ResourceBundle(metal: 25_000, crystal: 12_000, deuterium: 8_000),
+            storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000)
+        )
+    )
+    universe.planets[1].shipInventory = [.lightFighter: 16]
+    universe.planets[1].defenseInventory = [.rocketLauncher: 16, .lightLaser: 6]
+    let arrival: TimeInterval = 180
+    let firstFleet = Fleet(
+        id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-00000000a101")!),
+        ownerID: fleetPlayerID(),
+        mission: .attack,
+        origin: universe.planets[0].coordinate,
+        target: universe.planets[1].coordinate,
+        ships: [.cruiser: 4, .smallCargo: 1],
+        launchTime: 10,
+        arrivalTime: arrival,
+        returnTime: 350,
+        originPlanetID: fleetPlanetID(1),
+        targetPlanetID: fleetPlanetID(2)
+    )
+    let secondFleet = Fleet(
+        id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-00000000a102")!),
+        ownerID: fleetPlayerID(),
+        mission: .attack,
+        origin: universe.planets[2].coordinate,
+        target: universe.planets[1].coordinate,
+        ships: [.cruiser: 4, .smallCargo: 1],
+        launchTime: 10,
+        arrivalTime: arrival,
+        returnTime: 350,
+        originPlanetID: secondOriginID,
+        targetPlanetID: fleetPlanetID(2)
+    )
+    universe.fleets = [firstFleet, secondFleet]
+    universe.gameTime = arrival
+
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    let battleReports = universe.reports.filter { $0.kind == .battle }
+    requireEqual(battleReports.count, 1, "Joint attack should resolve as one combined battle report")
+    requireEqual(battleReports[0].participants[0].beforeShips[.cruiser], 8, "Joint attack report should combine attacker ships")
+    require(universe.events.contains { $0.title == "Joint Combat Resolved" }, "Joint attack should record a joint combat event")
+    require(universe.fleets.allSatisfy { $0.phase == .returning }, "Surviving joint attack groups should return to their own origins")
+    require(Set(universe.fleets.compactMap(\.originPlanetID)).isSubset(of: [fleetPlanetID(1), secondOriginID]), "Joint attack survivors should preserve original origins")
+}
+
+func testSensorPhalanxExposesChaseWindowAndDebrisFleetSaveRisk() {
+    let playerID = fleetPlayerID()
+    let rivalID = fleetEnemyID()
+    let moonPlanetID = fleetPlanetID(1)
+    let targetPlanetID = fleetPlanetID(2)
+    let scanMoon = Moon(
+        id: UUID(uuidString: "00000000-0000-0000-0000-00000000f401")!,
+        name: "Scanner",
+        createdAt: 0,
+        buildingLevels: [.sensorPhalanx: 3]
+    )
+    let recycleFleet = Fleet(
+        id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-00000000f402")!),
+        ownerID: rivalID,
+        mission: .recycle,
+        origin: Coordinate(galaxy: 1, system: 2, position: 6),
+        target: Coordinate(galaxy: 1, system: 3, position: 6),
+        ships: [.recycler: 2],
+        launchTime: 20,
+        arrivalTime: 180,
+        returnTime: 340,
+        originPlanetID: targetPlanetID,
+        targetPlanetID: targetPlanetID
+    )
+    let universe = Universe(
+        id: UniverseID(UUID(uuidString: "00000000-0000-0000-0000-00000000f400")!),
+        name: "Trace Test",
+        seed: 92,
+        gameTime: 100,
+        playerFactionID: playerID,
+        factions: [
+            Faction(id: playerID, name: "Player", kind: .player, strategy: .balanced, ownedPlanetIDs: [moonPlanetID]),
+            Faction(id: rivalID, name: "Rival", kind: .ai, strategy: .raider, ownedPlanetIDs: [targetPlanetID])
+        ],
+        planets: [
+            Planet(id: moonPlanetID, name: "Moon Base", coordinate: Coordinate(galaxy: 1, system: 1, position: 4), ownerID: playerID, moon: scanMoon),
+            Planet(id: targetPlanetID, name: "Target", coordinate: Coordinate(galaxy: 1, system: 2, position: 6), ownerID: rivalID, debrisField: ResourceBundle(metal: 4_000, crystal: 1_500))
+        ],
+        fleets: [recycleFleet],
+        events: [],
+        ruleSet: .fastSkirmish
+    )
+
+    let traces = MoonEngine.sensorTrace(from: moonPlanetID, targetPlanetID: targetPlanetID, ownerID: playerID, in: universe)
+
+    requireEqual(traces.count, 1, "Phalanx trace should include the visible recycle fleet")
+    requireEqual(traces[0].fleet.id, recycleFleet.id, "Trace should keep the scanned fleet")
+    requireEqual(traces[0].interceptTime, recycleFleet.arrivalTime, "Outbound visible fleets should expose an arrival chase window")
+    requireEqual(traces[0].risk, .debrisFleetSave, "Recycle flights toward debris should be marked as debris FS risk")
+    require(traces[0].tacticalNote.contains("废墟"), "Trace should explain the debris fleet-save risk")
+}
+
 func testTransportMissionDeliversCargoAndReturnsShips() {
     var universe = makeFleetUniverse()
     let cargo = ResourceBundle(metal: 300, crystal: 150, deuterium: 20)
@@ -6319,6 +6427,8 @@ testBattleSimulationRecordsRapidFireShieldHullAndExplosions()
 testFleetLaunchRespectsComputerFleetSlots()
 testOutboundFleetCanBeRecalled()
 testSensorPhalanxHidesRecalledAndMoonOriginFleets()
+testJointAttackCombinesSameOwnerFleetsArrivingTogether()
+testSensorPhalanxExposesChaseWindowAndDebrisFleetSaveRisk()
 testTransportMissionDeliversCargoAndReturnsShips()
 testLargeSimulationTickCompletesOutboundArrivalAndReturnTogether()
 testTransportOverflowCargoStaysWithReturningFleet()

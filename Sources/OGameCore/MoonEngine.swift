@@ -1,6 +1,32 @@
 import Foundation
 
 public enum MoonEngine {
+    public struct SensorTrace: Equatable, Sendable {
+        public enum Risk: String, Codable, Equatable, Sendable {
+            case low
+            case arrivalTiming
+            case returnTiming
+            case debrisFleetSave
+        }
+
+        public var fleet: Fleet
+        public var interceptTime: TimeInterval?
+        public var risk: Risk
+        public var tacticalNote: String
+
+        public init(
+            fleet: Fleet,
+            interceptTime: TimeInterval?,
+            risk: Risk,
+            tacticalNote: String
+        ) {
+            self.fleet = fleet
+            self.interceptTime = interceptTime.flatMap { $0.isFinite ? $0 : nil }
+            self.risk = risk
+            self.tacticalNote = tacticalNote
+        }
+    }
+
     private static let jumpGateCooldown: TimeInterval = 3_600
 
     public static func startFacilityUpgrade(
@@ -49,6 +75,21 @@ public enum MoonEngine {
                 !(fleet.originPlanetID == targetPlanetID && fleet.originSite == .moon) &&
                 (fleet.originPlanetID == targetPlanetID || fleet.targetPlanetID == targetPlanetID)
         }
+    }
+
+    public static func sensorTrace(
+        from moonPlanetID: PlanetID,
+        targetPlanetID: PlanetID,
+        ownerID: FactionID,
+        in universe: Universe
+    ) -> [SensorTrace] {
+        sensorScan(
+            from: moonPlanetID,
+            targetPlanetID: targetPlanetID,
+            ownerID: ownerID,
+            in: universe
+        )
+        .map { tacticalTrace(for: $0) }
     }
 
     public static func jumpShips(
@@ -104,6 +145,52 @@ public enum MoonEngine {
             }
             result[element.key, default: 0] += element.value
         }
+    }
+
+    private static func tacticalTrace(for fleet: Fleet) -> SensorTrace {
+        let interceptTime: TimeInterval?
+        switch fleet.phase {
+        case .outbound, .holding:
+            interceptTime = fleet.arrivalTime
+        case .returning:
+            interceptTime = fleet.returnTime
+        case .completed:
+            interceptTime = nil
+        }
+
+        if fleet.mission == .recycle {
+            return SensorTrace(
+                fleet: fleet,
+                interceptTime: interceptTime,
+                risk: .debrisFleetSave,
+                tacticalNote: "废墟 FS 风险：回收航线可被感应阵定位，适合按抵达或返航时间追秒。"
+            )
+        }
+
+        if fleet.phase == .returning {
+            return SensorTrace(
+                fleet: fleet,
+                interceptTime: interceptTime,
+                risk: .returnTiming,
+                tacticalNote: "返航追秒窗口：可按返航时间安排拦截。"
+            )
+        }
+
+        if fleet.mission == .attack {
+            return SensorTrace(
+                fleet: fleet,
+                interceptTime: interceptTime,
+                risk: .arrivalTiming,
+                tacticalNote: "抵达追秒窗口：可按抵达时间安排防守或反击。"
+            )
+        }
+
+        return SensorTrace(
+            fleet: fleet,
+            interceptTime: interceptTime,
+            risk: .low,
+            tacticalNote: "普通可见航线。"
+        )
     }
 
     private static func stableUUID(namespace: String, payload: String) -> UUID {
