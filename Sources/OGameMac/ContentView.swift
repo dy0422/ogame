@@ -1130,56 +1130,6 @@ private struct PlanetDetailView: View {
     }
 }
 
-private struct MoonSummaryCard: View {
-    let planet: Planet
-    let moon: Moon
-    @ObservedObject var model: AppModel
-
-    var body: some View {
-        PanelSurface {
-            HStack(alignment: .top, spacing: 14) {
-                ServerAssetThumbnail(
-                    url: GameArt.moonImageURL,
-                    fallbackSystemImage: "moon.stars",
-                    size: 72
-                )
-
-                VStack(alignment: .leading, spacing: 12) {
-                    SectionTitle(title: "月球", detail: moon.name.displayName)
-
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 160), alignment: .topLeading)],
-                        alignment: .leading,
-                        spacing: 10
-                    ) {
-                        DispatchMetric(title: "创建时间", value: "T+\(Formatters.wholeSeconds(moon.createdAt))")
-                        DispatchMetric(title: "设施", value: Formatters.wholeNumber(Double(moon.buildingLevels.values.reduce(0, +))))
-                        ForEach(model.availableMoonFacilityKinds, id: \.self) { facility in
-                            HStack {
-                                DispatchMetric(
-                                    title: facility.localizedName,
-                                    value: "等级 \(moon.buildingLevels[facility, default: 0])"
-                                )
-                                Spacer(minLength: 8)
-                                Button {
-                                    model.startMoonFacilityUpgrade(planetID: planet.id, kind: facility)
-                                } label: {
-                                    Label("升级", systemImage: "arrow.up.circle")
-                                        .labelStyle(.iconOnly)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .help("升级\(facility.localizedName)")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: 760, alignment: .leading)
-    }
-}
-
 private struct PlanetEconomyView: View {
     let planet: Planet
     @ObservedObject var model: AppModel
@@ -2775,7 +2725,7 @@ private struct FleetDispatchSummary: View {
     }
 }
 
-private struct DispatchMetric: View {
+struct DispatchMetric: View {
     let title: String
     let value: String
     var isWarning = false
@@ -3135,6 +3085,7 @@ private struct StarMapView: View {
             SolarSystemPanel(
                 galaxy: $selectedGalaxy,
                 system: $selectedSystem,
+                model: model,
                 slots: model.solarSystemSlots(galaxy: selectedGalaxy, system: selectedSystem)
             )
 
@@ -3153,6 +3104,7 @@ private struct StarMapView: View {
 private struct SolarSystemPanel: View {
     @Binding var galaxy: Int
     @Binding var system: Int
+    @ObservedObject var model: AppModel
     let slots: [SolarSystemSlotSummary]
 
     var body: some View {
@@ -3185,7 +3137,7 @@ private struct SolarSystemPanel: View {
                     spacing: 8
                 ) {
                     ForEach(slots) { slot in
-                        SolarSystemSlotTile(slot: slot)
+                        SolarSystemSlotTile(slot: slot, model: model)
                     }
                 }
             }
@@ -3196,6 +3148,7 @@ private struct SolarSystemPanel: View {
 
 private struct SolarSystemSlotTile: View {
     let slot: SolarSystemSlotSummary
+    @ObservedObject var model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -3242,9 +3195,11 @@ private struct SolarSystemSlotTile: View {
                     )
                 }
             }
+
+            StarMapSlotActions(slot: slot, model: model)
         }
         .padding(10)
-        .frame(minHeight: 108, alignment: .topLeading)
+        .frame(minHeight: 132, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tint.opacity(backgroundOpacity), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
@@ -3312,6 +3267,56 @@ private struct SolarSystemSlotTile: View {
 
     private var backgroundOpacity: Double {
         slot.planetID == nil ? 0.08 : 0.12
+    }
+}
+
+private struct StarMapSlotActions: View {
+    let slot: SolarSystemSlotSummary
+    @ObservedObject var model: AppModel
+
+    private var missions: [Fleet.Mission] {
+        if slot.isExpedition {
+            return [.explore]
+        }
+        if slot.planetID == nil {
+            return [.colonize]
+        }
+        if slot.isPlayerOwned {
+            return []
+        }
+
+        var result: [Fleet.Mission] = []
+        if slot.isVisible && slot.ownerKind != nil {
+            result.append(.espionage)
+            result.append(.attack)
+        } else {
+            result.append(.explore)
+        }
+        if slot.debrisTotal > 0 {
+            result.append(.recycle)
+        }
+        return result
+    }
+
+    var body: some View {
+        if missions.isEmpty {
+            EmptyView()
+        } else {
+            HStack(spacing: 6) {
+                ForEach(missions, id: \.rawValue) { mission in
+                    Button {
+                        model.quickLaunchStarMapMission(mission, slot: slot)
+                    } label: {
+                        Label(mission.localizedName, systemImage: mission.systemImage)
+                            .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!model.canQuickLaunchStarMapMission(mission, slot: slot))
+                    .help("从默认殖民地\(mission.localizedName)")
+                }
+            }
+        }
     }
 }
 
@@ -4334,7 +4339,7 @@ private struct ResourceCostLine: View {
     }
 }
 
-private struct QueueEmptyLine: View {
+struct QueueEmptyLine: View {
     let title: String
     let systemImage: String
 

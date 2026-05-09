@@ -685,6 +685,107 @@ final class AppModel: ObservableObject {
         autosaveAfterQueueing(successStatus: "已加入\(kind.localizedName)月球设施升级。")
     }
 
+    func moonSensorScanSummaries(from moonPlanetID: PlanetID) -> [MoonScanSummary] {
+        guard let origin = planet(for: moonPlanetID),
+              isPlayerOwned(origin),
+              origin.moon?.buildingLevels[.sensorPhalanx, default: 0] ?? 0 > 0
+        else {
+            return []
+        }
+
+        var seenFleetIDs = Set<FleetID>()
+        var summaries: [MoonScanSummary] = []
+        for target in universe.planets.sorted(by: Self.sortPlanetsByCoordinate) where target.id != moonPlanetID {
+            let scannedFleets = MoonEngine.sensorScan(
+                from: moonPlanetID,
+                targetPlanetID: target.id,
+                ownerID: universe.playerFactionID,
+                in: universe
+            )
+
+            for fleet in scannedFleets where !seenFleetIDs.contains(fleet.id) {
+                seenFleetIDs.insert(fleet.id)
+                summaries.append(
+                    MoonScanSummary(
+                        fleetID: fleet.id,
+                        targetName: isVisibleToPlayer(target) ? target.name.displayName : target.coordinate.displayText,
+                        missionText: fleet.mission.localizedName,
+                        phaseText: fleet.phase.localizedName,
+                        routeText: "\(fleet.origin.displayText) -> \(fleet.target.displayText)",
+                        remainingText: fleetRemainingText(fleet)
+                    )
+                )
+            }
+        }
+
+        return summaries.sorted { lhs, rhs in
+            lhs.fleetID.rawValue.uuidString < rhs.fleetID.rawValue.uuidString
+        }
+    }
+
+    func moonJumpTargets(from originPlanetID: PlanetID) -> [MoonJumpTargetSummary] {
+        guard let origin = planet(for: originPlanetID),
+              isPlayerOwned(origin),
+              origin.moon?.buildingLevels[.jumpGate, default: 0] ?? 0 > 0
+        else {
+            return []
+        }
+
+        return playerPlanets
+            .filter { planet in
+                planet.id != originPlanetID &&
+                    (planet.moon?.buildingLevels[.jumpGate, default: 0] ?? 0) > 0
+            }
+            .sorted(by: Self.sortPlanetsByCoordinate)
+            .map { planet in
+                MoonJumpTargetSummary(
+                    planetID: planet.id,
+                    displayName: planet.name.displayName,
+                    coordinateText: planet.coordinate.displayText,
+                    readyText: (origin.moon?.jumpGateReadyAt ?? 0) <= universe.gameTime ? "就绪" : "冷却中"
+                )
+            }
+    }
+
+    func canJumpOneShipThroughGate(from originPlanetID: PlanetID, to targetPlanetID: PlanetID) -> Bool {
+        guard let origin = planet(for: originPlanetID),
+              isPlayerOwned(origin),
+              defaultJumpGateShips(from: origin).isEmpty == false
+        else {
+            return false
+        }
+
+        return origin.moon?.buildingLevels[.jumpGate, default: 0] ?? 0 > 0 &&
+            (origin.moon?.jumpGateReadyAt ?? 0) <= universe.gameTime &&
+            (planet(for: targetPlanetID)?.moon?.buildingLevels[.jumpGate, default: 0] ?? 0) > 0
+    }
+
+    func jumpOneShipThroughGate(from originPlanetID: PlanetID, to targetPlanetID: PlanetID) {
+        guard let origin = planet(for: originPlanetID) else {
+            statusMessage = "无法使用跳跃门：找不到出发月球。"
+            return
+        }
+
+        let ships = defaultJumpGateShips(from: origin)
+        guard ships.isEmpty == false else {
+            statusMessage = "无法使用跳跃门：出发星球没有可跳跃舰船。"
+            return
+        }
+
+        guard MoonEngine.jumpShips(
+            from: originPlanetID,
+            to: targetPlanetID,
+            ownerID: universe.playerFactionID,
+            ships: ships,
+            in: &universe
+        ) else {
+            statusMessage = "无法使用跳跃门：目标月球、设施或冷却时间不满足。"
+            return
+        }
+
+        autosaveAfterQueueing(successStatus: "已通过跳跃门转移\(fleetShipsSummary(ships))。")
+    }
+
     func launchFleet(
         originID: PlanetID?,
         targetID: PlanetID?,
@@ -726,6 +827,57 @@ final class AppModel: ObservableObject {
         case .failure(let failure):
             statusMessage = "无法派遣舰队：\(Self.fleetFailureDescription(failure))。"
         }
+    }
+
+    func canQuickLaunchStarMapMission(_ mission: Fleet.Mission, slot: SolarSystemSlotSummary) -> Bool {
+        guard let origin = playerPlanets.first,
+              starMapMissionIsAllowed(mission, for: slot)
+        else {
+            return false
+        }
+
+        let ships = defaultShips(for: mission, on: origin)
+        guard ships.isEmpty == false,
+              ships.allSatisfy({ kind, quantity in (origin.shipInventory[kind] ?? 0) >= quantity })
+        else {
+            return false
+        }
+
+        let fuel = FleetEngine.fuelCost(
+            from: origin.coordinate,
+            to: slot.coordinate,
+            ships: ships,
+            ruleSet: universe.ruleSet,
+            research: researchState(for: origin)
+        )
+        return fuel.isFinite && fuel >= 0 && origin.resources.canAfford(ResourceBundle(deuterium: fuel))
+    }
+
+    func quickLaunchStarMapMission(_ mission: Fleet.Mission, slot: SolarSystemSlotSummary) {
+        guard let originID = defaultOriginPlanetID(),
+              starMapMissionIsAllowed(mission, for: slot)
+        else {
+            statusMessage = "无法从星图派遣：没有可用出发星球或任务。"
+            return
+        }
+
+        guard let origin = planet(for: originID) else {
+            statusMessage = "无法从星图派遣：找不到出发星球。"
+            return
+        }
+
+        let ships = defaultShips(for: mission, on: origin)
+        guard ships.isEmpty == false else {
+            statusMessage = "无法从星图派遣：缺少执行该任务的舰船。"
+            return
+        }
+
+        guard let targetID = ensureStarMapFleetTarget(for: slot) else {
+            statusMessage = "无法从星图派遣：目标槽位无效。"
+            return
+        }
+
+        launchFleet(originID: originID, targetID: targetID, mission: mission, ships: ships, cargo: .zero)
     }
 
     func recallFleet(_ fleet: Fleet) {
@@ -2520,6 +2672,103 @@ final class AppModel: ObservableObject {
         )
     }
 
+    private func defaultShips(for mission: Fleet.Mission, on origin: Planet) -> [ShipKind: Int] {
+        switch mission {
+        case .colonize:
+            return (origin.shipInventory[.colonyShip] ?? 0) > 0 ? [.colonyShip: 1] : [:]
+        case .explore:
+            if (origin.shipInventory[.smallCargo] ?? 0) > 0 {
+                return [.smallCargo: 1]
+            }
+            if (origin.shipInventory[.espionageProbe] ?? 0) > 0 {
+                return [.espionageProbe: 1]
+            }
+            return [:]
+        case .espionage:
+            return (origin.shipInventory[.espionageProbe] ?? 0) > 0 ? [.espionageProbe: 1] : [:]
+        case .recycle:
+            return (origin.shipInventory[.recycler] ?? 0) > 0 ? [.recycler: 1] : [:]
+        case .attack:
+            if (origin.shipInventory[.lightFighter] ?? 0) > 0 {
+                return [.lightFighter: min(origin.shipInventory[.lightFighter] ?? 0, 4)]
+            }
+            return [:]
+        case .transport, .returning:
+            return [:]
+        }
+    }
+
+    private func defaultJumpGateShips(from origin: Planet) -> [ShipKind: Int] {
+        let priorities: [ShipKind] = [.battlecruiser, .battleship, .cruiser, .heavyFighter, .lightFighter, .smallCargo, .largeCargo, .recycler]
+        for kind in priorities {
+            if (origin.shipInventory[kind] ?? 0) > 0 {
+                return [kind: 1]
+            }
+        }
+        return [:]
+    }
+
+    private func starMapMissionIsAllowed(_ mission: Fleet.Mission, for slot: SolarSystemSlotSummary) -> Bool {
+        switch mission {
+        case .colonize:
+            return slot.planetID == nil &&
+                !slot.isExpedition &&
+                UniverseTopologyEngine.isValidPlanetCoordinate(slot.coordinate)
+        case .explore:
+            return slot.isExpedition || !slot.isPlayerOwned
+        case .espionage:
+            return slot.planetID != nil && slot.isVisible && !slot.isPlayerOwned && slot.ownerKind != nil
+        case .recycle:
+            return slot.planetID != nil && slot.isVisible && slot.debrisTotal > 0
+        case .attack:
+            return slot.planetID != nil && slot.isVisible && !slot.isPlayerOwned && slot.ownerKind != nil
+        case .transport, .returning:
+            return false
+        }
+    }
+
+    private func ensureStarMapFleetTarget(for slot: SolarSystemSlotSummary) -> PlanetID? {
+        if let planetID = slot.planetID {
+            return planetID
+        }
+        if let existing = universe.planets.first(where: { $0.coordinate == slot.coordinate }) {
+            return existing.id
+        }
+
+        guard UniverseTopologyEngine.isValidPlanetCoordinate(slot.coordinate) ||
+            UniverseTopologyEngine.isExpeditionCoordinate(slot.coordinate)
+        else {
+            return nil
+        }
+
+        let profile = UniverseTopologyEngine.planetProfile(for: slot.coordinate, universeSeed: universe.seed)
+        let planetID = PlanetID(Self.stablePlaceholderUUID(payload: "star-map-target|\(universe.id.rawValue.uuidString)|\(slot.coordinate.displayText)"))
+        let displayName = slot.isExpedition ? "外太空 \(slot.coordinate.displayText)" : "未占领 \(slot.coordinate.displayText)"
+        let planet = Planet(
+            id: planetID,
+            name: displayName,
+            coordinate: slot.coordinate,
+            ownerID: nil,
+            resources: slot.isExpedition ? .zero : ResourceBundle(metal: 120, crystal: 60, deuterium: 20),
+            temperatureCelsius: profile.temperatureCelsius,
+            debrisField: .zero,
+            maxFields: slot.isExpedition ? 1 : profile.maxFields
+        )
+        universe.planets.append(planet)
+        universe.explorationRecords.append(
+            ExplorationRecord(
+                factionID: universe.playerFactionID,
+                targetPlanetID: planetID,
+                exploredAt: universe.gameTime,
+                discoveredResources: planet.resources,
+                discoveredDebris: planet.debrisField,
+                discoveredOwnerID: nil,
+                discoveredNeutral: !slot.isExpedition
+            )
+        )
+        return planetID
+    }
+
     private func factionName(for factionID: FactionID) -> String {
         universe.factions.first { $0.id == factionID }?.name.displayName ?? "未知势力"
     }
@@ -2662,6 +2911,20 @@ final class AppModel: ObservableObject {
         return value.formatted(.percent.precision(.fractionLength(0)))
     }
 
+    private static func stablePlaceholderUUID(payload: String) -> UUID {
+        let hash = stableHash("app-placeholder|\(payload)")
+        return UUID(uuidString: String(format: "00000000-0000-0000-%04x-%012llx", Int(hash & 0xffff), hash & 0xffffffffffff))!
+    }
+
+    private static func stableHash(_ value: String) -> UInt64 {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return hash
+    }
+
     private static let durationFormatter: DateComponentsFormatter = {
         let formatter = DateComponentsFormatter()
         formatter.allowedUnits = [.hour, .minute, .second]
@@ -2765,6 +3028,26 @@ struct SolarSystemSlotSummary: Identifiable {
     let debrisTotal: Double
 
     var id: Int { position }
+}
+
+struct MoonScanSummary: Identifiable {
+    let fleetID: FleetID
+    let targetName: String
+    let missionText: String
+    let phaseText: String
+    let routeText: String
+    let remainingText: String
+
+    var id: FleetID { fleetID }
+}
+
+struct MoonJumpTargetSummary: Identifiable {
+    let planetID: PlanetID
+    let displayName: String
+    let coordinateText: String
+    let readyText: String
+
+    var id: PlanetID { planetID }
 }
 
 struct FleetTargetSummary: Identifiable {

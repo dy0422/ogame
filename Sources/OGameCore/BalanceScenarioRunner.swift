@@ -63,7 +63,7 @@ public enum BalanceScenarioRunner {
         let targetDuration = max(0, duration)
 
         while universe.gameTime < targetDuration {
-            runGuidedPlayerActions(in: &universe)
+            runGuidedPlayerActions(in: &universe, settings: settings)
             SimulationEngine.tick(
                 universe: &universe,
                 delta: min(tickSize, targetDuration - universe.gameTime),
@@ -81,7 +81,7 @@ public enum BalanceScenarioRunner {
         return result
     }
 
-    private static func runGuidedPlayerActions(in universe: inout Universe) {
+    private static func runGuidedPlayerActions(in universe: inout Universe, settings: GameSettings) {
         guard let planetIndex = playerHomeIndex(in: universe) else {
             return
         }
@@ -95,12 +95,24 @@ public enum BalanceScenarioRunner {
             launchFirstFleetIfNeeded(planetIndex: planetIndex, in: &universe)
         }
 
+        if universe.gameTime >= 1_800 {
+            launchFirstEspionageIfNeeded(planetIndex: planetIndex, in: &universe)
+        }
+
         if universe.gameTime >= 2_700 {
             launchFirstAttackIfNeeded(planetIndex: planetIndex, in: &universe)
         }
 
         if universe.gameTime >= 3_600 {
             launchFirstColonyIfNeeded(planetIndex: planetIndex, in: &universe)
+        }
+
+        if universe.gameTime >= 4_800 {
+            prepareAIStrategicPressureIfNeeded(settings: settings, in: &universe)
+        }
+
+        if universe.gameTime >= 8_400 {
+            createMoonAndUseJumpGateIfNeeded(in: &universe)
         }
 
         if universe.gameTime >= 7_200, universe.victoryState.winningFactionID == nil {
@@ -179,6 +191,27 @@ public enum BalanceScenarioRunner {
         )
     }
 
+    private static func launchFirstEspionageIfNeeded(planetIndex: Int, in universe: inout Universe) {
+        guard !universe.reports.contains(where: { $0.kind == .espionage }),
+              !universe.fleets.contains(where: { $0.ownerID == universe.playerFactionID && $0.mission == .espionage }),
+              let target = firstAIPlanet(in: universe)
+        else {
+            return
+        }
+
+        universe.planets[planetIndex].shipInventory[.espionageProbe] = max(
+            universe.planets[planetIndex].shipInventory[.espionageProbe] ?? 0,
+            1
+        )
+        _ = FleetEngine.launchFleet(
+            from: universe.planets[planetIndex].id,
+            to: target.id,
+            in: &universe,
+            mission: .espionage,
+            ships: [.espionageProbe: 1]
+        )
+    }
+
     private static func launchFirstAttackIfNeeded(planetIndex: Int, in universe: inout Universe) {
         guard !universe.reports.contains(where: { $0.kind == .battle }) else {
             return
@@ -222,6 +255,92 @@ public enum BalanceScenarioRunner {
             mission: .colonize,
             ships: [.colonyShip: 1]
         )
+    }
+
+    private static func prepareAIStrategicPressureIfNeeded(settings: GameSettings, in universe: inout Universe) {
+        guard settings.difficulty == .hard,
+              !universe.fleets.contains(where: { $0.ownerID != universe.playerFactionID && $0.mission == .attack }),
+              !universe.reports.contains(where: { report in
+                  report.kind == .battle &&
+                      report.participants.contains { $0.role == .attacker && $0.factionID != universe.playerFactionID }
+              }),
+              let factionIndex = universe.factions.firstIndex(where: { $0.kind == .ai && $0.strategy == .raider }),
+              let planetIndex = universe.planets.firstIndex(where: { $0.ownerID == universe.factions[factionIndex].id }),
+              let targetIndex = playerHomeIndex(in: universe)
+        else {
+            return
+        }
+
+        universe.planets[planetIndex].resources = ResourceBundle(metal: 35_000, crystal: 20_000, deuterium: 25_000)
+        universe.planets[planetIndex].storage = ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000)
+        universe.planets[planetIndex].shipInventory[.lightFighter] = max(
+            universe.planets[planetIndex].shipInventory[.lightFighter] ?? 0,
+            6
+        )
+        universe.planets[planetIndex].shipInventory[.smallCargo] = max(
+            universe.planets[planetIndex].shipInventory[.smallCargo] ?? 0,
+            1
+        )
+        _ = FleetEngine.launchFleet(
+            from: universe.planets[planetIndex].id,
+            to: universe.planets[targetIndex].id,
+            in: &universe,
+            mission: .attack,
+            ships: [.lightFighter: 6, .smallCargo: 1]
+        )
+    }
+
+    private static func createMoonAndUseJumpGateIfNeeded(in universe: inout Universe) {
+        guard !universe.events.contains(where: { $0.title == "Jump Gate Transfer" }) else {
+            return
+        }
+
+        let playerPlanetIndices = universe.planets.indices
+            .filter { universe.planets[$0].ownerID == universe.playerFactionID }
+            .sorted { lhs, rhs in
+                comparePlanets(universe.planets[lhs], universe.planets[rhs])
+            }
+        guard playerPlanetIndices.count >= 2 else {
+            return
+        }
+
+        let originIndex = playerPlanetIndices[0]
+        let targetIndex = playerPlanetIndices[1]
+        ensurePlayableMoon(on: originIndex, in: &universe)
+        ensurePlayableMoon(on: targetIndex, in: &universe)
+        universe.planets[originIndex].shipInventory[.smallCargo] = max(
+            universe.planets[originIndex].shipInventory[.smallCargo] ?? 0,
+            1
+        )
+        _ = MoonEngine.jumpShips(
+            from: universe.planets[originIndex].id,
+            to: universe.planets[targetIndex].id,
+            ownerID: universe.playerFactionID,
+            ships: [.smallCargo: 1],
+            in: &universe
+        )
+    }
+
+    private static func ensurePlayableMoon(on planetIndex: Int, in universe: inout Universe) {
+        let levels: [BuildingKind: Int] = [.lunarBase: 1, .sensorPhalanx: 1, .jumpGate: 1]
+        if universe.planets[planetIndex].moon == nil {
+            universe.planets[planetIndex].moon = Moon(
+                id: stableMoonID(for: universe.planets[planetIndex]),
+                name: "\(universe.planets[planetIndex].name) 月球",
+                createdAt: universe.gameTime,
+                buildingLevels: levels
+            )
+            return
+        }
+
+        guard var moon = universe.planets[planetIndex].moon else {
+            return
+        }
+        for (building, level) in levels {
+            moon.buildingLevels[building] = max(moon.buildingLevels[building] ?? 0, level)
+        }
+        moon.jumpGateReadyAt = min(moon.jumpGateReadyAt, universe.gameTime)
+        universe.planets[planetIndex].moon = moon
     }
 
     private static func completeFastVictoryFixture(planetIndex: Int, in universe: inout Universe) {
@@ -353,5 +472,19 @@ public enum BalanceScenarioRunner {
 
     private static func comparePlanets(_ lhs: Planet, _ rhs: Planet) -> Bool {
         lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString
+    }
+
+    private static func stableMoonID(for planet: Planet) -> UUID {
+        let hash = stableHash("balance-moon|\(planet.id.rawValue.uuidString)")
+        return UUID(uuidString: String(format: "00000000-0000-0000-%04x-%012llx", Int(hash & 0xffff), hash & 0xffffffffffff))!
+    }
+
+    private static func stableHash(_ value: String) -> UInt64 {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for byte in value.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+        return hash
     }
 }

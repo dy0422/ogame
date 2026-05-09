@@ -5966,6 +5966,46 @@ func testBalanceScenarioVictoryOccursWithinFastRunWindow() {
     require(result.finalRankings.isEmpty == false, "Balance scenario should return final rankings")
 }
 
+func testBalanceScenarioIncludesEspionageAndAIPressure() {
+    let standard = BalanceScenarioRunner.run(
+        seed: 1,
+        duration: 14_400,
+        settings: GameSettings(difficulty: .standard)
+    )
+    let hard = BalanceScenarioRunner.run(
+        seed: 1,
+        duration: 14_400,
+        settings: GameSettings(difficulty: .hard)
+    )
+
+    guard let firstEspionageAt = standard.firstEspionageAt else {
+        fatalError("Balance scenario should record first espionage")
+    }
+
+    require(firstEspionageAt >= 1_800 && firstEspionageAt <= 4_500, "First espionage should become a natural 30-75 minute action")
+    require(hard.aiAttackCount > 0, "Hard balance scenario should include at least one AI pressure attack")
+    if let hardVictoryAt = hard.victoryAt {
+        require(hardVictoryAt >= 7_200, "Hard AI pressure should not end the fast session before the two-hour victory window")
+    }
+}
+
+func testBalanceScenarioTouchesMoonLoopWithinFastRunWindow() {
+    let result = BalanceScenarioRunner.run(
+        seed: 1,
+        duration: 14_400,
+        settings: GameSettings(difficulty: .standard)
+    )
+
+    guard let firstMoonAt = result.firstMoonAt,
+          let firstMoonActionAt = result.firstMoonActionAt
+    else {
+        fatalError("Balance scenario should record moon creation and a moon action")
+    }
+
+    require(firstMoonAt >= 6_000 && firstMoonAt <= 12_000, "Fast run should surface a moon before the late victory stretch")
+    require(firstMoonActionAt >= firstMoonAt && firstMoonActionAt <= 14_400, "Fast run should use the moon after it appears")
+}
+
 try testEntityIDsAreCodableAndEquatable()
 testResourceBundleClampsToStorageLimits()
 testResourceBundleDoesNotClampBelowZeroWhenStorageIsInvalid()
@@ -6132,4 +6172,6 @@ try testOfflineCatchUpSummaryIsCodableEquatableAndDeterministic()
 testBalanceScenarioReachesFirstFleetWithinTargetWindow()
 testBalanceScenarioReachesFirstConflictWithinTargetWindow()
 testBalanceScenarioVictoryOccursWithinFastRunWindow()
+testBalanceScenarioIncludesEspionageAndAIPressure()
+testBalanceScenarioTouchesMoonLoopWithinFastRunWindow()
 print("OGameCoreTests passed")
