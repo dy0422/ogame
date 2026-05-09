@@ -2799,6 +2799,121 @@ func testSensorPhalanxExposesChaseWindowAndDebrisFleetSaveRisk() {
     require(traces[0].tacticalNote.contains("废墟"), "Trace should explain the debris fleet-save risk")
 }
 
+func testDefendMissionHoldsAtFriendlyPlanetAndJoinsDefense() {
+    var universe = makeCombatUniverse()
+    let defenderColonyID = fleetPlanetID(3)
+    universe.factions[0].ownedPlanetIDs.append(defenderColonyID)
+    universe.planets.append(
+        Planet(
+            id: defenderColonyID,
+            name: "Forward Shield",
+            coordinate: Coordinate(galaxy: 1, system: 1, position: 5),
+            ownerID: fleetPlayerID(),
+            resources: ResourceBundle(metal: 20_000, crystal: 12_000, deuterium: 8_000),
+            storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+            shipInventory: [.cruiser: 4]
+        )
+    )
+    universe.planets[0].shipInventory[.cruiser] = 6
+    universe.planets[1].ownerID = fleetPlayerID()
+    universe.planets[1].shipInventory = [:]
+    universe.planets[1].defenseInventory = [.rocketLauncher: 4]
+    let defendLaunch = FleetEngine.launchFleet(
+        from: defenderColonyID,
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .defend,
+        ships: [.cruiser: 4],
+        holdDuration: 600
+    )
+    guard case .launched(let defendFleet) = defendLaunch else {
+        fatalError("Defend fleet should launch to a friendly planet")
+    }
+    universe.gameTime = defendFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    guard let holdingFleet = universe.fleets.first(where: { $0.id == defendFleet.id }) else {
+        fatalError("Defend fleet should remain active while holding")
+    }
+    requireEqual(holdingFleet.phase, .holding, "Defend fleet should enter a holding phase at the friendly target")
+    requireEqual(holdingFleet.targetPlanetID, fleetPlanetID(2), "Defend fleet should hold at the protected planet")
+
+    let attackerFleet = Fleet(
+        id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-00000000d101")!),
+        ownerID: fleetEnemyID(),
+        mission: .attack,
+        origin: universe.planets[1].coordinate,
+        target: universe.planets[1].coordinate,
+        ships: [.lightFighter: 16],
+        launchTime: universe.gameTime,
+        arrivalTime: universe.gameTime + 30,
+        returnTime: universe.gameTime + 60,
+        originPlanetID: fleetPlanetID(2),
+        targetPlanetID: fleetPlanetID(2)
+    )
+    universe.fleets.append(attackerFleet)
+    universe.gameTime = attackerFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    guard let report = universe.reports.last(where: { $0.kind == .battle }) else {
+        fatalError("Attack against defended planet should create a battle report")
+    }
+    requireEqual(report.participants[1].beforeShips[.cruiser], 4, "Holding defend fleet should join the defender side")
+    require(universe.fleets.contains { $0.id == defendFleet.id && $0.phase == .holding }, "Surviving defenders should continue holding after the battle")
+    requireEqual(requirePlanet(fleetPlanetID(2), in: universe, "Protected planet should remain").shipInventory[.cruiser] ?? 0, 0, "Defending fleet ships should not become permanent planet inventory")
+}
+
+func testACSGatheringCanDelayAttackFleetsIntoJointWindow() {
+    var universe = makeCombatUniverse()
+    universe.planets[0].shipInventory = [.cruiser: 8, .smallCargo: 2]
+    universe.planets[1].shipInventory = [.lightFighter: 12]
+    universe.planets[1].defenseInventory = [.rocketLauncher: 10]
+    let firstFleet = Fleet(
+        id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-00000000a201")!),
+        ownerID: fleetPlayerID(),
+        mission: .attack,
+        origin: universe.planets[0].coordinate,
+        target: universe.planets[1].coordinate,
+        ships: [.cruiser: 4, .smallCargo: 1],
+        launchTime: 10,
+        arrivalTime: 180,
+        returnTime: 340,
+        originPlanetID: fleetPlanetID(1),
+        targetPlanetID: fleetPlanetID(2)
+    )
+    let secondFleet = Fleet(
+        id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-00000000a202")!),
+        ownerID: fleetPlayerID(),
+        mission: .attack,
+        origin: universe.planets[0].coordinate,
+        target: universe.planets[1].coordinate,
+        ships: [.cruiser: 4, .smallCargo: 1],
+        launchTime: 10,
+        arrivalTime: 220,
+        returnTime: 380,
+        originPlanetID: fleetPlanetID(1),
+        targetPlanetID: fleetPlanetID(2)
+    )
+    universe.fleets = [firstFleet, secondFleet]
+
+    let adjusted = FleetEngine.setJointAttackGatherTime(
+        [firstFleet.id, secondFleet.id],
+        ownerID: fleetPlayerID(),
+        gatherUntil: 220,
+        in: &universe
+    )
+
+    requireEqual(adjusted, true, "ACS gathering should accept compatible attack fleets")
+    requireEqual(universe.fleets.map(\.arrivalTime), [220, 220], "ACS gathering should align selected fleets to the shared window")
+    requireEqual(universe.fleets[0].returnTime, 380, "ACS gathering should extend earlier fleet return time by the same delay")
+    requireEqual(universe.events.last?.title, "ACS Gathering Adjusted", "ACS gathering should record a tactical event")
+
+    universe.gameTime = 220
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    requireEqual(universe.reports.filter { $0.kind == .battle }.count, 1, "Gathered ACS fleets should resolve as one joint attack")
+}
+
 func testTransportMissionDeliversCargoAndReturnsShips() {
     var universe = makeFleetUniverse()
     let cargo = ResourceBundle(metal: 300, crystal: 150, deuterium: 20)
@@ -6429,6 +6544,8 @@ testOutboundFleetCanBeRecalled()
 testSensorPhalanxHidesRecalledAndMoonOriginFleets()
 testJointAttackCombinesSameOwnerFleetsArrivingTogether()
 testSensorPhalanxExposesChaseWindowAndDebrisFleetSaveRisk()
+testDefendMissionHoldsAtFriendlyPlanetAndJoinsDefense()
+testACSGatheringCanDelayAttackFleetsIntoJointWindow()
 testTransportMissionDeliversCargoAndReturnsShips()
 testLargeSimulationTickCompletesOutboundArrivalAndReturnTogether()
 testTransportOverflowCargoStaysWithReturningFleet()

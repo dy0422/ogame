@@ -72,6 +72,8 @@ private enum ChineseDisplay {
             return "侦察"
         case "attack":
             return "攻击"
+        case "defend":
+            return "驻防"
         case "recycle":
             return "回收"
         case "returning":

@@ -137,7 +137,7 @@ final class AppModel: ObservableObject {
     }
 
     var fleetMissionKinds: [Fleet.Mission] {
-        [.transport, .attack, .espionage, .recycle, .colonize, .explore]
+        [.transport, .defend, .attack, .espionage, .recycle, .colonize, .explore]
     }
 
     var activeFleets: [Fleet] {
@@ -833,7 +833,7 @@ final class AppModel: ObservableObject {
     }
 
     func canQuickLaunchStarMapMission(_ mission: Fleet.Mission, slot: SolarSystemSlotSummary) -> Bool {
-        guard let origin = playerPlanets.first,
+        guard let origin = defaultStarMapOrigin(for: mission, slot: slot),
               starMapMissionIsAllowed(mission, for: slot)
         else {
             return false
@@ -857,15 +857,10 @@ final class AppModel: ObservableObject {
     }
 
     func quickLaunchStarMapMission(_ mission: Fleet.Mission, slot: SolarSystemSlotSummary) {
-        guard let originID = defaultOriginPlanetID(),
+        guard let origin = defaultStarMapOrigin(for: mission, slot: slot),
               starMapMissionIsAllowed(mission, for: slot)
         else {
             statusMessage = "无法从星图派遣：没有可用出发星球或任务。"
-            return
-        }
-
-        guard let origin = planet(for: originID) else {
-            statusMessage = "无法从星图派遣：找不到出发星球。"
             return
         }
 
@@ -880,7 +875,7 @@ final class AppModel: ObservableObject {
             return
         }
 
-        launchFleet(originID: originID, targetID: targetID, mission: mission, ships: ships, cargo: .zero)
+        launchFleet(originID: origin.id, targetID: targetID, mission: mission, ships: ships, cargo: .zero)
     }
 
     func recallFleet(_ fleet: Fleet) {
@@ -1240,6 +1235,12 @@ final class AppModel: ObservableObject {
         playerPlanets.first?.id
     }
 
+    private func defaultStarMapOrigin(for mission: Fleet.Mission, slot: SolarSystemSlotSummary) -> Planet? {
+        playerPlanets.first { planet in
+            mission != .defend || planet.id != slot.planetID
+        }
+    }
+
     func defaultTargetPlanetID(excluding originID: PlanetID?) -> PlanetID? {
         fleetTargetSummaries(excluding: originID).first?.id
     }
@@ -1292,6 +1293,8 @@ final class AppModel: ObservableObject {
         switch mission {
         case .transport:
             return targetIsPlayerOwned
+        case .defend:
+            return targetIsPlayerOwned && !normalizedShips.isEmpty
         case .attack, .espionage:
             return targetIsVisible && !targetIsPlayerOwned && target.ownerID != nil
         case .explore:
@@ -2705,6 +2708,15 @@ final class AppModel: ObservableObject {
                 return [.lightFighter: min(origin.shipInventory[.lightFighter] ?? 0, 4)]
             }
             return [:]
+        case .defend:
+            let priorities: [ShipKind] = [.battlecruiser, .battleship, .cruiser, .heavyFighter, .lightFighter]
+            for kind in priorities {
+                let available = origin.shipInventory[kind] ?? 0
+                if available > 0 {
+                    return [kind: min(available, 4)]
+                }
+            }
+            return [:]
         case .transport, .returning:
             return [:]
         }
@@ -2734,6 +2746,8 @@ final class AppModel: ObservableObject {
             return slot.planetID != nil && slot.isVisible && slot.debrisTotal > 0
         case .attack:
             return slot.planetID != nil && slot.isVisible && !slot.isPlayerOwned && slot.ownerKind != nil
+        case .defend:
+            return slot.planetID != nil && slot.isVisible && slot.isPlayerOwned
         case .transport, .returning:
             return false
         }

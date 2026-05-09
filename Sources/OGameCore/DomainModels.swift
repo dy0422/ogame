@@ -1097,6 +1097,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         case colonize
         case espionage
         case attack
+        case defend
         case recycle
         case explore
         case returning
@@ -1927,6 +1928,8 @@ public extension Fleet.Mission {
             return "侦察"
         case .attack:
             return "攻击"
+        case .defend:
+            return "驻防"
         case .recycle:
             return "回收"
         case .explore:

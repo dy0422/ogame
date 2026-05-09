@@ -24,6 +24,19 @@ public enum FleetEngine {
         var arrivalTime: Int
     }
 
+    private struct AttackResolution {
+        var returningFleet: Fleet?
+        var updatedDefenders: [Fleet]
+    }
+
+    private struct JointAttackResolution {
+        var returningFleets: [Fleet]
+        var updatedDefenders: [Fleet]
+    }
+
+    private static let defaultDefendHoldDuration: TimeInterval = 900
+    private static let maximumACSWaitDuration: TimeInterval = 3_600
+
     public static func launchFleet(
         from originPlanetID: PlanetID,
         to targetPlanetID: PlanetID,
@@ -31,7 +44,8 @@ public enum FleetEngine {
         mission: Fleet.Mission,
         ships requestedShips: [ShipKind: Int],
         cargo: ResourceBundle = .zero,
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        holdDuration: TimeInterval = 900
     ) -> FleetLaunchResult {
         guard let originIndex = universe.planets.firstIndex(where: { $0.id == originPlanetID }) else {
             return .failure(.missingOrigin)
@@ -58,7 +72,9 @@ public enum FleetEngine {
         let speedPercent = normalizedSpeedPercent(speedPercent)
 
         let ships = normalizedShips(requestedShips)
-        guard !ships.isEmpty, isValidLaunchMission(mission, ships: ships, target: universe.planets[targetIndex]) else {
+        guard !ships.isEmpty,
+              isValidLaunchMission(mission, ships: ships, target: universe.planets[targetIndex], ownerID: ownerID)
+        else {
             return .failure(.invalidMission)
         }
 
@@ -115,7 +131,9 @@ public enum FleetEngine {
         }
 
         let arrivalTime = universe.gameTime + travelTime
-        let returnTime = arrivalTime + travelTime
+        let returnTime = mission == .defend
+            ? arrivalTime + normalizedHoldDuration(holdDuration)
+            : arrivalTime + travelTime
         guard arrivalTime.isFinite, returnTime.isFinite else {
             return .failure(.invalidMission)
         }
@@ -188,9 +206,36 @@ public enum FleetEngine {
         let jointAttackGroups = dueJointAttackGroups(in: startingFleets, universe: universe)
         let jointAttackFleetIDs = Set(jointAttackGroups.flatMap { $0.map(\.id) })
         var unresolvedFleets: [Fleet] = []
+        var fleetOverrides: [FleetID: Fleet] = [:]
+        var removedFleetIDs = Set<FleetID>()
+
+        func applyDefenderUpdates(_ defenders: [Fleet]) {
+            for defender in defenders {
+                let hadUnresolvedFleet = unresolvedFleets.contains { $0.id == defender.id }
+                unresolvedFleets.removeAll { $0.id == defender.id }
+                if defender.ships.isEmpty {
+                    removedFleetIDs.insert(defender.id)
+                    fleetOverrides[defender.id] = nil
+                } else {
+                    fleetOverrides[defender.id] = defender
+                    removedFleetIDs.remove(defender.id)
+                    if !hadUnresolvedFleet {
+                        continue
+                    }
+
+                    if defender.returnTime.isFinite, defender.returnTime <= universe.gameTime {
+                        resolveReturn(defender, in: &universe)
+                    } else {
+                        unresolvedFleets.append(defender)
+                    }
+                }
+            }
+        }
 
         for group in jointAttackGroups {
-            for returningFleet in resolveJointAttack(group, in: &universe) {
+            let resolution = resolveJointAttack(group, in: &universe)
+            applyDefenderUpdates(resolution.updatedDefenders)
+            for returningFleet in resolution.returningFleets {
                 if returningFleet.phase == .returning,
                    returningFleet.returnTime.isFinite,
                    returningFleet.returnTime <= universe.gameTime
@@ -202,20 +247,42 @@ public enum FleetEngine {
             }
         }
 
-        for fleet in startingFleets where !jointAttackFleetIDs.contains(fleet.id) {
+        for startingFleet in startingFleets where !jointAttackFleetIDs.contains(startingFleet.id) {
+            guard !removedFleetIDs.contains(startingFleet.id) else {
+                continue
+            }
+            let fleet = fleetOverrides[startingFleet.id] ?? startingFleet
             switch fleet.phase {
-            case .outbound, .holding:
+            case .outbound:
                 if fleet.arrivalTime.isFinite, fleet.arrivalTime <= universe.gameTime {
-                    if let returningFleet = resolveArrival(fleet, in: &universe) {
-                        if returningFleet.phase == .returning,
-                           returningFleet.returnTime.isFinite,
-                           returningFleet.returnTime <= universe.gameTime
+                    if fleet.mission == .attack {
+                        let resolution = resolveAttackArrival(fleet, eventTitle: "Combat Resolved", in: &universe)
+                        applyDefenderUpdates(resolution.updatedDefenders)
+                        if let returningFleet = resolution.returningFleet {
+                            if returningFleet.phase == .returning,
+                               returningFleet.returnTime.isFinite,
+                               returningFleet.returnTime <= universe.gameTime
+                            {
+                                resolveReturn(returningFleet, in: &universe)
+                            } else {
+                                unresolvedFleets.append(returningFleet)
+                            }
+                        }
+                    } else if let resolvedFleet = resolveArrival(fleet, in: &universe) {
+                        if resolvedFleet.returnTime.isFinite,
+                           resolvedFleet.returnTime <= universe.gameTime
                         {
-                            resolveReturn(returningFleet, in: &universe)
+                            resolveReturn(resolvedFleet, in: &universe)
                         } else {
-                            unresolvedFleets.append(returningFleet)
+                            unresolvedFleets.append(resolvedFleet)
                         }
                     }
+                } else {
+                    unresolvedFleets.append(fleet)
+                }
+            case .holding:
+                if fleet.returnTime.isFinite, fleet.returnTime <= universe.gameTime {
+                    resolveReturn(fleet, in: &universe)
                 } else {
                     unresolvedFleets.append(fleet)
                 }
@@ -230,7 +297,14 @@ public enum FleetEngine {
             }
         }
 
-        universe.fleets = unresolvedFleets
+        universe.fleets = unresolvedFleets.sorted { lhs, rhs in
+            let leftTime = lhs.phase == .returning || lhs.phase == .holding ? lhs.returnTime : lhs.arrivalTime
+            let rightTime = rhs.phase == .returning || rhs.phase == .holding ? rhs.returnTime : rhs.arrivalTime
+            if leftTime != rightTime {
+                return leftTime < rightTime
+            }
+            return lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString
+        }
     }
 
     private static func dueJointAttackGroups(in fleets: [Fleet], universe: Universe) -> [[Fleet]] {
@@ -374,6 +448,87 @@ public enum FleetEngine {
         return true
     }
 
+    public static func setJointAttackGatherTime(
+        _ fleetIDs: [FleetID],
+        ownerID: FactionID,
+        gatherUntil: TimeInterval,
+        in universe: inout Universe
+    ) -> Bool {
+        let uniqueFleetIDs = Array(Set(fleetIDs))
+        guard uniqueFleetIDs.count >= 2,
+              gatherUntil.isFinite,
+              gatherUntil > universe.gameTime
+        else {
+            return false
+        }
+
+        let indices = uniqueFleetIDs.compactMap { fleetID in
+            universe.fleets.firstIndex { $0.id == fleetID }
+        }
+        guard indices.count == uniqueFleetIDs.count else {
+            return false
+        }
+
+        let selected = indices.map { universe.fleets[$0] }
+        guard selected.allSatisfy({
+            $0.ownerID == ownerID &&
+                $0.mission == .attack &&
+                $0.phase == .outbound &&
+                $0.recalledAt == nil &&
+                $0.arrivalTime.isFinite
+        }) else {
+            return false
+        }
+
+        guard let first = selected.first,
+              selected.allSatisfy({ $0.targetPlanetID == first.targetPlanetID && $0.target == first.target })
+        else {
+            return false
+        }
+
+        let latestArrival = selected.map(\.arrivalTime).max() ?? gatherUntil
+        let earliestArrival = selected.map(\.arrivalTime).min() ?? gatherUntil
+        guard gatherUntil >= latestArrival,
+              gatherUntil - earliestArrival <= maximumACSWaitDuration
+        else {
+            return false
+        }
+
+        for index in indices {
+            let delay = max(gatherUntil - universe.fleets[index].arrivalTime, 0)
+            universe.fleets[index].arrivalTime += delay
+            universe.fleets[index].returnTime += delay
+        }
+        universe.fleets.sort { lhs, rhs in
+            if lhs.arrivalTime != rhs.arrivalTime {
+                return lhs.arrivalTime < rhs.arrivalTime
+            }
+            return lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString
+        }
+        universe.events.append(
+            GameEvent(
+                id: EventID(
+                    stableUUID(
+                        namespace: "0017",
+                        payload: [
+                            "acs-gather",
+                            universe.id.rawValue.uuidString,
+                            ownerID.rawValue.uuidString,
+                            uniqueFleetIDs.map { $0.rawValue.uuidString }.sorted().joined(separator: ","),
+                            String(gatherUntil),
+                            String(universe.gameTime)
+                        ].joined(separator: "|")
+                    )
+                ),
+                time: universe.gameTime,
+                kind: .system,
+                title: "ACS Gathering Adjusted",
+                message: "Attack fleets synchronized to T+\(Int(gatherUntil))."
+            )
+        )
+        return true
+    }
+
     private static func resolveArrival(_ fleet: Fleet, in universe: inout Universe) -> Fleet? {
         var returningFleet = fleet
         returningFleet.phase = .returning
@@ -434,15 +589,10 @@ public enum FleetEngine {
                 universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .system, title: "Colony Established"))
             }
         case .attack:
-            let defenderID = targetPlanetIndex(for: fleet, in: universe).flatMap { universe.planets[$0].ownerID }
-            guard let combatReturn = CombatEngine.resolveAttack(fleet, in: &universe) else {
-                recordAttackRelations(attackerID: fleet.ownerID, defenderID: defenderID, time: fleet.arrivalTime, in: &universe)
-                universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .combat, title: "Combat Resolved"))
-                return nil
-            }
-            returningFleet = combatReturn
-            recordAttackRelations(attackerID: fleet.ownerID, defenderID: defenderID, time: fleet.arrivalTime, in: &universe)
-            universe.events.append(missionEvent(for: returningFleet, time: fleet.arrivalTime, kind: .combat, title: "Combat Resolved"))
+            return resolveAttackArrival(fleet, eventTitle: "Combat Resolved", in: &universe).returningFleet
+        case .defend:
+            returningFleet.phase = .holding
+            universe.events.append(missionEvent(for: returningFleet, time: fleet.arrivalTime, kind: .system, title: "Defensive Hold Established"))
         case .espionage:
             guard let espionageReturn = CombatEngine.resolveEspionage(fleet, in: &universe) else {
                 universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .intelligence, title: "Espionage Report"))
@@ -458,25 +608,93 @@ public enum FleetEngine {
         return returningFleet
     }
 
-    private static func resolveJointAttack(_ fleets: [Fleet], in universe: inout Universe) -> [Fleet] {
+    private static func resolveAttackArrival(_ fleet: Fleet, eventTitle: String, in universe: inout Universe) -> AttackResolution {
+        let defenderID = targetPlanetIndex(for: fleet, in: universe).flatMap { universe.planets[$0].ownerID }
+        let resolution = resolveAttackWithHoldingDefenders(fleet, in: &universe)
+        recordAttackRelations(attackerID: fleet.ownerID, defenderID: defenderID, time: fleet.arrivalTime, in: &universe)
+        universe.events.append(
+            missionEvent(
+                for: resolution.returningFleet ?? fleet,
+                time: fleet.arrivalTime,
+                kind: .combat,
+                title: eventTitle
+            )
+        )
+        return resolution
+    }
+
+    private static func resolveJointAttack(_ fleets: [Fleet], in universe: inout Universe) -> JointAttackResolution {
         let group = fleets
             .filter { $0.mission == .attack }
             .sorted { lhs, rhs in lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString }
         guard let primaryFleet = group.first else {
-            return []
+            return JointAttackResolution(returningFleets: [], updatedDefenders: [])
         }
 
         let defenderID = targetPlanetIndex(for: primaryFleet, in: universe).flatMap { universe.planets[$0].ownerID }
         let combinedFleet = jointAttackFleet(from: group, primaryFleet: primaryFleet, in: universe)
-        guard let combinedReturn = CombatEngine.resolveAttack(combinedFleet, in: &universe) else {
-            recordAttackRelations(attackerID: primaryFleet.ownerID, defenderID: defenderID, time: primaryFleet.arrivalTime, in: &universe)
-            universe.events.append(missionEvent(for: combinedFleet, time: primaryFleet.arrivalTime, kind: .combat, title: "Joint Combat Resolved"))
-            return []
-        }
-
+        let resolution = resolveAttackWithHoldingDefenders(combinedFleet, in: &universe)
         recordAttackRelations(attackerID: primaryFleet.ownerID, defenderID: defenderID, time: primaryFleet.arrivalTime, in: &universe)
         universe.events.append(missionEvent(for: combinedFleet, time: primaryFleet.arrivalTime, kind: .combat, title: "Joint Combat Resolved"))
-        return splitJointAttackReturn(combinedReturn, among: group, ruleSet: universe.ruleSet)
+        guard let combinedReturn = resolution.returningFleet else {
+            return JointAttackResolution(returningFleets: [], updatedDefenders: resolution.updatedDefenders)
+        }
+
+        return JointAttackResolution(
+            returningFleets: splitJointAttackReturn(combinedReturn, among: group, ruleSet: universe.ruleSet),
+            updatedDefenders: resolution.updatedDefenders
+        )
+    }
+
+    private static func resolveAttackWithHoldingDefenders(_ fleet: Fleet, in universe: inout Universe) -> AttackResolution {
+        guard let targetIndex = targetPlanetIndex(for: fleet, in: universe),
+              let targetOwnerID = universe.planets[targetIndex].ownerID
+        else {
+            return AttackResolution(
+                returningFleet: CombatEngine.resolveAttack(fleet, in: &universe),
+                updatedDefenders: []
+            )
+        }
+
+        let targetPlanetID = universe.planets[targetIndex].id
+        let defenders = activeHoldingDefenders(
+            targetPlanetID: targetPlanetID,
+            targetOwnerID: targetOwnerID,
+            attackTime: fleet.arrivalTime,
+            attackerID: fleet.ownerID,
+            in: universe
+        )
+        guard !defenders.isEmpty else {
+            return AttackResolution(
+                returningFleet: CombatEngine.resolveAttack(fleet, in: &universe),
+                updatedDefenders: []
+            )
+        }
+
+        let planetShipsBefore = normalizedShips(universe.planets[targetIndex].shipInventory)
+        let defenderFleetShips = defenders.reduce(into: [ShipKind: Int]()) { result, defender in
+            for (kind, quantity) in normalizedShips(defender.ships) {
+                result[kind, default: 0] += quantity
+            }
+        }
+        universe.planets[targetIndex].shipInventory = addingShips(planetShipsBefore, defenderFleetShips)
+
+        let returningFleet = CombatEngine.resolveAttack(fleet, in: &universe)
+        let combinedDefenderSurvivors = normalizedShips(universe.planets[targetIndex].shipInventory)
+        let allocations = splitShips(
+            combinedDefenderSurvivors,
+            amongContributions: [planetShipsBefore] + defenders.map { normalizedShips($0.ships) },
+            identifiers: ["planet"] + defenders.map { $0.id.rawValue.uuidString }
+        )
+
+        universe.planets[targetIndex].shipInventory = allocations.first ?? [:]
+        let updatedDefenders = defenders.indices.map { index in
+            var defender = defenders[index]
+            defender.ships = allocations[index + 1]
+            return defender
+        }
+
+        return AttackResolution(returningFleet: returningFleet, updatedDefenders: updatedDefenders)
     }
 
     private static func jointAttackFleet(from fleets: [Fleet], primaryFleet: Fleet, in universe: Universe) -> Fleet {
@@ -537,8 +755,20 @@ public enum FleetEngine {
     }
 
     private static func splitShips(_ remainingShips: [ShipKind: Int], among fleets: [Fleet]) -> [[ShipKind: Int]] {
-        var allocations = Array(repeating: [ShipKind: Int](), count: fleets.count)
-        guard !fleets.isEmpty else {
+        splitShips(
+            remainingShips,
+            amongContributions: fleets.map { normalizedShips($0.ships) },
+            identifiers: fleets.map { $0.id.rawValue.uuidString }
+        )
+    }
+
+    private static func splitShips(
+        _ remainingShips: [ShipKind: Int],
+        amongContributions contributions: [[ShipKind: Int]],
+        identifiers: [String]
+    ) -> [[ShipKind: Int]] {
+        var allocations = Array(repeating: [ShipKind: Int](), count: contributions.count)
+        guard !contributions.isEmpty else {
             return allocations
         }
 
@@ -547,7 +777,7 @@ public enum FleetEngine {
             guard remaining > 0 else {
                 continue
             }
-            let contributed = fleets.map { max($0.ships[kind] ?? 0, 0) }
+            let contributed = contributions.map { max($0[kind] ?? 0, 0) }
             let totalContributed = contributed.reduce(0, +)
             guard totalContributed > 0 else {
                 continue
@@ -555,7 +785,7 @@ public enum FleetEngine {
 
             var assigned = 0
             var remainders: [(index: Int, remainder: Double)] = []
-            for index in fleets.indices {
+            for index in contributions.indices {
                 let rawShare = Double(remaining) * Double(contributed[index]) / Double(totalContributed)
                 let wholeShare = min(contributed[index], Int(floor(rawShare)))
                 if wholeShare > 0 {
@@ -569,7 +799,9 @@ public enum FleetEngine {
                 if lhs.remainder != rhs.remainder {
                     return lhs.remainder > rhs.remainder
                 }
-                return fleets[lhs.index].id.rawValue.uuidString < fleets[rhs.index].id.rawValue.uuidString
+                let leftIdentifier = identifiers.indices.contains(lhs.index) ? identifiers[lhs.index] : ""
+                let rightIdentifier = identifiers.indices.contains(rhs.index) ? identifiers[rhs.index] : ""
+                return leftIdentifier < rightIdentifier
             }
             var remainderIndex = 0
             while assigned < remaining && !sortedRemainders.isEmpty {
@@ -623,10 +855,12 @@ public enum FleetEngine {
         universe.events.append(missionEvent(for: fleet, time: fleet.returnTime, kind: .system, title: "Fleet Returned"))
     }
 
-    private static func isValidLaunchMission(_ mission: Fleet.Mission, ships: [ShipKind: Int], target: Planet) -> Bool {
+    private static func isValidLaunchMission(_ mission: Fleet.Mission, ships: [ShipKind: Int], target: Planet, ownerID: FactionID) -> Bool {
         switch mission {
         case .transport, .attack, .espionage, .explore:
             return true
+        case .defend:
+            return target.ownerID == ownerID
         case .recycle:
             return (ships[.recycler] ?? 0) > 0
         case .colonize:
@@ -636,6 +870,29 @@ public enum FleetEngine {
         case .returning:
             return false
         }
+    }
+
+    private static func activeHoldingDefenders(
+        targetPlanetID: PlanetID,
+        targetOwnerID: FactionID,
+        attackTime: TimeInterval,
+        attackerID: FactionID,
+        in universe: Universe
+    ) -> [Fleet] {
+        universe.fleets
+            .filter { fleet in
+                fleet.mission == .defend &&
+                    fleet.phase == .holding &&
+                    fleet.targetPlanetID == targetPlanetID &&
+                    fleet.ownerID == targetOwnerID &&
+                    fleet.ownerID != attackerID &&
+                    fleet.arrivalTime.isFinite &&
+                    fleet.arrivalTime <= attackTime &&
+                    fleet.returnTime.isFinite &&
+                    fleet.returnTime > attackTime &&
+                    !normalizedShips(fleet.ships).isEmpty
+            }
+            .sorted { lhs, rhs in lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString }
     }
 
     private static func canFactionColonizeMorePlanets(_ factionID: FactionID, in universe: Universe) -> Bool {
@@ -660,6 +917,16 @@ public enum FleetEngine {
 
             result[element.key] = addition.partialValue
         }
+    }
+
+    private static func addingShips(_ lhs: [ShipKind: Int], _ rhs: [ShipKind: Int]) -> [ShipKind: Int] {
+        var result = normalizedShips(lhs)
+        for (kind, quantity) in normalizedShips(rhs) {
+            let current = result[kind] ?? 0
+            let addition = current.addingReportingOverflow(quantity)
+            result[kind] = addition.overflow ? current : addition.partialValue
+        }
+        return result
     }
 
     private static func applyExplorationShipOutcome(
@@ -693,6 +960,14 @@ public enum FleetEngine {
         }
 
         return min(max(value, 0.1), 1)
+    }
+
+    private static func normalizedHoldDuration(_ value: TimeInterval) -> TimeInterval {
+        guard value.isFinite else {
+            return defaultDefendHoldDuration
+        }
+
+        return min(max(value, 60), 86_400)
     }
 
     private static func cargoCapacity(for ships: [ShipKind: Int], ruleSet: RuleSet) -> Double {

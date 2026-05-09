@@ -3282,7 +3282,7 @@ private struct StarMapSlotActions: View {
             return [.colonize]
         }
         if slot.isPlayerOwned {
-            return []
+            return [.defend]
         }
 
         var result: [Fleet.Mission] = []
@@ -4532,8 +4532,14 @@ private enum LocalizedGameText {
             return "探索完成"
         case "Colony Established":
             return "殖民地已建立"
+        case "Defensive Hold Established":
+            return "驻防已部署"
         case "Combat Resolved":
             return "战斗已结算"
+        case "Joint Combat Resolved":
+            return "联合战斗已结算"
+        case "ACS Gathering Adjusted":
+            return "ACS 集结已调整"
         case "Espionage Report":
             return "侦察报告"
         case "Fleet Lost Contact":
@@ -4954,6 +4960,8 @@ private extension Fleet.Mission {
             return "eye"
         case .attack:
             return "target"
+        case .defend:
+            return "shield"
         case .recycle:
             return "arrow.triangle.2.circlepath"
         case .explore:
