@@ -3101,6 +3101,8 @@ private struct ExplorationEventReportRow: View {
 
 private struct StarMapView: View {
     @ObservedObject var model: AppModel
+    @SceneStorage("starMap.selectedGalaxy") private var selectedGalaxy = 1
+    @SceneStorage("starMap.selectedSystem") private var selectedSystem = 1
 
     private var allPlanets: [StarMapPlanetSummary] {
         model.starMapSections.flatMap(\.planets)
@@ -3130,6 +3132,12 @@ private struct StarMapView: View {
             }
             .frame(maxWidth: 860, alignment: .leading)
 
+            SolarSystemPanel(
+                galaxy: $selectedGalaxy,
+                system: $selectedSystem,
+                slots: model.solarSystemSlots(galaxy: selectedGalaxy, system: selectedSystem)
+            )
+
             StarMapGalaxyStrip(summaries: allPlanets)
 
             ForEach(model.starMapSections) { section in
@@ -3139,6 +3147,171 @@ private struct StarMapView: View {
             ExplorationSummaryPanel(model: model)
         }
         .navigationTitle("星图")
+    }
+}
+
+private struct SolarSystemPanel: View {
+    @Binding var galaxy: Int
+    @Binding var system: Int
+    let slots: [SolarSystemSlotSummary]
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(
+                    title: "太阳系槽位",
+                    detail: "\(galaxy):\(system) · 1-15 可殖民，16 远征"
+                )
+
+                HStack(spacing: 18) {
+                    Stepper(value: $galaxy, in: 1...UniverseTopologyEngine.defaultGalaxyCount) {
+                        Text("银河 \(galaxy)")
+                            .font(.callout.monospacedDigit())
+                            .lineLimit(1)
+                    }
+
+                    Stepper(value: $system, in: 1...UniverseTopologyEngine.defaultSystemsPerGalaxy) {
+                        Text("太阳系 \(system)")
+                            .font(.callout.monospacedDigit())
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 158), alignment: .topLeading)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(slots) { slot in
+                        SolarSystemSlotTile(slot: slot)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct SolarSystemSlotTile: View {
+    let slot: SolarSystemSlotSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(String(format: "%02d", slot.position))
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Image(systemName: systemImage)
+                    .foregroundStyle(tint)
+                    .frame(width: 16)
+
+                Spacer(minLength: 4)
+
+                Text(slot.coordinate.displayText)
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Text(slot.displayName)
+                .font(.callout.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+
+            Text(slot.ownerName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            HStack(spacing: 5) {
+                StrategicChip(title: statusTitle, systemImage: systemImage, tint: tint)
+
+                if slot.hasMoon {
+                    StrategicChip(title: "月球", systemImage: "moon.stars", tint: .purple)
+                }
+
+                if slot.debrisTotal > 0 {
+                    StrategicChip(
+                        title: Formatters.wholeNumber(slot.debrisTotal),
+                        systemImage: "sparkles",
+                        tint: .orange
+                    )
+                }
+            }
+        }
+        .padding(10)
+        .frame(minHeight: 108, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(backgroundOpacity), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(tint.opacity(0.18))
+        }
+    }
+
+    private var statusTitle: String {
+        if slot.isExpedition {
+            return "远征"
+        }
+        if slot.planetID == nil {
+            return "空位"
+        }
+        if slot.isPlayerOwned {
+            return "我的"
+        }
+        if !slot.isVisible {
+            return "未知"
+        }
+        if slot.ownerKind == .ai {
+            return "AI"
+        }
+        return "中立"
+    }
+
+    private var systemImage: String {
+        if slot.isExpedition {
+            return "sparkles"
+        }
+        if slot.planetID == nil {
+            return "circle.dashed"
+        }
+        if slot.isPlayerOwned {
+            return "house.and.flag"
+        }
+        if !slot.isVisible {
+            return "questionmark.circle"
+        }
+        if slot.ownerKind == .ai {
+            return "cpu"
+        }
+        return "globe.asia.australia"
+    }
+
+    private var tint: Color {
+        if slot.isExpedition {
+            return .purple
+        }
+        if slot.planetID == nil {
+            return .green
+        }
+        if slot.isPlayerOwned {
+            return .blue
+        }
+        if !slot.isVisible {
+            return .secondary
+        }
+        if slot.ownerKind == .ai {
+            return .red
+        }
+        return .orange
+    }
+
+    private var backgroundOpacity: Double {
+        slot.planetID == nil ? 0.08 : 0.12
     }
 }
 

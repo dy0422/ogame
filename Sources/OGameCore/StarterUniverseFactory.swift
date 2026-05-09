@@ -6,17 +6,22 @@ public enum StarterUniverseFactory {
 
         let playerID = stableFactionID(index: 0)
         let playerHomeID = stablePlanetID(index: 0)
+        let playerHomeCoordinate = Coordinate(galaxy: 1, system: 1, position: 4)
+        let playerHomeProfile = UniverseTopologyEngine.planetProfile(
+            for: playerHomeCoordinate,
+            universeSeed: seed
+        )
         let playerHome = Planet(
             id: playerHomeID,
             name: "Homeworld",
-            coordinate: Coordinate(galaxy: 1, system: 1, position: 4),
+            coordinate: playerHomeCoordinate,
             ownerID: playerID,
             resources: startingResources,
             storage: startingStorage,
-            temperatureCelsius: temperatureCelsius(for: Coordinate(galaxy: 1, system: 1, position: 4)),
+            temperatureCelsius: playerHomeProfile.temperatureCelsius,
             energy: startingEnergy,
             buildingLevels: startingBuildingLevels,
-            maxFields: maxFields(for: Coordinate(galaxy: 1, system: 1, position: 4), seedOffset: 0)
+            maxFields: playerHomeProfile.maxFields
         )
 
         let aiStrategies: [Faction.Strategy] = [.miner, .raider, .technologist, .expansionist, .balanced]
@@ -52,6 +57,7 @@ public enum StarterUniverseFactory {
                 system: index + 1,
                 position: generator.nextInt(in: 4...12)
             )
+            let profile = UniverseTopologyEngine.planetProfile(for: coordinate, universeSeed: seed)
             planets.append(
                 Planet(
                     id: planetID,
@@ -60,31 +66,32 @@ public enum StarterUniverseFactory {
                     ownerID: factionID,
                     resources: startingResources,
                     storage: startingStorage,
-                    temperatureCelsius: temperatureCelsius(for: coordinate),
+                    temperatureCelsius: profile.temperatureCelsius,
                     energy: startingEnergy,
                     buildingLevels: startingBuildingLevels,
-                    maxFields: maxFields(for: coordinate, seedOffset: index)
+                    maxFields: profile.maxFields
                 )
             )
         }
 
-        let neutralCoordinates = [
-            Coordinate(galaxy: 1, system: 8, position: 6),
-            Coordinate(galaxy: 1, system: 9, position: 9),
-            Coordinate(galaxy: 1, system: 10, position: 12)
-        ]
+        let neutralCoordinates = UniverseTopologyEngine.regionalColonyCoordinates(
+            around: playerHomeCoordinate,
+            occupied: Set(planets.map(\.coordinate)),
+            limit: 30
+        )
         for (offset, coordinate) in neutralCoordinates.enumerated() {
+            let profile = UniverseTopologyEngine.planetProfile(for: coordinate, universeSeed: seed)
             planets.append(
                 Planet(
                     id: stablePlanetID(index: 6 + offset),
-                    name: "Unclaimed \(offset + 1)",
+                    name: "未占领 \(offset + 1)",
                     coordinate: coordinate,
                     ownerID: nil,
                     resources: ResourceBundle(metal: 100 + Double(offset * 50), crystal: 50, deuterium: 20),
                     storage: startingStorage,
-                    temperatureCelsius: temperatureCelsius(for: coordinate),
+                    temperatureCelsius: profile.temperatureCelsius,
                     debrisField: ResourceBundle(metal: 25 + Double(offset * 10), crystal: 10),
-                    maxFields: maxFields(for: coordinate, seedOffset: 6 + offset)
+                    maxFields: profile.maxFields
                 )
             )
         }
@@ -128,13 +135,4 @@ public enum StarterUniverseFactory {
         PlanetID(UUID(uuidString: String(format: "00000000-0000-0000-0001-%012d", index + 1))!)
     }
 
-    private static func temperatureCelsius(for coordinate: Coordinate) -> Double {
-        100 - Double(coordinate.position) * 15
-    }
-
-    private static func maxFields(for coordinate: Coordinate, seedOffset: Int) -> Int {
-        let centerBonus = max(0, 9 - abs(coordinate.position - 8)) * 6
-        let variation = abs((coordinate.system * 17 + coordinate.position * 31 + seedOffset * 13) % 24)
-        return 140 + centerBonus + variation
-    }
 }

@@ -204,6 +204,74 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func solarSystemSlots(galaxy: Int, system: Int) -> [SolarSystemSlotSummary] {
+        let normalizedGalaxy = min(max(galaxy, 1), UniverseTopologyEngine.defaultGalaxyCount)
+        let normalizedSystem = min(max(system, 1), UniverseTopologyEngine.defaultSystemsPerGalaxy)
+        let planetsByPosition = universe.planets
+            .filter { $0.coordinate.galaxy == normalizedGalaxy && $0.coordinate.system == normalizedSystem }
+            .reduce(into: [Int: Planet]()) { result, planet in
+                result[planet.coordinate.position] = planet
+            }
+
+        return (1...UniverseTopologyEngine.expeditionPosition).map { position in
+            let coordinate = Coordinate(galaxy: normalizedGalaxy, system: normalizedSystem, position: position)
+            if position == UniverseTopologyEngine.expeditionPosition {
+                return SolarSystemSlotSummary(
+                    position: position,
+                    coordinate: coordinate,
+                    planetID: nil,
+                    displayName: "外太空",
+                    ownerName: "远征",
+                    ownerKind: nil,
+                    isPlayerOwned: false,
+                    isVisible: true,
+                    isExpedition: true,
+                    hasMoon: false,
+                    debrisTotal: 0
+                )
+            }
+
+            guard let planet = planetsByPosition[position] else {
+                return SolarSystemSlotSummary(
+                    position: position,
+                    coordinate: coordinate,
+                    planetID: nil,
+                    displayName: "空位",
+                    ownerName: "可殖民",
+                    ownerKind: nil,
+                    isPlayerOwned: false,
+                    isVisible: true,
+                    isExpedition: false,
+                    hasMoon: false,
+                    debrisTotal: 0
+                )
+            }
+
+            let isPlayerOwned = isPlayerOwned(planet)
+            let isVisible = isVisibleToPlayer(planet)
+            let ownerKind = isPlayerOwned
+                ? Faction.Kind.player
+                : isVisible ? planet.ownerID.flatMap { faction(with: $0)?.kind } : nil
+            let ownerName = isPlayerOwned
+                ? (playerFaction?.name.displayName ?? "玩家")
+                : isVisible ? planet.ownerID.map(factionName(for:)) ?? "中立" : "未知"
+
+            return SolarSystemSlotSummary(
+                position: position,
+                coordinate: coordinate,
+                planetID: planet.id,
+                displayName: isVisible ? planet.name.displayName : "未知区域",
+                ownerName: ownerName,
+                ownerKind: ownerKind,
+                isPlayerOwned: isPlayerOwned,
+                isVisible: isVisible,
+                isExpedition: false,
+                hasMoon: isVisible && planet.moon != nil,
+                debrisTotal: isVisible ? planet.debrisField.totalAmountForDisplay : 0
+            )
+        }
+    }
+
     var factionRankings: [FactionScore] {
         let rankings = universe.rankings.isEmpty ? StrategicEngine.rankings(in: universe) : universe.rankings
         return rankings.sorted { lhs, rhs in
@@ -1078,7 +1146,10 @@ final class AppModel: ObservableObject {
                 (normalizedShips[.recycler] ?? 0) > 0 &&
                 target.debrisField.totalAmountForDisplay > 0
         case .colonize:
-            return targetIsVisible && target.ownerID == nil && (normalizedShips[.colonyShip] ?? 0) > 0
+            return targetIsVisible &&
+                target.ownerID == nil &&
+                UniverseTopologyEngine.isValidPlanetCoordinate(target.coordinate) &&
+                (normalizedShips[.colonyShip] ?? 0) > 0
         case .returning:
             return false
         }
@@ -2678,6 +2749,22 @@ struct StarMapPlanetSummary: Identifiable {
     let otherFleetCount: Int
 
     var id: PlanetID { planet.id }
+}
+
+struct SolarSystemSlotSummary: Identifiable {
+    let position: Int
+    let coordinate: Coordinate
+    let planetID: PlanetID?
+    let displayName: String
+    let ownerName: String
+    let ownerKind: Faction.Kind?
+    let isPlayerOwned: Bool
+    let isVisible: Bool
+    let isExpedition: Bool
+    let hasMoon: Bool
+    let debrisTotal: Double
+
+    var id: Int { position }
 }
 
 struct FleetTargetSummary: Identifiable {

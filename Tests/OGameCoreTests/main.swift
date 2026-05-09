@@ -1028,15 +1028,8 @@ func testStarterUniverseIsDeterministicForSeed() throws {
         first.planets.map(\.coordinate) != differentSeed.planets.map(\.coordinate),
         "Different seeds should produce meaningfully different generated coordinates"
     )
-    requireEqual(
-        neutralPlanets.map(\.coordinate),
-        [
-            Coordinate(galaxy: 1, system: 8, position: 6),
-            Coordinate(galaxy: 1, system: 9, position: 9),
-            Coordinate(galaxy: 1, system: 10, position: 12)
-        ],
-        "Neutral planets should use deterministic colonization coordinates"
-    )
+    require(neutralPlanets.count >= 24, "Neutral planets should provide a service-style regional colonization pool")
+    require(neutralPlanets.allSatisfy { UniverseTopologyEngine.isValidPlanetCoordinate($0.coordinate) }, "Neutral planets should use valid colony slots")
     require(neutralPlanets.allSatisfy { resourceTotal($0.resources) > 0 }, "Neutral planets should carry small exploration resources")
 
     requireEqual(first.events.count, 1, "Starter universe should create one welcome event")
@@ -1047,6 +1040,139 @@ func testStarterUniverseIsDeterministicForSeed() throws {
     let data = try JSONEncoder().encode(first)
     let decoded = try JSONDecoder().decode(Universe.self, from: data)
     requireEqual(decoded, first, "Starter universe should preserve stable enum-map JSON behavior")
+}
+
+func testUniverseTopologyUsesServiceStyleCoordinateLimits() {
+    requireEqual(UniverseTopologyEngine.defaultGalaxyCount, 9, "Service-style universe should expose nine galaxies")
+    requireEqual(UniverseTopologyEngine.defaultSystemsPerGalaxy, 499, "Each galaxy should expose 499 solar systems")
+    requireEqual(UniverseTopologyEngine.planetSlotsPerSystem, 15, "Each solar system should expose fifteen planet slots")
+    requireEqual(UniverseTopologyEngine.expeditionPosition, 16, "Position 16 should be reserved for expedition space")
+    requireEqual(UniverseTopologyEngine.defaultMaxPlayerPlanets, 8, "Default player colony cap should match the service baseline")
+
+    require(UniverseTopologyEngine.isValidPlanetCoordinate(Coordinate(galaxy: 1, system: 1, position: 1)), "First planet slot should be valid")
+    require(UniverseTopologyEngine.isValidPlanetCoordinate(Coordinate(galaxy: 9, system: 499, position: 15)), "Last planet slot should be valid")
+    require(!UniverseTopologyEngine.isValidPlanetCoordinate(Coordinate(galaxy: 10, system: 1, position: 1)), "Galaxy beyond the universe limit should be invalid")
+    require(!UniverseTopologyEngine.isValidPlanetCoordinate(Coordinate(galaxy: 1, system: 500, position: 1)), "System beyond the galaxy limit should be invalid")
+    require(!UniverseTopologyEngine.isValidPlanetCoordinate(Coordinate(galaxy: 1, system: 1, position: 16)), "Expedition slot should not be a colony planet slot")
+    require(UniverseTopologyEngine.isExpeditionCoordinate(Coordinate(galaxy: 1, system: 1, position: 16)), "Position 16 should be recognized as expedition space")
+}
+
+func testUniverseTopologyPlanetProfilesVaryBySlot() {
+    let inner = UniverseTopologyEngine.planetProfile(
+        for: Coordinate(galaxy: 1, system: 8, position: 2),
+        universeSeed: 42
+    )
+    let middle = UniverseTopologyEngine.planetProfile(
+        for: Coordinate(galaxy: 1, system: 8, position: 5),
+        universeSeed: 42
+    )
+    let outer = UniverseTopologyEngine.planetProfile(
+        for: Coordinate(galaxy: 1, system: 8, position: 14),
+        universeSeed: 42
+    )
+
+    require(inner.temperatureCelsius > outer.temperatureCelsius, "Inner slots should be hotter than outer slots")
+    require(middle.maxFields > inner.maxFields, "Middle colony slots should generally offer more fields than inner slots")
+    require(middle.maxFields > outer.maxFields, "Middle colony slots should generally offer more fields than cold outer slots")
+    requireEqual(outer.habitat, .ice, "Outer slots should receive an ice habitat profile")
+}
+
+func testStarterUniverseProvidesServiceStyleColonyPool() {
+    let universe = StarterUniverseFactory.makeNewGame(seed: 23, playerName: "Commander")
+    let neutralPlanets = universe.planets.filter { $0.ownerID == nil }
+    let occupiedCoordinates = Set(universe.planets.map(\.coordinate))
+
+    require(neutralPlanets.count >= 24, "Starter universe should expose a regional colony pool instead of only three neutral planets")
+    requireEqual(occupiedCoordinates.count, universe.planets.count, "Starter universe should not duplicate coordinates")
+    require(neutralPlanets.allSatisfy { UniverseTopologyEngine.isValidPlanetCoordinate($0.coordinate) }, "Neutral colony targets should be valid planet slots")
+    require(neutralPlanets.contains { $0.coordinate.position >= 13 }, "Regional colony pool should include cold outer deuterium candidates")
+    require(neutralPlanets.contains { $0.coordinate.position <= 3 }, "Regional colony pool should include hot inner solar candidates")
+}
+
+func testServiceStyleMoonChanceUsesDebrisThresholdAndCap() {
+    requireEqual(
+        UniverseTopologyEngine.moonChancePercent(forDebris: ResourceBundle(metal: 99_999, crystal: 0)),
+        0,
+        "Debris below 100,000 should not create a moon chance"
+    )
+    requireEqual(
+        UniverseTopologyEngine.moonChancePercent(forDebris: ResourceBundle(metal: 100_000, crystal: 0)),
+        1,
+        "Every 100,000 debris should grant one percent moon chance"
+    )
+    requireEqual(
+        UniverseTopologyEngine.moonChancePercent(forDebris: ResourceBundle(metal: 2_500_000, crystal: 0)),
+        20,
+        "Moon chance should cap at twenty percent"
+    )
+}
+
+func testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized() {
+    var universe = makeFleetUniverse(originResources: ResourceBundle(metal: 20_000, crystal: 20_000, deuterium: 20_000))
+    let expectedProfile = UniverseTopologyEngine.planetProfile(for: universe.planets[1].coordinate, universeSeed: universe.seed)
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &universe,
+        mission: .colonize,
+        ships: [.colonyShip: 1],
+        cargo: .zero
+    )
+    guard case .launched(let launchedFleet) = launch else {
+        fatalError("Colonization fleet should launch to a normal empty planet slot")
+    }
+
+    universe.gameTime = launchedFleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &universe)
+
+    let colony = requirePlanet(fleetPlanetID(2), in: universe, "Colonized planet should remain")
+    requireEqual(colony.maxFields, expectedProfile.maxFields, "Colonized world should receive topology-derived fields")
+    requireEqual(colony.temperatureCelsius, expectedProfile.temperatureCelsius, "Colonized world should receive topology-derived temperature")
+
+    var expeditionUniverse = makeFleetUniverse(originResources: ResourceBundle(metal: 20_000, crystal: 20_000, deuterium: 20_000))
+    expeditionUniverse.planets[1].coordinate = Coordinate(galaxy: 1, system: 1, position: UniverseTopologyEngine.expeditionPosition)
+    let expeditionColonize = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &expeditionUniverse,
+        mission: .colonize,
+        ships: [.colonyShip: 1],
+        cargo: .zero
+    )
+    requireEqual(expeditionColonize, .failure(.invalidMission), "Position 16 should not accept colonization")
+
+    let expeditionExplore = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &expeditionUniverse,
+        mission: .explore,
+        ships: [.smallCargo: 1],
+        cargo: .zero
+    )
+    guard case .launched = expeditionExplore else {
+        fatalError("Position 16 should accept exploration")
+    }
+
+    var cappedUniverse = makeFleetUniverse(originResources: ResourceBundle(metal: 20_000, crystal: 20_000, deuterium: 20_000))
+    let extraColonies = (3...(UniverseTopologyEngine.defaultMaxPlayerPlanets + 1)).map { index in
+        Planet(
+            id: fleetPlanetID(index),
+            name: "Colony \(index)",
+            coordinate: Coordinate(galaxy: 1, system: index + 1, position: 6),
+            ownerID: fleetPlayerID()
+        )
+    }
+    cappedUniverse.planets.append(contentsOf: extraColonies)
+    cappedUniverse.factions[0].ownedPlanetIDs = [fleetPlanetID(1)] + extraColonies.map(\.id)
+    let cappedColonize = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: fleetPlanetID(2),
+        in: &cappedUniverse,
+        mission: .colonize,
+        ships: [.colonyShip: 1],
+        cargo: .zero
+    )
+    requireEqual(cappedColonize, .failure(.invalidMission), "Faction at colony cap should not launch another colonization fleet")
 }
 
 func testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources() {
@@ -3003,7 +3129,7 @@ func testMoonChanceCanCreateMoonFromLargeDebrisBattle() {
     universe.planets[1].shipInventory = [.battleship: 18, .cruiser: 12, .lightFighter: 40]
     universe.planets[1].defenseInventory = [.rocketLauncher: 60, .lightLaser: 20, .heavyLaser: 6]
     let fleet = Fleet(
-        id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-0000000006a0")!),
+        id: FleetID(UUID(uuidString: "00000000-0000-0000-0000-000000000003")!),
         ownerID: fleetPlayerID(),
         mission: .attack,
         origin: universe.planets[0].coordinate,
@@ -3735,6 +3861,31 @@ func testAIExpansionistColonizesKnownNeutralWorld() {
     requireEqual(universe.fleets.count, 1, "Expansionist should launch one strategic fleet")
     requireEqual(universe.fleets[0].mission, .colonize, "Expansionist should colonize known neutral worlds")
     requireEqual(universe.fleets[0].targetPlanetID, unclaimed.id, "Expansionist should target the known neutral world")
+}
+
+func testAIExpansionistSeedsServiceStyleColonizationTargetWhenNoneKnown() {
+    let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
+    let expansionist = makeAIEconomyFaction(index: 1, strategy: .expansionist)
+    let playerPlanet = makeAIEconomyPlanet(index: 0, ownerID: player.id)
+    let expansionistPlanet = makeAIEconomyPlanet(
+        index: 1,
+        ownerID: expansionist.id,
+        resources: ResourceBundle(metal: 30_000, crystal: 30_000, deuterium: 20_000),
+        buildingLevels: [.shipyard: 1, .roboticsFactory: 1, .solarPlant: 2],
+        shipInventory: [.colonyShip: 1, .smallCargo: 1]
+    )
+    var universe = makeAIEconomyUniverse(factions: [player, expansionist], planets: [playerPlanet, expansionistPlanet])
+
+    AIStrategyEngine.makeStrategicDecisions(in: &universe)
+
+    requireEqual(universe.fleets.count, 1, "Expansionist should launch one strategic fleet")
+    requireEqual(universe.fleets[0].mission, .colonize, "Expansionist should seed and colonize a topology-backed empty world")
+    guard let targetPlanetID = universe.fleets[0].targetPlanetID else {
+        fatalError("Seeded colonization fleet should remember its target planet")
+    }
+    let target = requirePlanet(targetPlanetID, in: universe, "Seeded expansion target should exist")
+    requireEqual(target.ownerID, nil, "Seeded expansion target should be neutral before arrival")
+    require(UniverseTopologyEngine.isValidPlanetCoordinate(target.coordinate), "Seeded expansion target should be a valid planet slot")
 }
 
 func testAIRecyclerCollectsKnownDebris() {
@@ -5848,6 +5999,11 @@ testSeededGeneratorProducesDeterministicDistinctSequences()
 testSeededGeneratorEqualityTracksSeedAndState()
 testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
+testUniverseTopologyUsesServiceStyleCoordinateLimits()
+testUniverseTopologyPlanetProfilesVaryBySlot()
+testStarterUniverseProvidesServiceStyleColonyPool()
+testServiceStyleMoonChanceUsesDebrisThresholdAndCap()
+testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized()
 testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources()
 testPlayerObjectivesAwardRewardsOnce()
 testPlayerObjectiveStatesExposeProgressAndCompletedRecords()
@@ -5890,6 +6046,7 @@ testAIStrategyBuildsDefensesForThreatenedFactions()
 testAIStrategyDoesNotReadHiddenPlayerFleetState()
 testAIRaiderLaunchesEspionageBeforeAttack()
 testAIExpansionistColonizesKnownNeutralWorld()
+testAIExpansionistSeedsServiceStyleColonizationTargetWhenNoneKnown()
 testAIRecyclerCollectsKnownDebris()
 testAIAttackUsesKnownWeakTargetOnly()
 testOfflineCatchUpCapsAIAggressiveFleetLaunchesByChunkPressure()

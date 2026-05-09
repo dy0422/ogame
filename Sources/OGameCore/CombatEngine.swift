@@ -17,8 +17,6 @@ public enum CombatEngine {
         case failed(MissileStrikeFailure)
     }
 
-    private static let moonDebrisThreshold = 50_000.0
-
     public static func resolveAttack(_ fleet: Fleet, in universe: inout Universe) -> Fleet? {
         var returningFleet = fleet
         returningFleet.phase = .returning
@@ -640,12 +638,23 @@ public enum CombatEngine {
     ) {
         guard universe.planets.indices.contains(targetIndex),
               universe.planets[targetIndex].moon == nil,
-              debris.totalAmount >= moonDebrisThreshold
+              UniverseTopologyEngine.moonChancePercent(forDebris: debris) > 0
         else {
             return
         }
 
         let planet = universe.planets[targetIndex]
+        let moonChance = UniverseTopologyEngine.moonChancePercent(forDebris: debris)
+        guard UniverseTopologyEngine.moonRollSucceeds(
+            chancePercent: moonChance,
+            universeID: universe.id,
+            targetPlanetID: planet.id,
+            reportID: reportID,
+            battleTime: battleTime
+        ) else {
+            return
+        }
+
         universe.planets[targetIndex].moon = Moon(
             id: stableUUID(
                 namespace: "0011",

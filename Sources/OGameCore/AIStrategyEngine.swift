@@ -193,9 +193,14 @@ public enum AIStrategyEngine {
     }
 
     private static func launchColonizationFleet(for faction: Faction, in universe: inout Universe) -> Bool {
-        let records = StrategicEngine.explorationRecords(for: faction.id, in: universe)
+        var records = StrategicEngine.explorationRecords(for: faction.id, in: universe)
             .filter(\.discoveredNeutral)
             .sorted(by: compareExplorationRecords)
+        if records.isEmpty, seedColonizationTarget(for: faction, in: &universe) {
+            records = StrategicEngine.explorationRecords(for: faction.id, in: universe)
+                .filter(\.discoveredNeutral)
+                .sorted(by: compareExplorationRecords)
+        }
 
         for record in records {
             guard let origin = firstOrigin(for: faction, requiring: [.colonyShip: 1], in: universe),
@@ -216,6 +221,59 @@ public enum AIStrategyEngine {
         }
 
         return false
+    }
+
+    private static func seedColonizationTarget(for faction: Faction, in universe: inout Universe) -> Bool {
+        guard let origin = firstOrigin(for: faction, requiring: [.colonyShip: 1], in: universe) else {
+            return false
+        }
+
+        let coordinates = UniverseTopologyEngine.regionalColonyCoordinates(
+            around: origin.coordinate,
+            occupied: Set(universe.planets.map(\.coordinate)),
+            limit: 1
+        )
+        guard let coordinate = coordinates.first else {
+            return false
+        }
+
+        let profile = UniverseTopologyEngine.planetProfile(for: coordinate, universeSeed: universe.seed)
+        let planetID = stablePlanetID(
+            payload: [
+                "ai-colony-target",
+                universe.id.rawValue.uuidString,
+                faction.id.rawValue.uuidString,
+                coordinate.displayText
+            ].joined(separator: "|")
+        )
+        guard !universe.planets.contains(where: { $0.id == planetID || $0.coordinate == coordinate }) else {
+            return false
+        }
+
+        universe.planets.append(
+            Planet(
+                id: planetID,
+                name: "未占领 \(coordinate.displayText)",
+                coordinate: coordinate,
+                ownerID: nil,
+                resources: ResourceBundle(metal: 150, crystal: 80, deuterium: 30),
+                temperatureCelsius: profile.temperatureCelsius,
+                debrisField: ResourceBundle(metal: 40, crystal: 15),
+                maxFields: profile.maxFields
+            )
+        )
+        universe.explorationRecords.append(
+            ExplorationRecord(
+                factionID: faction.id,
+                targetPlanetID: planetID,
+                exploredAt: universe.gameTime,
+                discoveredResources: ResourceBundle(metal: 150, crystal: 80, deuterium: 30),
+                discoveredDebris: ResourceBundle(metal: 40, crystal: 15),
+                discoveredOwnerID: nil,
+                discoveredNeutral: true
+            )
+        )
+        return true
     }
 
     private static func launchAttackFleet(
@@ -524,5 +582,10 @@ public enum AIStrategyEngine {
         }
 
         return hash
+    }
+
+    private static func stablePlanetID(payload: String) -> PlanetID {
+        let hash = stableHash("0018|\(payload)")
+        return PlanetID(UUID(uuidString: String(format: "00000000-0000-0000-%04x-%012llx", Int(hash & 0xffff), hash & 0xffffffffffff))!)
     }
 }

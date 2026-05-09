@@ -37,7 +37,13 @@ public enum FleetEngine {
         guard let ownerID = universe.planets[originIndex].ownerID else {
             return .failure(.missingOwner)
         }
-        let ownerResearch = universe.factions.first { $0.id == ownerID }?.technology ?? ResearchState()
+        let ownerFaction = universe.factions.first { $0.id == ownerID }
+        if mission == .colonize,
+           (ownerFaction?.ownedPlanetIDs.count ?? 0) >= UniverseTopologyEngine.defaultMaxPlayerPlanets
+        {
+            return .failure(.invalidMission)
+        }
+        let ownerResearch = ownerFaction?.technology ?? ResearchState()
         let activeFleetCount = universe.fleets.filter { $0.ownerID == ownerID && $0.phase != .completed }.count
         guard activeFleetCount < TechnologyEffects.maxFleetSlots(for: ownerResearch) else {
             return .failure(.fleetSlotLimit)
@@ -345,9 +351,18 @@ public enum FleetEngine {
         case .colonize:
             if let targetIndex = targetPlanetIndex(for: fleet, in: universe),
                universe.planets[targetIndex].ownerID == nil,
+               UniverseTopologyEngine.isValidPlanetCoordinate(universe.planets[targetIndex].coordinate),
+               (universe.factions.first { $0.id == fleet.ownerID }?.ownedPlanetIDs.count ?? 0) < UniverseTopologyEngine.defaultMaxPlayerPlanets,
                (fleet.ships[.colonyShip] ?? 0) > 0
             {
+                let profile = UniverseTopologyEngine.planetProfile(
+                    for: universe.planets[targetIndex].coordinate,
+                    universeSeed: universe.seed
+                )
                 universe.planets[targetIndex].ownerID = fleet.ownerID
+                universe.planets[targetIndex].resources = ResourceBundle(metal: 500, crystal: 500, deuterium: 500)
+                universe.planets[targetIndex].temperatureCelsius = profile.temperatureCelsius
+                universe.planets[targetIndex].maxFields = profile.maxFields
                 if let factionIndex = universe.factions.firstIndex(where: { $0.id == fleet.ownerID }),
                    !universe.factions[factionIndex].ownedPlanetIDs.contains(universe.planets[targetIndex].id)
                 {
@@ -410,7 +425,9 @@ public enum FleetEngine {
         case .recycle:
             return (ships[.recycler] ?? 0) > 0
         case .colonize:
-            return target.ownerID == nil && (ships[.colonyShip] ?? 0) > 0
+            return target.ownerID == nil &&
+                UniverseTopologyEngine.isValidPlanetCoordinate(target.coordinate) &&
+                (ships[.colonyShip] ?? 0) > 0
         case .returning:
             return false
         }
