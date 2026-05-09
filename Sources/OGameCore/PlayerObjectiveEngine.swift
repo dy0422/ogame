@@ -191,27 +191,24 @@ public enum PlayerObjectiveEngine {
     }
 
     private static func playerPlanets(in universe: Universe) -> [Planet] {
-        guard let faction = playerFaction(in: universe) else {
-            return []
-        }
-
-        return faction.ownedPlanetIDs.compactMap { planetID in
-            universe.planets.first { $0.id == planetID && $0.ownerID == faction.id }
-        }
+        PlayerVisibilityEngine.playerOwnedPlanets(in: universe)
     }
 
     private static func firstPlayerPlanetIndex(in universe: Universe) -> Int? {
-        guard let faction = playerFaction(in: universe) else {
-            return nil
-        }
-
-        for planetID in faction.ownedPlanetIDs {
-            if let index = universe.planets.firstIndex(where: { $0.id == planetID && $0.ownerID == faction.id }) {
-                return index
+        if let faction = playerFaction(in: universe) {
+            for planetID in faction.ownedPlanetIDs {
+                if let index = universe.planets.firstIndex(where: { $0.id == planetID && $0.ownerID == faction.id }) {
+                    return index
+                }
             }
         }
 
-        return nil
+        guard let firstPlayerPlanet = PlayerVisibilityEngine.playerOwnedPlanets(in: universe).first else {
+            return nil
+        }
+        return universe.planets.firstIndex {
+            $0.id == firstPlayerPlanet.id && $0.ownerID == universe.playerFactionID
+        }
     }
 
     private static func objectiveIndex(_ kind: PlayerObjectiveKind) -> Int {

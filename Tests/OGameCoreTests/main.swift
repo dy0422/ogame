@@ -1255,6 +1255,35 @@ func requireVictoryProgress(_ state: VictoryState, factionID: FactionID, route: 
     return progress
 }
 
+func testPlayerVisibilityUsesPlanetOwnerAsSourceOfTruth() {
+    var universe = makeStrategicUniverse(playerPlanetCount: 2, aiPlanetCount: 1, neutralPlanetCount: 1)
+    let missingIndexedPlanetID = strategicPlanetID(2)
+    let aiPlanetID = strategicPlanetID(21)
+
+    guard let playerIndex = universe.factions.firstIndex(where: { $0.id == universe.playerFactionID }) else {
+        fatalError("Player faction should exist")
+    }
+
+    universe.factions[playerIndex].ownedPlanetIDs = [strategicPlanetID(1), aiPlanetID]
+
+    let visiblePlanets = PlayerVisibilityEngine.playerOwnedPlanets(in: universe)
+    let visibleIDs = Set(visiblePlanets.map(\.id))
+
+    requireEqual(visiblePlanets.count, 2, "Player-owned planet visibility should follow planet ownerID")
+    require(visibleIDs.contains(missingIndexedPlanetID), "A player-owned colony should stay visible even when the faction index is stale")
+    require(!visibleIDs.contains(aiPlanetID), "A stale faction index should not expose a rival planet as player-owned")
+
+    PlayerVisibilityEngine.normalizeFactionPlanetIndexes(in: &universe)
+    requireEqual(
+        universe.factions[playerIndex].ownedPlanetIDs,
+        [strategicPlanetID(1), missingIndexedPlanetID],
+        "Ownership index normalization should remove stale rival IDs and append missing player colonies"
+    )
+
+    let secondColonyState = PlayerObjectiveEngine.states(in: universe).first { $0.kind == .secondColony }
+    requireEqual(secondColonyState?.progressValue, 2, "Player objectives should also count ownerID-backed colonies")
+}
+
 func testStrategicRankingsScoreFactionStrengthsAndVictoryProgress() {
     let universe = makeStrategicUniverse()
     let rankings = StrategicEngine.rankings(in: universe)
@@ -5830,6 +5859,7 @@ try testStrategicStateRoundTripsThroughJSONAndDefaultsWhenMissing()
 try testExplorationAndRelationStateRoundTripsAndDefaultsWhenMissing()
 testStrategicExplorationRecordsAreFilteredByFaction()
 testStrategicRankingsClampInvalidNumericInputs()
+testPlayerVisibilityUsesPlanetOwnerAsSourceOfTruth()
 testEconomyProductionPerHourUsesMineLevelsAndEnergyRatio()
 testEconomyOneHourTickIncreasesOwnedPlanetResources()
 testEconomyProductionClampsToStorageCaps()

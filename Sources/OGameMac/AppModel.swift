@@ -93,13 +93,7 @@ final class AppModel: ObservableObject {
     }
 
     var playerPlanets: [Planet] {
-        guard let playerFaction else {
-            return []
-        }
-
-        return universe.planets.filter { planet in
-            playerFaction.ownedPlanetIDs.contains(planet.id)
-        }
+        PlayerVisibilityEngine.playerOwnedPlanets(in: universe)
     }
 
     var playerObjectiveStates: [PlayerObjectiveState] {
@@ -155,13 +149,13 @@ final class AppModel: ObservableObject {
     var starMapSections: [StarMapPlanetSection] {
         let factionNamesByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.name.displayName) })
         let factionKindsByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.kind) })
-        let playerOwnedPlanetIDs = Set(playerFaction?.ownedPlanetIDs ?? [])
+        let playerOwnedPlanetIDs = PlayerVisibilityEngine.playerOwnedPlanetIDs(in: universe)
         let exploredPlanetIDs = playerExploredPlanetIDs
 
         let summaries = universe.planets
             .sorted(by: Self.sortPlanetsByCoordinate)
             .map { planet in
-                let isPlayerOwned = planet.ownerID == universe.playerFactionID || playerOwnedPlanetIDs.contains(planet.id)
+                let isPlayerOwned = playerOwnedPlanetIDs.contains(planet.id)
                 let isExploredByPlayer = exploredPlanetIDs.contains(planet.id)
                 let isVisible = isPlayerOwned || isExploredByPlayer
                 let touchingFleets = isVisible ? universe.fleets.filter { fleet in
@@ -184,6 +178,7 @@ final class AppModel: ObservableObject {
                     isPlayerOwned: isPlayerOwned,
                     isExploredByPlayer: isExploredByPlayer,
                     isVisible: isVisible,
+                    hasMoon: isVisible && planet.moon != nil,
                     debrisTotal: isVisible ? planet.debrisField.totalAmountForDisplay : 0,
                     friendlyFleetCount: friendlyFleetCount,
                     otherFleetCount: otherFleetCount
@@ -1911,12 +1906,14 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshStrategicState() {
+        PlayerVisibilityEngine.normalizeFactionPlanetIndexes(in: &universe)
         StrategicEngine.updateStrategicState(in: &universe)
         PlayerObjectiveEngine.updatePlayerObjectives(in: &universe)
     }
 
     private static func refreshedStrategicUniverse(_ universe: Universe) -> Universe {
         var refreshed = universe
+        PlayerVisibilityEngine.normalizeFactionPlanetIndexes(in: &refreshed)
         StrategicEngine.updateStrategicState(in: &refreshed)
         PlayerObjectiveEngine.updatePlayerObjectives(in: &refreshed)
         return refreshed
@@ -2419,8 +2416,7 @@ final class AppModel: ObservableObject {
     }
 
     private func isPlayerOwned(_ planet: Planet) -> Bool {
-        planet.ownerID == universe.playerFactionID ||
-            playerFaction?.ownedPlanetIDs.contains(planet.id) == true
+        PlayerVisibilityEngine.isPlayerOwned(planet, in: universe)
     }
 
     private var playerExploredPlanetIDs: Set<PlanetID> {
@@ -2676,6 +2672,7 @@ struct StarMapPlanetSummary: Identifiable {
     let isPlayerOwned: Bool
     let isExploredByPlayer: Bool
     let isVisible: Bool
+    let hasMoon: Bool
     let debrisTotal: Double
     let friendlyFleetCount: Int
     let otherFleetCount: Int

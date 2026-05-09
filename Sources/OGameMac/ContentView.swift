@@ -34,6 +34,7 @@ enum SidebarDestination: Hashable {
     case research
     case settings
     case planet(PlanetID)
+    case moon(PlanetID)
 }
 
 private struct SidebarView: View {
@@ -76,6 +77,11 @@ private struct SidebarView: View {
                 ForEach(planets) { planet in
                     SidebarPlanetRow(planet: planet)
                         .tag(SidebarDestination.planet(planet.id))
+
+                    if let moon = planet.moon {
+                        SidebarMoonRow(moon: moon)
+                            .tag(SidebarDestination.moon(planet.id))
+                    }
                 }
             }
         }
@@ -102,7 +108,39 @@ private struct SidebarPlanetRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+
+            Spacer(minLength: 4)
+
+            if planet.moon != nil {
+                Image(systemName: "moon.stars.fill")
+                    .font(.caption)
+                    .foregroundStyle(.purple)
+                    .help("有月球")
+            }
         }
+    }
+}
+
+private struct SidebarMoonRow: View {
+    let moon: Moon
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "moon.stars.fill")
+                .foregroundStyle(.purple)
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(moon.name.displayName)
+                    .lineLimit(1)
+
+                Text("月球")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, 12)
     }
 }
 
@@ -136,6 +174,12 @@ private struct DetailView: View {
         case .planet(let planetID):
             if let planet = model.playerPlanets.first(where: { $0.id == planetID }) {
                 PlanetDetailView(planet: planet, model: model)
+            } else {
+                DashboardView(model: model)
+            }
+        case .moon(let planetID):
+            if let planet = model.playerPlanets.first(where: { $0.id == planetID }) {
+                PlanetDetailView(planet: planet, model: model, isMoonFocused: true)
             } else {
                 DashboardView(model: model)
             }
@@ -1053,6 +1097,7 @@ private struct EffectDescriptionText: View {
 private struct PlanetDetailView: View {
     let planet: Planet
     @ObservedObject var model: AppModel
+    var isMoonFocused = false
 
     var body: some View {
         GamePage(title: nil, model: model) {
@@ -1073,7 +1118,15 @@ private struct PlanetDetailView: View {
             }
             ResourceCard(title: "残骸带", resources: planet.debrisField)
         }
-        .navigationTitle(planet.name.displayName)
+        .navigationTitle(navigationTitle)
+    }
+
+    private var navigationTitle: String {
+        if isMoonFocused, let moon = planet.moon {
+            return moon.name.displayName
+        }
+
+        return planet.name.displayName
     }
 }
 
@@ -3108,6 +3161,12 @@ private struct StarMapGalaxyStrip: View {
                                 .foregroundStyle(tint(for: summary))
                                 .frame(width: 18, alignment: .leading)
 
+                            if summary.hasMoon {
+                                Image(systemName: "moon.stars.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.purple)
+                            }
+
                             Text(summary.planet.coordinate.displayText)
                                 .font(.caption.monospacedDigit().weight(.semibold))
                                 .lineLimit(1)
@@ -3225,6 +3284,10 @@ private struct StarMapPlanetRow: View {
                             systemImage: "sparkles",
                             tint: .orange
                         )
+                    }
+
+                    if summary.hasMoon {
+                        StrategicChip(title: "月球", systemImage: "moon.stars", tint: .purple)
                     }
 
                     if summary.friendlyFleetCount > 0 {
