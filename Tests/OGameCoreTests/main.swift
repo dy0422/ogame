@@ -4143,6 +4143,74 @@ func testStrategicAdvisorRecommendsDebrisColonyAndExpeditionLoops() {
     require(recommendations.contains { $0.kind == .expeditionWindow }, "Advisor should recommend expeditions when cargo or probes are idle")
 }
 
+func testFleetMissionPlannerSummarizesRecycleValueAndTiming() {
+    let universe = makeFleetUniverse(
+        originResources: ResourceBundle(metal: 5_000, crystal: 3_000, deuterium: 20_000),
+        originShips: [.recycler: 1],
+        targetDebris: ResourceBundle(metal: 900, crystal: 450),
+        targetOwnerID: nil
+    )
+
+    let plan = FleetMissionPlannerEngine.plan(
+        originID: fleetPlanetID(1),
+        targetID: fleetPlanetID(2),
+        in: universe,
+        mission: .recycle,
+        ships: [.recycler: 1]
+    )
+
+    require(plan.isLaunchable, "Planner should mark an affordable recycler mission as launchable")
+    require(plan.fuelCost > 0, "Planner should calculate fuel cost")
+    require(plan.travelDuration > 0, "Planner should calculate travel duration")
+    requireApproxEqual(plan.roundTripDuration, plan.travelDuration * 2, "Round trip should be outbound plus return")
+    requireApproxEqual(plan.expectedValue, ResourceBundle(metal: 900, crystal: 450), "Recycler expected value should use visible debris")
+    require(plan.notes.contains { $0.title == "残骸收益" }, "Planner should explain debris value")
+}
+
+func testFleetMissionPlannerBlocksMissingRequiredShipsAndFuel() {
+    let universe = makeFleetUniverse(
+        originResources: ResourceBundle(metal: 5_000, crystal: 3_000, deuterium: 0),
+        originShips: [.smallCargo: 1],
+        targetDebris: ResourceBundle(metal: 900, crystal: 450),
+        targetOwnerID: nil
+    )
+
+    let plan = FleetMissionPlannerEngine.plan(
+        originID: fleetPlanetID(1),
+        targetID: fleetPlanetID(2),
+        in: universe,
+        mission: .recycle,
+        ships: [.smallCargo: 1]
+    )
+
+    require(!plan.isLaunchable, "Planner should block impossible recycler missions")
+    require(plan.blockers.contains(.missingRequiredShip), "Planner should identify the missing recycler")
+    require(plan.blockers.contains(.insufficientFuel), "Planner should identify unavailable deuterium")
+    require(plan.notes.contains { $0.kind == .requirement }, "Planner should produce a requirement note")
+}
+
+func testFleetMissionPlannerDoesNotRevealHiddenTargetResources() {
+    let universe = makeFleetUniverse(
+        originResources: ResourceBundle(metal: 5_000, crystal: 3_000, deuterium: 20_000),
+        originShips: [.lightFighter: 4, .smallCargo: 1],
+        targetResources: ResourceBundle(metal: 9_000, crystal: 4_000, deuterium: 1_000),
+        targetOwnerID: fleetEnemyID()
+    )
+
+    let plan = FleetMissionPlannerEngine.plan(
+        originID: fleetPlanetID(1),
+        targetID: fleetPlanetID(2),
+        targetIsVisible: false,
+        in: universe,
+        mission: .attack,
+        ships: [.lightFighter: 4, .smallCargo: 1]
+    )
+
+    require(plan.blockers.contains(.targetNotVisible), "Planner should block attack planning for hidden targets")
+    requireApproxEqual(plan.expectedValue, .zero, "Planner should not reveal hidden target resources")
+    require(!plan.notes.contains { $0.title == "掠夺预估" }, "Planner should not render hidden loot notes")
+}
+
 func testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState() throws {
     let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
     let miner = makeAIEconomyFaction(index: 1, strategy: .miner)
@@ -6542,6 +6610,9 @@ testPlayerAutoUpgradeQueuesBuildingAndResearchWhenEnabledDuringTick()
 testPlayerAutoUpgradeDoesNotQueueWhenDisabled()
 testStrategicAdvisorHighlightsEnergyDeficitAndStoragePressure()
 testStrategicAdvisorRecommendsDebrisColonyAndExpeditionLoops()
+testFleetMissionPlannerSummarizesRecycleValueAndTiming()
+testFleetMissionPlannerBlocksMissingRequiredShipsAndFuel()
+testFleetMissionPlannerDoesNotRevealHiddenTargetResources()
 try testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState()
 testAIStrategyBuildsShipsForRaiderFactions()
 testAIStrategyBuildsDefensesForThreatenedFactions()

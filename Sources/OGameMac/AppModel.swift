@@ -837,27 +837,13 @@ final class AppModel: ObservableObject {
     }
 
     func canQuickLaunchStarMapMission(_ mission: Fleet.Mission, slot: SolarSystemSlotSummary) -> Bool {
-        guard let origin = defaultStarMapOrigin(for: mission, slot: slot),
-              starMapMissionIsAllowed(mission, for: slot)
+        guard starMapMissionIsAllowed(mission, for: slot),
+              let plan = starMapMissionPlan(mission, slot: slot)
         else {
             return false
         }
 
-        let ships = defaultShips(for: mission, on: origin)
-        guard ships.isEmpty == false,
-              ships.allSatisfy({ kind, quantity in (origin.shipInventory[kind] ?? 0) >= quantity })
-        else {
-            return false
-        }
-
-        let fuel = FleetEngine.fuelCost(
-            from: origin.coordinate,
-            to: slot.coordinate,
-            ships: ships,
-            ruleSet: universe.ruleSet,
-            research: researchState(for: origin)
-        )
-        return fuel.isFinite && fuel >= 0 && origin.resources.canAfford(ResourceBundle(deuterium: fuel))
+        return plan.isLaunchable
     }
 
     func quickLaunchStarMapMission(_ mission: Fleet.Mission, slot: SolarSystemSlotSummary) {
@@ -868,9 +854,13 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let ships = defaultShips(for: mission, on: origin)
-        guard ships.isEmpty == false else {
-            statusMessage = "无法从星图派遣：缺少执行该任务的舰船。"
+        guard let plan = starMapMissionPlan(mission, slot: slot) else {
+            statusMessage = "无法从星图派遣：无法生成任务计划。"
+            return
+        }
+
+        guard plan.isLaunchable else {
+            statusMessage = "无法从星图派遣：\(plan.blockers.map(\.localizedName).joined(separator: "、"))。"
             return
         }
 
@@ -879,7 +869,7 @@ final class AppModel: ObservableObject {
             return
         }
 
-        launchFleet(originID: origin.id, targetID: targetID, mission: mission, ships: ships, cargo: .zero)
+        launchFleet(originID: origin.id, targetID: targetID, mission: mission, ships: plan.ships, cargo: .zero)
     }
 
     func recallFleet(_ fleet: Fleet) {
@@ -1389,6 +1379,69 @@ final class AppModel: ObservableObject {
 
             return partialResult + max(0, rule.cargoCapacity) * Double(element.value)
         }
+    }
+
+    func fleetMissionPlan(
+        originID: PlanetID?,
+        targetID: PlanetID?,
+        mission: Fleet.Mission,
+        ships: [ShipKind: Int],
+        cargo: ResourceBundle = .zero,
+        speedPercent: Double = 1
+    ) -> FleetMissionPlan {
+        let target = planet(for: targetID)
+        return FleetMissionPlannerEngine.plan(
+            originID: originID,
+            targetID: targetID,
+            targetIsVisible: target.map(isVisibleToPlayer) ?? true,
+            in: universe,
+            mission: mission,
+            ships: normalizedShips(ships),
+            cargo: cargo,
+            speedPercent: speedPercent
+        )
+    }
+
+    func starMapMissionPlan(_ mission: Fleet.Mission, slot: SolarSystemSlotSummary) -> FleetMissionPlan? {
+        guard let origin = defaultStarMapOrigin(for: mission, slot: slot) else {
+            return nil
+        }
+
+        let ships = defaultShips(for: mission, on: origin)
+        return FleetMissionPlannerEngine.plan(
+            originID: origin.id,
+            targetID: slot.planetID,
+            targetCoordinate: slot.coordinate,
+            targetIsVisible: slot.isVisible,
+            in: universe,
+            mission: mission,
+            ships: ships
+        )
+    }
+
+    func primaryStarMapMissionPlan(for slot: SolarSystemSlotSummary) -> FleetMissionPlan? {
+        let mission: Fleet.Mission
+        if slot.isExpedition {
+            mission = .explore
+        } else if slot.planetID == nil {
+            mission = .colonize
+        } else if slot.debrisTotal > 0 {
+            mission = .recycle
+        } else if slot.isPlayerOwned {
+            mission = .defend
+        } else if !slot.isVisible {
+            mission = .explore
+        } else if slot.ownerKind != nil {
+            mission = .espionage
+        } else {
+            mission = .explore
+        }
+
+        guard starMapMissionIsAllowed(mission, for: slot) else {
+            return nil
+        }
+
+        return starMapMissionPlan(mission, slot: slot)
     }
 
     func fleetFuelCost(
@@ -2692,38 +2745,7 @@ final class AppModel: ObservableObject {
     }
 
     private func defaultShips(for mission: Fleet.Mission, on origin: Planet) -> [ShipKind: Int] {
-        switch mission {
-        case .colonize:
-            return (origin.shipInventory[.colonyShip] ?? 0) > 0 ? [.colonyShip: 1] : [:]
-        case .explore:
-            if (origin.shipInventory[.smallCargo] ?? 0) > 0 {
-                return [.smallCargo: 1]
-            }
-            if (origin.shipInventory[.espionageProbe] ?? 0) > 0 {
-                return [.espionageProbe: 1]
-            }
-            return [:]
-        case .espionage:
-            return (origin.shipInventory[.espionageProbe] ?? 0) > 0 ? [.espionageProbe: 1] : [:]
-        case .recycle:
-            return (origin.shipInventory[.recycler] ?? 0) > 0 ? [.recycler: 1] : [:]
-        case .attack:
-            if (origin.shipInventory[.lightFighter] ?? 0) > 0 {
-                return [.lightFighter: min(origin.shipInventory[.lightFighter] ?? 0, 4)]
-            }
-            return [:]
-        case .defend:
-            let priorities: [ShipKind] = [.battlecruiser, .battleship, .cruiser, .heavyFighter, .lightFighter]
-            for kind in priorities {
-                let available = origin.shipInventory[kind] ?? 0
-                if available > 0 {
-                    return [kind: min(available, 4)]
-                }
-            }
-            return [:]
-        case .transport, .returning:
-            return [:]
-        }
+        FleetMissionPlannerEngine.recommendedShips(for: mission, on: origin)
     }
 
     private func defaultJumpGateShips(from origin: Planet) -> [ShipKind: Int] {

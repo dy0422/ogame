@@ -2691,27 +2691,46 @@ private struct FleetDispatchSummary: View {
         ships.values.contains { $0 > 0 }
     }
 
+    private var plan: FleetMissionPlan {
+        model.fleetMissionPlan(
+            originID: originID,
+            targetID: targetID,
+            mission: mission,
+            ships: ships,
+            cargo: cargo,
+            speedPercent: speedPercent
+        )
+    }
+
     var body: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 160), alignment: .topLeading)],
-            alignment: .leading,
-            spacing: 10
-        ) {
-            DispatchMetric(title: "容量", value: "\(Formatters.wholeNumber(cargoUsed)) / \(Formatters.wholeNumber(cargoCapacity))")
-            DispatchMetric(title: "燃料", value: fuelText, isWarning: hasShipsSelected && !fuelIsAffordable)
-            DispatchMetric(title: "航程", value: model.durationText(model.fleetTravelDuration(originID: originID, targetID: targetID, ships: ships, speedPercent: speedPercent)))
-            if let battlePreviewText {
-                DispatchMetric(title: "战斗预估", value: battlePreviewText)
+        VStack(alignment: .leading, spacing: 10) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 160), alignment: .topLeading)],
+                alignment: .leading,
+                spacing: 10
+            ) {
+                DispatchMetric(title: "容量", value: "\(Formatters.wholeNumber(plan.cargoUsed)) / \(Formatters.wholeNumber(plan.cargoCapacity))")
+                DispatchMetric(title: "燃料", value: fuelText, isWarning: hasShipsSelected && plan.blockers.contains(.insufficientFuel))
+                DispatchMetric(title: "航程", value: model.durationText(plan.travelDuration))
+                DispatchMetric(
+                    title: "状态",
+                    value: plan.isLaunchable ? "可发射" : plan.blockers.first?.localizedName ?? "不可发射",
+                    isWarning: !plan.isLaunchable && hasShipsSelected
+                )
+                if let battlePreviewText {
+                    DispatchMetric(title: "战斗预估", value: battlePreviewText)
+                }
             }
+
+            FleetPlanNotesView(plan: plan)
         }
     }
 
     private var fuelText: String {
-        model.fleetFuelStatusText(originID: originID, targetID: targetID, ships: ships, cargo: cargo, speedPercent: speedPercent)
-    }
-
-    private var fuelIsAffordable: Bool {
-        model.canAffordFleetFuel(originID: originID, targetID: targetID, ships: ships, cargo: cargo, speedPercent: speedPercent)
+        if plan.blockers.contains(.missingOrigin) || plan.blockers.contains(.missingTarget) {
+            return "未知"
+        }
+        return Formatters.wholeNumber(plan.fuelCost)
     }
 
     private var battlePreviewText: String? {
@@ -2723,6 +2742,39 @@ private struct FleetDispatchSummary: View {
             cargo: cargo,
             speedPercent: speedPercent
         )
+    }
+}
+
+private struct FleetPlanNotesView: View {
+    let plan: FleetMissionPlan
+
+    private var visibleNotes: [FleetMissionPlanNote] {
+        Array(plan.notes.prefix(4))
+    }
+
+    var body: some View {
+        if !visibleNotes.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(visibleNotes) { note in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: note.kind.systemImage)
+                            .foregroundStyle(note.kind.tint)
+                            .frame(width: 16)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(note.title)
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                            Text(note.detail)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
     }
 }
 
@@ -2743,6 +2795,38 @@ struct DispatchMetric: View {
                 .foregroundStyle(isWarning ? Color.red : Color.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+        }
+    }
+}
+
+private extension FleetMissionPlanNote.Kind {
+    var systemImage: String {
+        switch self {
+        case .value:
+            return "banknote"
+        case .timing:
+            return "clock"
+        case .requirement:
+            return "checklist"
+        case .warning:
+            return "exclamationmark.triangle"
+        case .risk:
+            return "shield"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .value:
+            return .green
+        case .timing:
+            return .blue
+        case .requirement:
+            return .orange
+        case .warning:
+            return .red
+        case .risk:
+            return .purple
         }
     }
 }
@@ -3198,9 +3282,13 @@ private struct SolarSystemSlotTile: View {
             }
 
             StarMapSlotActions(slot: slot, model: model)
+
+            if let plan = model.primaryStarMapMissionPlan(for: slot) {
+                StarMapMissionPlanPreview(plan: plan)
+            }
         }
         .padding(10)
-        .frame(minHeight: 132, alignment: .topLeading)
+        .frame(minHeight: 162, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tint.opacity(backgroundOpacity), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
@@ -3268,6 +3356,46 @@ private struct SolarSystemSlotTile: View {
 
     private var backgroundOpacity: Double {
         slot.planetID == nil ? 0.08 : 0.12
+    }
+}
+
+private struct StarMapMissionPlanPreview: View {
+    let plan: FleetMissionPlan
+
+    private var title: String {
+        plan.isLaunchable ? "\(plan.mission.localizedName)可发射" : plan.blockers.first?.localizedName ?? "不可发射"
+    }
+
+    private var subtitle: String {
+        if let valueNote = plan.notes.first(where: { $0.kind == .value }) {
+            return valueNote.detail
+        }
+        if plan.travelDuration > 0 {
+            return "单程 \(Formatters.wholeSeconds(plan.travelDuration)) · 燃料 \(Formatters.wholeNumber(plan.fuelCost))"
+        }
+        return plan.riskLevel.localizedName
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: plan.isLaunchable ? "checkmark.circle" : "exclamationmark.triangle")
+                .foregroundStyle(plan.isLaunchable ? Color.green : Color.orange)
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                Text(subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.top, 2)
     }
 }
 

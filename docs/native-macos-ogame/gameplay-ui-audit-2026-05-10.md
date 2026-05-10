@@ -35,15 +35,23 @@ Phase 1 is complete: add a strategic advisor layer.
 - Added a new dashboard panel named "战略顾问".
 - Added click-through routing from advisor rows into the likely relevant screen: planet, research, star map, or fleet.
 
+Phase 2 is now started: add fleet mission planning.
+
+- Added `FleetMissionPlannerEngine` to summarize launch blockers, fuel, travel time, cargo capacity, expected value, risk, and mission notes.
+- Added tests for recycler value planning and impossible mission blockers.
+- Connected star-map quick launches to the planner so disabled missions have the same reasoning as the preview.
+- Added compact mission previews to solar-system slots and richer notes to the fleet dispatch summary.
+
 ## Recommended Roadmap
 
 ### Phase 2 - Fleet Planner
 
 Goal: make fleet decisions feel intentional.
 
-- Add a mission planner panel that explains why a mission is available or blocked.
-- Show fuel, cargo capacity, round-trip time, risk, and expected value before launch.
-- Add recommendation chips for "回收残骸", "殖民该星位", "远征空位", "运输资源", and "保护舰队".
+- Done: add a mission planner model that explains why a mission is available or blocked.
+- Done: show fuel, cargo capacity, round-trip time, risk, and expected value before launch.
+- Done: add star-map previews for "回收残骸", "殖民该星位", "远征空位", and other primary slot actions.
+- Remaining: add a dedicated planner inspector with editable speed/cargo presets directly from the star map.
 
 ### Phase 3 - Combat Review
 
