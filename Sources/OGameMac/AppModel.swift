@@ -1630,6 +1630,10 @@ final class AppModel: ObservableObject {
         return "\(report.battleRounds.count) 回合 - 射击 \(attackerShots)/\(defenderShots) - RF \(rapidFire) - 爆炸 \(explosions) - 月球 \(moonChance)% - 战利品 \(loot) - 残骸 \(debris)"
     }
 
+    func combatReview(for report: Report) -> CombatReview? {
+        CombatReviewEngine.review(for: report)
+    }
+
     func queueRemainingText(until finishTime: TimeInterval) -> String {
         guard finishTime.isFinite, universe.gameTime.isFinite else {
             return "剩余时间未知"

@@ -3507,6 +3507,145 @@ func testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense() {
     requireEqual(universe.events.last?.kind, .combat, "Attack should record a combat event")
 }
 
+func testCombatReviewAggregatesBattleRoundsAndInsights() {
+    let report = Report(
+        id: UUID(uuidString: "00000000-0000-0000-0000-00000000c0a1")!,
+        time: 120,
+        kind: .battle,
+        title: "Battle at [1:2:6]",
+        summary: "Attacker wins.",
+        participants: [
+            ReportParticipant(
+                role: .attacker,
+                factionID: fleetPlayerID(),
+                planetID: fleetPlanetID(1),
+                name: "Raider",
+                beforeShips: [.cruiser: 3, .smallCargo: 2],
+                afterShips: [.cruiser: 2, .smallCargo: 1],
+                losses: ResourceBundle(metal: 22_000, crystal: 8_000)
+            ),
+            ReportParticipant(
+                role: .defender,
+                factionID: fleetEnemyID(),
+                planetID: fleetPlanetID(2),
+                name: "Defender",
+                beforeShips: [.lightFighter: 6],
+                afterShips: [:],
+                beforeDefenses: [.rocketLauncher: 3],
+                afterDefenses: [:],
+                losses: ResourceBundle(metal: 50_000, crystal: 20_000)
+            )
+        ],
+        loot: ResourceBundle(metal: 1_200, crystal: 800, deuterium: 200),
+        debris: ResourceBundle(metal: 240_000, crystal: 60_000),
+        losses: ResourceBundle(metal: 72_000, crystal: 28_000),
+        battleRounds: [
+            BattleRoundSummary(
+                round: 1,
+                attackerPower: 1_200,
+                defenderPower: 800,
+                defenderShipLosses: [.lightFighter: 4],
+                defenderDefenseLosses: [.rocketLauncher: 1],
+                attackerShots: 5,
+                defenderShots: 9,
+                rapidFireShots: 3,
+                shieldDamage: 400,
+                hullDamage: 900,
+                explodedUnits: 2
+            ),
+            BattleRoundSummary(
+                round: 2,
+                attackerPower: 850,
+                defenderPower: 220,
+                attackerLosses: [.smallCargo: 1],
+                defenderShipLosses: [.lightFighter: 2],
+                defenderDefenseLosses: [.rocketLauncher: 1],
+                attackerShots: 3,
+                defenderShots: 3,
+                shieldDamage: 120,
+                hullDamage: 500,
+                explodedUnits: 1
+            )
+        ]
+    )
+
+    guard let review = CombatReviewEngine.review(for: report) else {
+        fatalError("Battle report should produce a combat review")
+    }
+
+    requireEqual(review.outcome, .attackerVictory, "Review should identify attacker victory")
+    requireEqual(review.rounds.count, 2, "Review should keep per-round rows")
+    requireEqual(review.totalRapidFireShots, 3, "Review should aggregate rapid fire")
+    requireEqual(review.totalExplodedUnits, 3, "Review should aggregate explosions")
+    requireEqual(review.moonChancePercent, 3, "Review should calculate moon chance from debris")
+    require(review.insights.contains { $0.kind == .rapidFire }, "Review should highlight rapid fire")
+    require(review.insights.contains { $0.kind == .debrisRecovery }, "Review should highlight debris recovery")
+    require(review.insights.contains { $0.kind == .moonChance }, "Review should highlight moon chance")
+}
+
+func testCombatReviewExplainsDefenderHoldAndIgnoresNonBattleReports() {
+    let battle = Report(
+        id: UUID(uuidString: "00000000-0000-0000-0000-00000000c0a2")!,
+        time: 240,
+        kind: .battle,
+        title: "Battle at [1:2:7]",
+        summary: "Defender holds.",
+        participants: [
+            ReportParticipant(
+                role: .attacker,
+                factionID: fleetPlayerID(),
+                planetID: fleetPlanetID(1),
+                name: "Attacker",
+                beforeShips: [.lightFighter: 3],
+                afterShips: [:],
+                losses: ResourceBundle(metal: 9_000, crystal: 3_000)
+            ),
+            ReportParticipant(
+                role: .defender,
+                factionID: fleetEnemyID(),
+                planetID: fleetPlanetID(2),
+                name: "Defender",
+                beforeDefenses: [.rocketLauncher: 2],
+                afterDefenses: [.rocketLauncher: 1],
+                losses: ResourceBundle(metal: 2_000)
+            )
+        ],
+        loot: .zero,
+        debris: ResourceBundle(metal: 30_000),
+        losses: ResourceBundle(metal: 11_000, crystal: 3_000),
+        battleRounds: [
+            BattleRoundSummary(
+                round: 1,
+                attackerPower: 300,
+                defenderPower: 450,
+                attackerLosses: [.lightFighter: 3],
+                defenderDefenseLosses: [.rocketLauncher: 1],
+                attackerShots: 3,
+                defenderShots: 2,
+                shieldDamage: 40,
+                hullDamage: 500,
+                explodedUnits: 3
+            )
+        ]
+    )
+    let espionage = Report(
+        id: UUID(uuidString: "00000000-0000-0000-0000-00000000c0a3")!,
+        time: 300,
+        kind: .espionage,
+        title: "Espionage",
+        summary: "Intel",
+        participants: []
+    )
+
+    guard let review = CombatReviewEngine.review(for: battle) else {
+        fatalError("Battle report should produce review")
+    }
+
+    requireEqual(review.outcome, .defenderHeld, "Review should identify defender hold")
+    require(review.insights.contains { $0.kind == .fleetComposition }, "Review should explain attacking fleet wipe")
+    require(CombatReviewEngine.review(for: espionage) == nil, "Non-battle reports should not produce combat review")
+}
+
 func testStrongAttackAgainstWeakTargetHasReducedLootAndProtectionSummary() {
     var universe = makeCombatUniverse()
     universe.planets[0].resources = ResourceBundle(metal: 250_000, crystal: 120_000, deuterium: 120_000)
@@ -6673,6 +6812,8 @@ testAttackShiftsFactionRelationsWithoutHiddenTargetDetails()
 testRepeatedAttacksIncrementThreatWithoutDuplicateRelations()
 try testFactionRelationsNormalizeDuplicatesOnDecodeAndAttackUpdate()
 testAttackMissionCreatesCombatReportLootDebrisAndRecoveredDefense()
+testCombatReviewAggregatesBattleRoundsAndInsights()
+testCombatReviewExplainsDefenderHoldAndIgnoresNonBattleReports()
 testStrongAttackAgainstWeakTargetHasReducedLootAndProtectionSummary()
 testMoonChanceCanCreateMoonFromLargeDebrisBattle()
 testMissileStrikeDamagesDefensesWithoutLoot()

@@ -3115,9 +3115,187 @@ private struct ReportRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
+
+                if let review = model.combatReview(for: report) {
+                    CombatReviewSummaryView(review: review)
+                }
             }
         }
         .padding(.vertical, 10)
+    }
+}
+
+private struct CombatReviewSummaryView: View {
+    let review: CombatReview
+
+    private var visibleInsights: [CombatReviewInsight] {
+        Array(review.insights.prefix(4))
+    }
+
+    private var visibleRounds: [CombatRoundReview] {
+        Array(review.rounds.prefix(3))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 120), alignment: .topLeading)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                CombatReviewMetric(title: "结果", value: review.outcome.localizedName, tint: review.outcome.tint)
+                CombatReviewMetric(title: "RF", value: "\(review.totalRapidFireShots)", tint: .blue)
+                CombatReviewMetric(title: "爆炸", value: "\(review.totalExplodedUnits)", tint: .orange)
+                CombatReviewMetric(title: "月球", value: "\(review.moonChancePercent)%", tint: review.moonChancePercent > 0 ? .purple : .secondary)
+            }
+
+            if !visibleInsights.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(visibleInsights) { insight in
+                        CombatInsightRow(insight: insight)
+                    }
+                }
+            }
+
+            if !visibleRounds.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("回合复盘")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    ForEach(visibleRounds) { round in
+                        CombatRoundReviewRow(round: round)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+private struct CombatReviewMetric: View {
+    let title: String
+    let value: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+    }
+}
+
+private struct CombatInsightRow: View {
+    let insight: CombatReviewInsight
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: insight.kind.systemImage)
+                .foregroundStyle(insight.kind.tint)
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(insight.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                Text(insight.detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+private struct CombatRoundReviewRow: View {
+    let round: CombatRoundReview
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(round.title)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+                .frame(width: 52, alignment: .leading)
+
+            Text("攻损 \(round.attackerLossCount) / 防损 \(round.defenderShipLossCount + round.defenderDefenseLossCount)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Text(round.detail)
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+    }
+}
+
+private extension CombatReview.Outcome {
+    var tint: Color {
+        switch self {
+        case .attackerVictory:
+            return .green
+        case .defenderHeld:
+            return .orange
+        case .mutualDestruction:
+            return .red
+        case .stalemate:
+            return .blue
+        }
+    }
+}
+
+private extension CombatReviewInsight.Kind {
+    var systemImage: String {
+        switch self {
+        case .battleOutcome:
+            return "flag.checkered"
+        case .rapidFire:
+            return "bolt"
+        case .debrisRecovery:
+            return "arrow.triangle.2.circlepath"
+        case .moonChance:
+            return "moon.stars"
+        case .loot:
+            return "shippingbox"
+        case .fleetComposition:
+            return "paperplane"
+        case .defenseRecovery:
+            return "shield"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .battleOutcome:
+            return .blue
+        case .rapidFire:
+            return .purple
+        case .debrisRecovery:
+            return .orange
+        case .moonChance:
+            return .purple
+        case .loot:
+            return .green
+        case .fleetComposition:
+            return .red
+        case .defenseRecovery:
+            return .teal
+        }
     }
 }
 

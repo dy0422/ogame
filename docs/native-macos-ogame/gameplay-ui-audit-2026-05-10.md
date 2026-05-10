@@ -35,12 +35,18 @@ Phase 1 is complete: add a strategic advisor layer.
 - Added a new dashboard panel named "战略顾问".
 - Added click-through routing from advisor rows into the likely relevant screen: planet, research, star map, or fleet.
 
-Phase 2 is now started: add fleet mission planning.
+Phase 2 is complete: add fleet mission planning.
 
 - Added `FleetMissionPlannerEngine` to summarize launch blockers, fuel, travel time, cargo capacity, expected value, risk, and mission notes.
 - Added tests for recycler value planning and impossible mission blockers.
 - Connected star-map quick launches to the planner so disabled missions have the same reasoning as the preview.
 - Added compact mission previews to solar-system slots and richer notes to the fleet dispatch summary.
+
+Phase 3 is now started: add combat review.
+
+- Added `CombatReviewEngine` to turn battle reports into outcome, per-round, rapid-fire, explosion, loot, debris, and moon-chance reviews.
+- Added tests for attacker victory reviews, defender holds, insight generation, and non-battle report filtering.
+- Added combat review blocks to battle reports in the macOS UI.
 
 ## Recommended Roadmap
 
@@ -57,9 +63,9 @@ Goal: make fleet decisions feel intentional.
 
 Goal: make battles teach strategy.
 
-- Expand battle reports with per-round losses, shield/armor highlights, rapid-fire triggers, debris, loot, and moon chance.
-- Add "为什么输了/赢了" summaries: lack of fodder, weak shields, no recycler follow-up, overkill waste, poor target selection.
-- Add simulator presets from actual combat reports.
+- Done: expand battle reports with per-round losses, shield/hull highlights, rapid-fire triggers, debris, loot, and moon chance.
+- Done: add "为什么输了/赢了" style summaries for attacker victory, defender hold, fleet wipe, debris recovery, and moon chance.
+- Remaining: add simulator presets from actual combat reports.
 
 ### Phase 4 - Colony Specialization
 
