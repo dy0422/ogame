@@ -100,6 +100,10 @@ final class AppModel: ObservableObject {
         PlayerObjectiveEngine.states(in: universe)
     }
 
+    var strategicAdvisorRecommendations: [StrategicAdvisorRecommendation] {
+        StrategicAdvisorEngine.recommendations(in: universe)
+    }
+
     var availableBuildingKinds: [BuildingKind] {
         BuildingKind.allCases.filter { kind in
             universe.ruleSet.buildingRules[kind] != nil && !kind.isMoonFacility

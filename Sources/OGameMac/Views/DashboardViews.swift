@@ -24,6 +24,107 @@ struct CommanderBriefingPanel: View {
     }
 }
 
+struct StrategicAdvisorPanel: View {
+    @ObservedObject var model: AppModel
+
+    private var recommendations: [StrategicAdvisorRecommendation] {
+        model.strategicAdvisorRecommendations
+    }
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: "战略顾问", detail: "经济、舰队与殖民机会")
+
+                if recommendations.isEmpty {
+                    Label("暂无紧急建议", systemImage: "checkmark.seal")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(recommendations) { recommendation in
+                            StrategicAdvisorRow(recommendation: recommendation) {
+                                navigate(to: recommendation)
+                            }
+
+                            if recommendation.id != recommendations.last?.id {
+                                Divider()
+                                    .padding(.leading, 42)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+
+    private func navigate(to recommendation: StrategicAdvisorRecommendation) {
+        switch recommendation.kind {
+        case .energyDeficit, .storagePressure, .idleConstruction:
+            if let planetID = recommendation.planetID {
+                model.selectedDestination = .planet(planetID)
+            }
+        case .idleResearch:
+            model.selectedDestination = .research
+        case .debrisRecovery, .colonyWindow:
+            model.selectedDestination = .starMap
+        case .expeditionWindow, .fleetSafety:
+            model.selectedDestination = .fleets
+        }
+    }
+}
+
+private struct StrategicAdvisorRow: View {
+    let recommendation: StrategicAdvisorRecommendation
+    let action: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: recommendation.kind.systemImage)
+                .font(.headline)
+                .foregroundStyle(recommendation.priority.tint)
+                .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(recommendation.title)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+
+                    Text(recommendation.priority.localizedName)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(recommendation.priority.tint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(recommendation.priority.tint.opacity(0.1), in: Capsule())
+                }
+
+                Text(recommendation.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 10)
+
+            Button(action: action) {
+                Label(recommendation.actionLabel, systemImage: "arrow.right")
+                    .labelStyle(.titleAndIcon)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+}
+
 struct CommandCenterStrip: View {
     @ObservedObject var model: AppModel
 
@@ -164,6 +265,57 @@ extension BriefingUrgency {
             return .green
         case .warning:
             return .orange
+        }
+    }
+}
+
+private extension StrategicAdvisorRecommendation.Kind {
+    var systemImage: String {
+        switch self {
+        case .energyDeficit:
+            return "bolt.trianglebadge.exclamationmark"
+        case .storagePressure:
+            return "archivebox"
+        case .idleConstruction:
+            return "hammer"
+        case .idleResearch:
+            return "atom"
+        case .debrisRecovery:
+            return "arrow.triangle.2.circlepath"
+        case .colonyWindow:
+            return "globe.europe.africa"
+        case .expeditionWindow:
+            return "sparkles"
+        case .fleetSafety:
+            return "shield.lefthalf.filled"
+        }
+    }
+}
+
+private extension StrategicAdvisorRecommendation.Priority {
+    var localizedName: String {
+        switch self {
+        case .critical:
+            return "紧急"
+        case .warning:
+            return "注意"
+        case .opportunity:
+            return "机会"
+        case .info:
+            return "提示"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .critical:
+            return .red
+        case .warning:
+            return .orange
+        case .opportunity:
+            return .blue
+        case .info:
+            return .green
         }
     }
 }

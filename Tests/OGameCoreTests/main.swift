@@ -4105,6 +4105,44 @@ func testPlayerAutoUpgradeDoesNotQueueWhenDisabled() {
     requireEqual(updatedPlayer.researchQueue, [], "Disabled auto upgrade should leave player research queue unchanged")
 }
 
+func testStrategicAdvisorHighlightsEnergyDeficitAndStoragePressure() {
+    let planetID = queuePlanetID()
+    let universe = makeQueueUniverse(
+        resources: ResourceBundle(metal: 96_000, crystal: 10_000, deuterium: 8_000),
+        storage: ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000),
+        buildingLevels: [.metalMine: 8, .crystalMine: 6, .deuteriumSynthesizer: 4, .solarPlant: 1]
+    )
+
+    let recommendations = StrategicAdvisorEngine.recommendations(in: universe)
+
+    requireEqual(recommendations.first?.kind, .energyDeficit, "Advisor should lead with critical energy deficits")
+    require(recommendations.contains { $0.kind == .storagePressure && $0.planetID == planetID }, "Advisor should surface near-full storage")
+    require(recommendations.contains { $0.detail.contains("金属") }, "Storage pressure should name the constrained resource")
+}
+
+func testStrategicAdvisorRecommendsDebrisColonyAndExpeditionLoops() {
+    var universe = makeFleetUniverse(
+        originShips: [.recycler: 1, .colonyShip: 1, .smallCargo: 2, .espionageProbe: 1],
+        targetDebris: ResourceBundle(metal: 900, crystal: 450),
+        targetOwnerID: nil
+    )
+    universe.planets.append(
+        Planet(
+            id: fleetPlanetID(3),
+            name: "Open Slot",
+            coordinate: Coordinate(galaxy: 1, system: 1, position: 8),
+            ownerID: nil
+        )
+    )
+
+    let recommendations = StrategicAdvisorEngine.recommendations(in: universe, limit: 8)
+
+    require(recommendations.contains { $0.kind == .debrisRecovery && $0.actionLabel == "派回收船" }, "Advisor should recommend recycler use when debris is visible")
+    require(recommendations.contains { $0.kind == .colonyWindow && $0.actionLabel == "派殖民船" }, "Advisor should recommend colonization when a colony ship and open slot exist")
+    require(recommendations.contains { $0.kind == .colonyWindow && $0.targetCoordinate != nil }, "Advisor should include the colony coordinate")
+    require(recommendations.contains { $0.kind == .expeditionWindow }, "Advisor should recommend expeditions when cargo or probes are idle")
+}
+
 func testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState() throws {
     let player = makeAIEconomyFaction(index: 0, kind: .player, strategy: .balanced)
     let miner = makeAIEconomyFaction(index: 1, strategy: .miner)
@@ -6502,6 +6540,8 @@ testAIEconomyResearchPreviewUsesQueueEnginePaymentPlanetOrder()
 testAIEconomyDoesNotMutatePlayerState()
 testPlayerAutoUpgradeQueuesBuildingAndResearchWhenEnabledDuringTick()
 testPlayerAutoUpgradeDoesNotQueueWhenDisabled()
+testStrategicAdvisorHighlightsEnergyDeficitAndStoragePressure()
+testStrategicAdvisorRecommendsDebrisColonyAndExpeditionLoops()
 try testAIEconomyDecisionsAreDeterministicForSameSeedTimeAndState()
 testAIStrategyBuildsShipsForRaiderFactions()
 testAIStrategyBuildsDefensesForThreatenedFactions()
