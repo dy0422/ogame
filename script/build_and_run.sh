@@ -3,7 +3,10 @@ set -euo pipefail
 
 MODE="${1:-run}"
 APP_NAME="OGameMac"
-BUNDLE_ID="dev.local.NativeOGame.OGameMac"
+BUNDLE_ID="${NATIVE_OGAME_BUNDLE_ID:-dev.local.NativeOGame.OGameMac}"
+DISPLAY_NAME="${NATIVE_OGAME_DISPLAY_NAME:-Native OGame}"
+MARKETING_VERSION="${NATIVE_OGAME_VERSION:-0.1.0}"
+BUILD_NUMBER="${NATIVE_OGAME_BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 MIN_SYSTEM_VERSION="13.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -38,16 +41,28 @@ cat >"$INFO_PLIST" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>zh_CN</string>
+  <key>CFBundleDisplayName</key>
+  <string>$DISPLAY_NAME</string>
   <key>CFBundleExecutable</key>
   <string>$APP_NAME</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
   <key>CFBundleName</key>
-  <string>$APP_NAME</string>
+  <string>$DISPLAY_NAME</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$MARKETING_VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>$BUILD_NUMBER</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.strategy-games</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
 </dict>
