@@ -42,11 +42,18 @@ Phase 2 is complete: add fleet mission planning.
 - Connected star-map quick launches to the planner so disabled missions have the same reasoning as the preview.
 - Added compact mission previews to solar-system slots and richer notes to the fleet dispatch summary.
 
-Phase 3 is now started: add combat review.
+Phase 3 is complete: add combat review.
 
 - Added `CombatReviewEngine` to turn battle reports into outcome, per-round, rapid-fire, explosion, loot, debris, and moon-chance reviews.
 - Added tests for attacker victory reviews, defender holds, insight generation, and non-battle report filtering.
 - Added combat review blocks to battle reports in the macOS UI.
+
+Phase 4 is complete: add colony specialization.
+
+- Added `ColonySpecializationEngine` to classify inner, middle, outer, built-up, and moon-backed worlds into readable roles.
+- Added tests for solar outposts, core worlds, deuterium worlds, shipyard hubs, moon bases, and field-pressure warnings.
+- Added a colony specialization panel to planet detail pages with role, field usage, solar/deuterium factors, temperature, recommended buildings, and warnings.
+- Added star-map specialization previews so empty colony slots show their long-term value before the player launches a colony ship.
 
 ## Recommended Roadmap
 
@@ -71,9 +78,10 @@ Goal: make battles teach strategy.
 
 Goal: make colonization more than adding another resource tile.
 
-- Give star positions clearer tradeoffs: inner solar efficiency, mid-position field size, outer deuterium output.
-- Add colony role labels: miner, deut world, shipyard hub, research lab, moon base.
-- Add advisor warnings when a colony is too small, too hot/cold for the intended role, or lacks logistics.
+- Done: give star positions clearer tradeoffs: inner solar efficiency, mid-position field size, outer deuterium output.
+- Done: add colony role labels: solar outpost, core world, deuterium world, shipyard hub, research campus, moon base, and marginal colony.
+- Done: add warnings when a colony has low fields, crowded fields, weak solar, weak deuterium, missing logistics, or no moon.
+- Remaining: let the strategic advisor recommend abandoning or replacing weak colonies once the empire reaches the planet cap.
 
 ### Phase 5 - Solo Diplomacy and ACS
 

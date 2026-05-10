@@ -1103,6 +1103,7 @@ private struct PlanetDetailView: View {
     var body: some View {
         GamePage(title: nil, model: model) {
             PlanetHeroPanel(planet: planet, model: model)
+            ColonySpecializationPanel(planet: planet, model: model)
 
             if let moon = planet.moon {
                 MoonSummaryCard(planet: planet, moon: moon, model: model)
@@ -1128,6 +1129,125 @@ private struct PlanetDetailView: View {
         }
 
         return planet.name.displayName
+    }
+}
+
+private struct ColonySpecializationPanel: View {
+    let planet: Planet
+    @ObservedObject var model: AppModel
+
+    private var specialization: ColonySpecialization {
+        model.colonySpecialization(for: planet)
+    }
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    SectionTitle(title: "殖民定位", detail: specialization.title)
+
+                    Spacer(minLength: 0)
+
+                    GameStatusPill(
+                        title: specialization.role.localizedTitle,
+                        systemImage: specialization.role.systemImage,
+                        tint: specialization.role.tint
+                    )
+                }
+
+                Text(specialization.detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 132), alignment: .topLeading)],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    GameMetricTile(
+                        title: "方圆",
+                        value: "\(specialization.usedFields)/\(specialization.maxFields)",
+                        systemImage: "square.grid.3x3",
+                        tint: specialization.fieldUsageRatio >= 0.8 ? .orange : .blue
+                    )
+                    GameMetricTile(
+                        title: "太阳",
+                        value: Formatters.percent(specialization.slotProfile.solarEnergyFactor),
+                        systemImage: "sun.max",
+                        tint: .orange
+                    )
+                    GameMetricTile(
+                        title: "重氢",
+                        value: Formatters.percent(specialization.slotProfile.deuteriumFactor),
+                        systemImage: "snowflake",
+                        tint: .cyan
+                    )
+                    GameMetricTile(
+                        title: "温度",
+                        value: "\(Formatters.wholeNumber(specialization.temperatureCelsius))°C",
+                        systemImage: "thermometer.medium",
+                        tint: specialization.temperatureCelsius < 0 ? .cyan : .orange
+                    )
+                }
+
+                if !specialization.recommendedBuildings.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("建议建筑")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 112), alignment: .leading)],
+                            alignment: .leading,
+                            spacing: 6
+                        ) {
+                            ForEach(specialization.recommendedBuildings, id: \.self) { building in
+                                StrategicChip(
+                                    title: building.localizedName,
+                                    systemImage: building.systemImage,
+                                    tint: specialization.role.tint
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if !specialization.warnings.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(specialization.warnings) { warning in
+                            ColonySpecializationWarningRow(warning: warning)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 760, alignment: .leading)
+    }
+}
+
+private struct ColonySpecializationWarningRow: View {
+    let warning: ColonySpecializationWarning
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: warning.kind.systemImage)
+                .foregroundStyle(warning.kind.tint)
+                .frame(width: 16)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(warning.title)
+                    .font(.caption.weight(.semibold))
+
+                Text(warning.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(warning.kind.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -3459,6 +3579,10 @@ private struct SolarSystemSlotTile: View {
                 }
             }
 
+            if let specialization = model.colonySpecializationPreview(for: slot) {
+                StarMapColonySpecializationPreview(specialization: specialization)
+            }
+
             StarMapSlotActions(slot: slot, model: model)
 
             if let plan = model.primaryStarMapMissionPlan(for: slot) {
@@ -3466,7 +3590,7 @@ private struct SolarSystemSlotTile: View {
             }
         }
         .padding(10)
-        .frame(minHeight: 162, alignment: .topLeading)
+        .frame(minHeight: 202, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tint.opacity(backgroundOpacity), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
@@ -3534,6 +3658,56 @@ private struct SolarSystemSlotTile: View {
 
     private var backgroundOpacity: Double {
         slot.planetID == nil ? 0.08 : 0.12
+    }
+}
+
+private struct StarMapColonySpecializationPreview: View {
+    let specialization: ColonySpecialization
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: specialization.role.systemImage)
+                    .foregroundStyle(specialization.role.tint)
+                    .frame(width: 15)
+
+                Text(specialization.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                Text("\(specialization.maxFields) 方圆")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Text(specialization.slotProfile.strategyHint)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 76), alignment: .leading)],
+                alignment: .leading,
+                spacing: 5
+            ) {
+                StrategicChip(
+                    title: "太阳 \(Formatters.percent(specialization.slotProfile.solarEnergyFactor))",
+                    systemImage: "sun.max",
+                    tint: .orange
+                )
+                StrategicChip(
+                    title: "重氢 \(Formatters.percent(specialization.slotProfile.deuteriumFactor))",
+                    systemImage: "snowflake",
+                    tint: .cyan
+                )
+            }
+        }
+        .padding(8)
+        .background(specialization.role.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 
@@ -5115,6 +5289,84 @@ enum Formatters {
         }
 
         return value.formatted(.percent.precision(.fractionLength(0)))
+    }
+}
+
+private extension ColonySpecialization.Role {
+    var systemImage: String {
+        switch self {
+        case .solarOutpost:
+            return "sun.max"
+        case .coreWorld:
+            return "building.columns"
+        case .deuteriumWorld:
+            return "snowflake"
+        case .shipyardHub:
+            return "wrench.and.screwdriver"
+        case .researchCampus:
+            return "atom"
+        case .moonBase:
+            return "moon.stars"
+        case .marginalColony:
+            return "exclamationmark.triangle"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .solarOutpost:
+            return .orange
+        case .coreWorld:
+            return .blue
+        case .deuteriumWorld:
+            return .cyan
+        case .shipyardHub:
+            return .red
+        case .researchCampus:
+            return .purple
+        case .moonBase:
+            return .indigo
+        case .marginalColony:
+            return .secondary
+        }
+    }
+}
+
+private extension ColonySpecializationWarning.Kind {
+    var systemImage: String {
+        switch self {
+        case .lowFields:
+            return "square.grid.3x3"
+        case .hotDeuterium:
+            return "thermometer.sun"
+        case .coldSolar:
+            return "snowflake"
+        case .crowdedFields:
+            return "exclamationmark.triangle"
+        case .missingShipyard:
+            return "wrench.and.screwdriver"
+        case .missingResearchLab:
+            return "atom"
+        case .noMoon:
+            return "moon"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .lowFields, .crowdedFields:
+            return .orange
+        case .hotDeuterium:
+            return .red
+        case .coldSolar:
+            return .cyan
+        case .missingShipyard:
+            return .red
+        case .missingResearchLab:
+            return .purple
+        case .noMoon:
+            return .indigo
+        }
     }
 }
 

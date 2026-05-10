@@ -1089,6 +1089,75 @@ func testUniverseTopologyColonySlotProfilesExposeLongTermTradeoffs() {
     require(outer.strategyHint.contains("重氢"), "Outer slot hint should explain deuterium value")
 }
 
+func testColonySpecializationClassifiesSlotTradeoffs() {
+    let inner = ColonySpecializationEngine.preview(
+        for: Coordinate(galaxy: 1, system: 42, position: 2),
+        universeSeed: 88
+    )
+    let middle = ColonySpecializationEngine.preview(
+        for: Coordinate(galaxy: 1, system: 42, position: 5),
+        universeSeed: 88
+    )
+    let outer = ColonySpecializationEngine.preview(
+        for: Coordinate(galaxy: 1, system: 42, position: 14),
+        universeSeed: 88
+    )
+
+    requireEqual(inner.role, .solarOutpost, "Hot inner slots should be recommended as solar outposts")
+    requireEqual(middle.role, .coreWorld, "Large middle slots should be recommended as core worlds")
+    requireEqual(outer.role, .deuteriumWorld, "Cold outer slots should be recommended as deuterium worlds")
+    require(inner.slotProfile.solarEnergyFactor > outer.slotProfile.solarEnergyFactor, "Inner specialization should preserve solar advantage")
+    require(outer.slotProfile.deuteriumFactor > inner.slotProfile.deuteriumFactor, "Outer specialization should preserve deuterium advantage")
+    require(inner.warnings.contains { $0.kind == .lowFields }, "Inner hot slots should warn about limited fields")
+    require(outer.warnings.contains { $0.kind == .coldSolar }, "Outer cold slots should warn about weak solar energy")
+    require(outer.recommendedBuildings.contains(.deuteriumSynthesizer), "Deuterium worlds should prioritize deuterium synthesizers")
+}
+
+func testColonySpecializationPromotesBuiltWorldRolesAndFieldWarnings() {
+    let shipyardWorld = Planet(
+        name: "Forge",
+        coordinate: Coordinate(galaxy: 1, system: 9, position: 5),
+        ownerID: FactionID(),
+        temperatureCelsius: 38,
+        buildingLevels: [
+            .metalMine: 12,
+            .crystalMine: 11,
+            .deuteriumSynthesizer: 8,
+            .solarPlant: 12,
+            .roboticsFactory: 4,
+            .shipyard: 7,
+            .naniteFactory: 1
+        ],
+        maxFields: 7
+    )
+
+    let shipyardSpecialization = ColonySpecializationEngine.specialization(for: shipyardWorld)
+    requireEqual(shipyardSpecialization.role, .shipyardHub, "Built-up shipyards should become shipyard hubs")
+    require(
+        shipyardSpecialization.warnings.contains { $0.kind == .crowdedFields },
+        "Worlds near field cap should surface a crowded field warning"
+    )
+    require(
+        shipyardSpecialization.recommendedBuildings.contains(.naniteFactory),
+        "Shipyard hubs should recommend nanite factories"
+    )
+
+    let moonWorld = Planet(
+        name: "Moon Gate",
+        coordinate: Coordinate(galaxy: 1, system: 9, position: 8),
+        ownerID: FactionID(),
+        moon: Moon(
+            name: "Luna",
+            createdAt: 1_000,
+            buildingLevels: [.lunarBase: 2, .sensorPhalanx: 2, .jumpGate: 1]
+        )
+    )
+
+    let moonSpecialization = ColonySpecializationEngine.specialization(for: moonWorld)
+    requireEqual(moonSpecialization.role, .moonBase, "Worlds with active moon facilities should surface moon base specialization")
+    require(moonSpecialization.recommendedBuildings.contains(.sensorPhalanx), "Moon bases should recommend phalanx expansion")
+}
+
 func testStarterUniverseProvidesServiceStyleColonyPool() {
     let universe = StarterUniverseFactory.makeNewGame(seed: 23, playerName: "Commander")
     let neutralPlanets = universe.planets.filter { $0.ownerID == nil }
@@ -6708,6 +6777,8 @@ try testStarterUniverseIsDeterministicForSeed()
 testUniverseTopologyUsesServiceStyleCoordinateLimits()
 testUniverseTopologyPlanetProfilesVaryBySlot()
 testUniverseTopologyColonySlotProfilesExposeLongTermTradeoffs()
+testColonySpecializationClassifiesSlotTradeoffs()
+testColonySpecializationPromotesBuiltWorldRolesAndFieldWarnings()
 testStarterUniverseProvidesServiceStyleColonyPool()
 testServiceStyleMoonChanceUsesDebrisThresholdAndCap()
 testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized()

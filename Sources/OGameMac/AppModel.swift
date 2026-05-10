@@ -276,6 +276,26 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func colonySpecialization(for planet: Planet) -> ColonySpecialization {
+        ColonySpecializationEngine.specialization(for: planet)
+    }
+
+    func colonySpecializationPreview(for slot: SolarSystemSlotSummary) -> ColonySpecialization? {
+        guard !slot.isExpedition else {
+            return nil
+        }
+
+        if let planet = planet(for: slot.planetID), slot.isVisible {
+            return ColonySpecializationEngine.specialization(for: planet)
+        }
+
+        guard slot.planetID == nil else {
+            return nil
+        }
+
+        return ColonySpecializationEngine.preview(for: slot.coordinate, universeSeed: universe.seed)
+    }
+
     var factionRankings: [FactionScore] {
         let rankings = universe.rankings.isEmpty ? StrategicEngine.rankings(in: universe) : universe.rankings
         return rankings.sorted { lhs, rhs in
