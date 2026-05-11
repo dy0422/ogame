@@ -1158,6 +1158,89 @@ func testColonySpecializationPromotesBuiltWorldRolesAndFieldWarnings() {
     require(moonSpecialization.recommendedBuildings.contains(.sensorPhalanx), "Moon bases should recommend phalanx expansion")
 }
 
+func testGameplayAuditAutoplayDoesNotUseGuidedFixtures() {
+    let result = GameplayAuditEngine.runAutoplayAudit(
+        seed: 1,
+        duration: 7_200,
+        settings: GameSettings(difficulty: .standard)
+    )
+
+    requireEqual(result.usedGuidedFixtures, false, "Gameplay audit should not inject scripted ships, moons, or victory fixtures")
+    require(result.auditNotes.contains { $0.kind == .organicPacing }, "Gameplay audit should label organic pacing evidence")
+    require(result.advisorRecommendationKinds.isEmpty == false, "Gameplay audit should sample strategic advisor recommendations")
+    require(result.routePlans.count == VictoryRoute.allCases.count, "Gameplay audit should expose all victory route plans")
+}
+
+func testGameplayAuditAutoplayReachesNaturalFleetLoop() {
+    let result = GameplayAuditEngine.runAutoplayAudit(
+        seed: 1,
+        duration: 14_400,
+        settings: GameSettings(difficulty: .standard)
+    )
+    require(result.balance.firstShipAt != nil, "Autoplay audit should naturally build a first ship in the fast-skirmish window")
+    require(result.balance.firstFleetLaunchAt != nil, "Autoplay audit should naturally launch a first fleet in the fast-skirmish window")
+    require(
+        !result.auditNotes.contains { $0.kind == .earlyFleetBlocked },
+        "A mature autoplay loop should not report the early fleet as blocked"
+    )
+}
+
+func testVictoryRoutePlansExposeCompositeCheckpoints() {
+    var universe = makeStrategicUniverse(playerResources: ResourceBundle(metal: 120_000, crystal: 80_000, deuterium: 40_000))
+    StrategicEngine.updateStrategicState(in: &universe)
+
+    let plans = VictoryRoutePlanEngine.plans(for: strategicPlayerID(), in: universe)
+    guard let economyPlan = plans.first(where: { $0.route == .economy }) else {
+        fatalError("Victory route plans should include economy route")
+    }
+    guard let technologyPlan = plans.first(where: { $0.route == .technology }) else {
+        fatalError("Victory route plans should include technology route")
+    }
+
+    require(economyPlan.checkpoints.count >= 4, "Economy victory should be decomposed into multiple gameplay checkpoints")
+    require(economyPlan.checkpoints.contains { $0.kind == .scoreThreshold && $0.isComplete }, "Economy route should still recognize raw economy strength")
+    require(economyPlan.checkpoints.contains { $0.kind == .colonyNetwork && !$0.isComplete }, "Economy route should also require colony network depth")
+    require(economyPlan.progress < 1, "Large stockpile alone should not make the composite economy plan complete")
+    require(technologyPlan.checkpoints.contains { $0.kind == .moonInfrastructure }, "Technology route should include moon infrastructure as a late-game checkpoint")
+}
+
+func testAIIntentSummariesExposeActionPlans() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 9, playerName: "Commander")
+    StrategicEngine.updateStrategicState(in: &universe)
+
+    let intents = AIIntentEngine.intentSummaries(in: universe)
+
+    require(intents.count >= 5, "AI intent summaries should cover each AI faction")
+    require(intents.contains { $0.intent == .expand || $0.intent == .scout || $0.intent == .buildUp }, "AI should expose actionable non-idle intent")
+    require(intents.allSatisfy { !$0.title.isEmpty && !$0.detail.isEmpty }, "AI intent summaries should be readable in UI and advisor surfaces")
+}
+
+func testMidgamePlayerObjectivesExposeStrategyDepth() {
+    let objectives = PlayerObjectiveEngine.states(in: StarterUniverseFactory.makeNewGame(seed: 4, playerName: "Commander"))
+    let kinds = Set(objectives.map(\.kind))
+
+    require(kinds.contains(.colonySpecialization), "Objectives should include colony specialization")
+    require(kinds.contains(.combatReview), "Objectives should include combat review")
+    require(kinds.contains(.fleetSaveDrill), "Objectives should include fleet save drill")
+    require(kinds.contains(.jumpGateNetwork), "Objectives should include jump gate network")
+}
+
+func testStrategicAdvisorRecommendsVictoryRouteAndAIThreat() {
+    var universe = makeStrategicUniverse(playerResources: ResourceBundle(metal: 8_000, crystal: 6_000, deuterium: 2_000))
+    let aiID = strategicAIID()
+    if let factionIndex = universe.factions.firstIndex(where: { $0.id == strategicPlayerID() }) {
+        universe.factions[factionIndex].relations = [
+            FactionRelation(factionID: aiID, posture: .hostile, threatScore: 4, lastInteractionTime: 600, attackCount: 2)
+        ]
+    }
+    StrategicEngine.updateStrategicState(in: &universe)
+
+    let recommendations = StrategicAdvisorEngine.recommendations(in: universe, limit: 12)
+
+    require(recommendations.contains { $0.kind == .victoryRoute }, "Advisor should recommend a victory route focus")
+    require(recommendations.contains { $0.kind == .aiThreat }, "Advisor should surface active AI threat")
+}
+
 func testStarterUniverseProvidesServiceStyleColonyPool() {
     let universe = StarterUniverseFactory.makeNewGame(seed: 23, playerName: "Commander")
     let neutralPlanets = universe.planets.filter { $0.ownerID == nil }
@@ -6779,6 +6862,12 @@ testUniverseTopologyPlanetProfilesVaryBySlot()
 testUniverseTopologyColonySlotProfilesExposeLongTermTradeoffs()
 testColonySpecializationClassifiesSlotTradeoffs()
 testColonySpecializationPromotesBuiltWorldRolesAndFieldWarnings()
+testGameplayAuditAutoplayDoesNotUseGuidedFixtures()
+testGameplayAuditAutoplayReachesNaturalFleetLoop()
+testVictoryRoutePlansExposeCompositeCheckpoints()
+testAIIntentSummariesExposeActionPlans()
+testMidgamePlayerObjectivesExposeStrategyDepth()
+testStrategicAdvisorRecommendsVictoryRouteAndAIThreat()
 testStarterUniverseProvidesServiceStyleColonyPool()
 testServiceStyleMoonChanceUsesDebrisThresholdAndCap()
 testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized()

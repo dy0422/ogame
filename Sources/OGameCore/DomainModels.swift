@@ -318,6 +318,10 @@ public enum PlayerObjectiveKind: String, Codable, CaseIterable, Sendable {
     case deepSpaceSurvey
     case secondColony
     case lunarOutpost
+    case colonySpecialization
+    case combatReview
+    case fleetSaveDrill
+    case jumpGateNetwork
 }
 
 public struct PlayerObjectiveRecord: Codable, Equatable, Sendable, Identifiable {

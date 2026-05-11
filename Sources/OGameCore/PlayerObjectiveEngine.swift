@@ -112,6 +112,34 @@ public enum PlayerObjectiveEngine {
             detail: "拥有第一颗月球。",
             targetValue: 1,
             reward: ResourceBundle(metal: 10_000, crystal: 8_000, deuterium: 4_000)
+        ),
+        ObjectiveDefinition(
+            kind: .colonySpecialization,
+            title: "殖民分工",
+            detail: "至少 2 个玩家星球形成明确殖民定位。",
+            targetValue: 2,
+            reward: ResourceBundle(metal: 8_000, crystal: 6_000, deuterium: 3_000)
+        ),
+        ObjectiveDefinition(
+            kind: .combatReview,
+            title: "战报复盘",
+            detail: "获得第一份战斗报告并完成战斗复盘循环。",
+            targetValue: 1,
+            reward: ResourceBundle(metal: 6_000, crystal: 4_000, deuterium: 2_000)
+        ),
+        ObjectiveDefinition(
+            kind: .fleetSaveDrill,
+            title: "舰队保存演练",
+            detail: "召回一次出航舰队，掌握基础 FS 节奏。",
+            targetValue: 1,
+            reward: ResourceBundle(metal: 5_000, crystal: 5_000, deuterium: 2_500)
+        ),
+        ObjectiveDefinition(
+            kind: .jumpGateNetwork,
+            title: "跳跃门网络",
+            detail: "拥有 2 个带跳跃门的月球，形成后期机动网络。",
+            targetValue: 2,
+            reward: ResourceBundle(metal: 20_000, crystal: 15_000, deuterium: 8_000)
         )
     ]
 
@@ -151,6 +179,27 @@ public enum PlayerObjectiveEngine {
             return Double(planets.count)
         case .lunarOutpost:
             return Double(planets.filter { $0.moon != nil }.count)
+        case .colonySpecialization:
+            return Double(
+                planets.filter { planet in
+                    ColonySpecializationEngine.specialization(for: planet).role != .marginalColony
+                }.count
+            )
+        case .combatReview:
+            return universe.reports.contains { report in
+                report.kind == .battle &&
+                    report.participants.contains { $0.factionID == universe.playerFactionID }
+            } ? 1 : 0
+        case .fleetSaveDrill:
+            return universe.fleets.contains { fleet in
+                fleet.ownerID == universe.playerFactionID && fleet.recalledAt != nil
+            } ? 1 : 0
+        case .jumpGateNetwork:
+            return Double(
+                planets.filter { planet in
+                    (planet.moon?.buildingLevels[.jumpGate] ?? 0) > 0
+                }.count
+            )
         }
     }
 

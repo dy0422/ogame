@@ -22,6 +22,19 @@ struct OGameBalanceTool {
                 print(csvLine(seed: 1, difficulty: difficulty, minutes: minutes, snapshot: snapshot))
             }
         }
+
+        let auditMinutes = durations.max() ?? 240
+        print("")
+        print("Autoplay gameplay audit")
+        print("seed,difficulty,minutes,used_guided_fixtures,first_ship,first_fleet,first_espionage,first_exploration,first_conflict,first_colony,victory_at,advisor_kinds,route_progress,route_next,ai_intents,notes")
+        for difficulty in GameSettings.Difficulty.allCases {
+            let audit = GameplayAuditEngine.runAutoplayAudit(
+                seed: 1,
+                duration: TimeInterval(auditMinutes * 60),
+                settings: GameSettings(difficulty: difficulty)
+            )
+            print(auditCSVLine(seed: 1, difficulty: difficulty, minutes: auditMinutes, audit: audit))
+        }
     }
 
     private static func parseDurations() -> [Int]? {
@@ -83,6 +96,52 @@ struct OGameBalanceTool {
 
         fields = fields.map(escapeCSV)
         return fields.joined(separator: ",")
+    }
+
+    private static func auditCSVLine(
+        seed: UInt64,
+        difficulty: GameSettings.Difficulty,
+        minutes: Int,
+        audit: GameplayAuditResult
+    ) -> String {
+        let routeProgress = audit.routePlans
+            .map { "\($0.title)=\(percent($0.progress))%" }
+            .joined(separator: " | ")
+        let routeNext = audit.routePlans
+            .compactMap { plan in
+                plan.nextCheckpoint.map { "\(plan.title):\($0.title)" }
+            }
+            .joined(separator: " | ")
+        let aiIntents = audit.aiIntents
+            .map { "\($0.factionName):\($0.intent.rawValue)" }
+            .joined(separator: " | ")
+        let notes = audit.auditNotes
+            .map(\.title)
+            .joined(separator: " | ")
+        let advisorKinds = audit.advisorRecommendationKinds
+            .map(\.rawValue)
+            .joined(separator: " | ")
+
+        let fields = [
+            String(seed),
+            difficulty.localizedName,
+            String(minutes),
+            audit.usedGuidedFixtures ? "true" : "false",
+            whole(audit.balance.firstShipAt),
+            whole(audit.balance.firstFleetLaunchAt),
+            whole(audit.balance.firstEspionageAt),
+            whole(audit.balance.firstExplorationEventAt),
+            whole(audit.balance.firstCombatAt),
+            whole(audit.balance.firstColonizationAt),
+            whole(audit.balance.victoryAt),
+            advisorKinds,
+            routeProgress,
+            routeNext,
+            aiIntents,
+            notes
+        ]
+
+        return fields.map(escapeCSV).joined(separator: ",")
     }
 
     private static func whole(_ value: Double) -> String {

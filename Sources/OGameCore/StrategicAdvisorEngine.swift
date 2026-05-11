@@ -1,7 +1,9 @@
 import Foundation
 
 public struct StrategicAdvisorRecommendation: Equatable, Identifiable, Sendable {
-    public enum Kind: String, CaseIterable, Sendable {
+    public enum Kind: String, CaseIterable, Hashable, Sendable {
+        case victoryRoute
+        case aiThreat
         case energyDeficit
         case storagePressure
         case idleConstruction
@@ -10,6 +12,7 @@ public struct StrategicAdvisorRecommendation: Equatable, Identifiable, Sendable 
         case colonyWindow
         case expeditionWindow
         case fleetSafety
+        case combatReview
     }
 
     public enum Priority: Int, Comparable, Sendable {
@@ -81,9 +84,11 @@ public enum StrategicAdvisorEngine {
         var recommendations: [StrategicAdvisorRecommendation] = []
         let playerFaction = universe.factions.first { $0.id == universe.playerFactionID }
 
+        recommendations.append(contentsOf: strategicRouteRecommendations(playerFaction: playerFaction, universe: universe))
         recommendations.append(contentsOf: economyRecommendations(for: playerPlanets, playerFaction: playerFaction, universe: universe))
         recommendations.append(contentsOf: queueRecommendations(for: playerPlanets, playerFaction: playerFaction, universe: universe))
         recommendations.append(contentsOf: fleetLoopRecommendations(for: playerPlanets, playerFaction: playerFaction, universe: universe))
+        recommendations.append(contentsOf: reportRecommendations(universe: universe))
 
         return Array(
             recommendations
@@ -99,6 +104,44 @@ public enum StrategicAdvisorEngine {
                 }
                 .prefix(safeLimit)
         )
+    }
+
+    private static func strategicRouteRecommendations(
+        playerFaction: Faction?,
+        universe: Universe
+    ) -> [StrategicAdvisorRecommendation] {
+        guard let playerFaction else {
+            return []
+        }
+
+        var recommendations: [StrategicAdvisorRecommendation] = []
+
+        if let plan = VictoryRoutePlanEngine.bestPlan(for: playerFaction.id, in: universe),
+           let next = plan.nextCheckpoint {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .victoryRoute,
+                    priority: plan.progress >= 0.75 ? .warning : .opportunity,
+                    title: "路线建议：\(plan.title)",
+                    detail: "当前进度 \(whole(plan.progress * 100))%。下一步：\(next.title) - \(next.detail)",
+                    actionLabel: "查看路线"
+                )
+            )
+        }
+
+        if let threat = AIIntentEngine.highestPlayerThreat(in: universe) {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .aiThreat,
+                    priority: threat.priority,
+                    title: "AI 动向：\(threat.title)",
+                    detail: threat.detail,
+                    actionLabel: "查看关系"
+                )
+            )
+        }
+
+        return recommendations
     }
 
     private static func economyRecommendations(
@@ -147,6 +190,29 @@ public enum StrategicAdvisorEngine {
         }
 
         return recommendations
+    }
+
+    private static func reportRecommendations(universe: Universe) -> [StrategicAdvisorRecommendation] {
+        guard let latestBattle = universe.reports
+            .filter({
+                $0.kind == .battle &&
+                    $0.participants.contains { $0.factionID == universe.playerFactionID }
+            })
+            .sorted(by: { $0.time > $1.time })
+            .first
+        else {
+            return []
+        }
+
+        return [
+            StrategicAdvisorRecommendation(
+                kind: .combatReview,
+                priority: .info,
+                title: "战报可复盘",
+                detail: "最近战斗发生在 T+\(whole(latestBattle.time)) 秒。复盘 RF、残骸、月球概率和损失结构，可优化下一次舰队搭配。",
+                actionLabel: "查看战报"
+            )
+        ]
     }
 
     private static func queueRecommendations(

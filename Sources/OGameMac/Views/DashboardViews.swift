@@ -63,6 +63,10 @@ struct StrategicAdvisorPanel: View {
 
     private func navigate(to recommendation: StrategicAdvisorRecommendation) {
         switch recommendation.kind {
+        case .victoryRoute:
+            model.selectedDestination = .victory
+        case .aiThreat:
+            model.selectedDestination = .relations
         case .energyDeficit, .storagePressure, .idleConstruction:
             if let planetID = recommendation.planetID {
                 model.selectedDestination = .planet(planetID)
@@ -72,6 +76,8 @@ struct StrategicAdvisorPanel: View {
         case .debrisRecovery, .colonyWindow:
             model.selectedDestination = .starMap
         case .expeditionWindow, .fleetSafety:
+            model.selectedDestination = .fleets
+        case .combatReview:
             model.selectedDestination = .fleets
         }
     }
@@ -272,6 +278,10 @@ extension BriefingUrgency {
 private extension StrategicAdvisorRecommendation.Kind {
     var systemImage: String {
         switch self {
+        case .victoryRoute:
+            return "flag.checkered"
+        case .aiThreat:
+            return "exclamationmark.shield"
         case .energyDeficit:
             return "bolt.trianglebadge.exclamationmark"
         case .storagePressure:
@@ -288,6 +298,8 @@ private extension StrategicAdvisorRecommendation.Kind {
             return "sparkles"
         case .fleetSafety:
             return "shield.lefthalf.filled"
+        case .combatReview:
+            return "doc.text.magnifyingglass"
         }
     }
 }

@@ -37,9 +37,18 @@ public enum PlayerAutoUpgradeEngine {
         }
 
         var result = PlayerAutoUpgradeResult()
+        let shouldQueueShipsFirst = policy.allowShipConstruction && shouldQueueShipsBeforeInfrastructure(
+            for: player,
+            policy: policy,
+            in: universe
+        )
+        if shouldQueueShipsFirst {
+            result.queuedShips += queueShips(for: player, policy: policy, in: &universe)
+        }
+
         result.queuedBuildings += queueBuildings(for: player, policy: policy, in: &universe)
         result.queuedResearch += queueResearch(for: player, policy: policy, in: &universe)
-        if policy.allowShipConstruction {
+        if policy.allowShipConstruction && !shouldQueueShipsFirst {
             result.queuedShips += queueShips(for: player, policy: policy, in: &universe)
         }
         if policy.allowDefenseConstruction {
@@ -71,9 +80,25 @@ public enum PlayerAutoUpgradeEngine {
                 ruleSet: universe.ruleSet,
                 strategy: policy.strategy
             )
+            let reserveForFirstShip = shouldReserveForFirstShip(
+                for: player,
+                policy: policy,
+                in: universe
+            )
             while universe.planets[planetIndex].buildQueue.count < policy.maxBuildQueueDepthPerPlanet {
                 var didQueue = false
                 for kind in priorities where universe.ruleSet.buildingRules[kind] != nil && !kind.isMoonFacility {
+                    guard shouldQueueBuilding(
+                        kind,
+                        on: universe.planets[planetIndex],
+                        player: player,
+                        ruleSet: universe.ruleSet,
+                        strategy: policy.strategy,
+                        reserveForFirstShip: reserveForFirstShip
+                    ) else {
+                        continue
+                    }
+
                     guard let cost = QueueEngine.buildingUpgradeCost(on: planetID, in: universe, kind: kind),
                           canSpend(
                             cost,
@@ -98,6 +123,112 @@ public enum PlayerAutoUpgradeEngine {
         }
 
         return queued
+    }
+
+    private static func shouldQueueShipsBeforeInfrastructure(
+        for player: Faction,
+        policy: AutoUpgradePolicy,
+        in universe: Universe
+    ) -> Bool {
+        switch policy.strategy {
+        case .fleet:
+            return true
+        case .balanced:
+            return ownedShipCount(for: player, in: universe) == 0
+        case .economy, .research, .defense, .lowRiskOffline:
+            return false
+        }
+    }
+
+    private static func shouldReserveForFirstShip(
+        for player: Faction,
+        policy: AutoUpgradePolicy,
+        in universe: Universe
+    ) -> Bool {
+        policy.allowShipConstruction &&
+            shouldQueueShipsBeforeInfrastructure(for: player, policy: policy, in: universe) &&
+            ownedShipCount(for: player, in: universe) == 0
+    }
+
+    private static func ownedShipCount(for player: Faction, in universe: Universe) -> Int {
+        player.ownedPlanetIDs.reduce(0) { total, planetID in
+            guard let planet = universe.planets.first(where: { $0.id == planetID && $0.ownerID == player.id }) else {
+                return total
+            }
+
+            let inventoryCount = planet.shipInventory.values.reduce(0) { $0 + max($1, 0) }
+            let queuedCount = planet.shipBuildQueue.reduce(0) { $0 + max($1.quantity, 0) }
+            return total + inventoryCount + queuedCount
+        }
+    }
+
+    private static func shouldQueueBuilding(
+        _ kind: BuildingKind,
+        on planet: Planet,
+        player: Faction,
+        ruleSet: RuleSet,
+        strategy: AutoUpgradeStrategy,
+        reserveForFirstShip: Bool
+    ) -> Bool {
+        let energy = EconomyEngine.energyState(for: planet, ruleSet: ruleSet, research: player.technology)
+        if energy.available < 0 && (kind == .solarPlant || kind == .fusionReactor) {
+            return true
+        }
+
+        if reserveForFirstShip && firstShipReserveFoundationMet(on: planet) {
+            return false
+        }
+
+        let targets = foundationTargets(for: strategy)
+        guard !targets.isEmpty else {
+            return true
+        }
+
+        if let target = targets[kind], projectedBuildingLevel(kind, on: planet) < target {
+            return true
+        }
+
+        return foundationTargetsMet(targets, on: planet)
+    }
+
+    private static func foundationTargetsMet(_ targets: [BuildingKind: Int], on planet: Planet) -> Bool {
+        targets.allSatisfy { kind, target in
+            projectedBuildingLevel(kind, on: planet) >= max(target, 0)
+        }
+    }
+
+    private static func firstShipReserveFoundationMet(on planet: Planet) -> Bool {
+        let targets: [BuildingKind: Int] = [.metalMine: 2, .crystalMine: 2, .solarPlant: 3]
+        return foundationTargetsMet(targets, on: planet)
+    }
+
+    private static func foundationTargets(for strategy: AutoUpgradeStrategy) -> [BuildingKind: Int] {
+        switch strategy {
+        case .balanced:
+            return [.metalMine: 4, .crystalMine: 4, .deuteriumSynthesizer: 2, .solarPlant: 5, .roboticsFactory: 1, .shipyard: 1, .researchLab: 1]
+        case .economy:
+            return [.metalMine: 6, .crystalMine: 5, .deuteriumSynthesizer: 3, .solarPlant: 6, .roboticsFactory: 1, .shipyard: 1, .researchLab: 1]
+        case .research:
+            return [.metalMine: 4, .crystalMine: 4, .deuteriumSynthesizer: 2, .solarPlant: 5, .roboticsFactory: 1, .shipyard: 1, .researchLab: 2]
+        case .fleet:
+            return [.metalMine: 4, .crystalMine: 4, .deuteriumSynthesizer: 2, .solarPlant: 5, .roboticsFactory: 1, .shipyard: 2, .researchLab: 1]
+        case .defense:
+            return [.metalMine: 4, .crystalMine: 3, .deuteriumSynthesizer: 2, .solarPlant: 5, .roboticsFactory: 1, .shipyard: 2]
+        case .lowRiskOffline:
+            return [.metalMine: 4, .crystalMine: 3, .deuteriumSynthesizer: 2, .solarPlant: 5, .roboticsFactory: 1, .shipyard: 1]
+        }
+    }
+
+    private static func projectedBuildingLevel(_ kind: BuildingKind, on planet: Planet) -> Int {
+        let currentLevel = kind.isMoonFacility
+            ? normalizedLevel(planet.moon?.buildingLevels[kind] ?? 0)
+            : normalizedLevel(planet.buildingLevels[kind] ?? 0)
+        let queuedLevel = planet.buildQueue
+            .filter { $0.buildingKind == kind }
+            .map { normalizedLevel($0.targetLevel) }
+            .max() ?? currentLevel
+
+        return max(currentLevel, queuedLevel)
     }
 
     private static func queueResearch(for player: Faction, policy: AutoUpgradePolicy, in universe: inout Universe) -> Int {
@@ -275,6 +406,10 @@ public enum PlayerAutoUpgradeEngine {
     private static func canSpend(_ cost: ResourceBundle, from resources: ResourceBundle, reserveRatio: Double) -> Bool {
         let reserve = resources.scaled(by: min(max(reserveRatio, 0), 0.8))
         return resources.subtracting(reserve).canAfford(cost)
+    }
+
+    private static func normalizedLevel(_ level: Int) -> Int {
+        max(level, 0)
     }
 
     private static func researchPriorities(for strategy: AutoUpgradeStrategy) -> [TechnologyKind] {

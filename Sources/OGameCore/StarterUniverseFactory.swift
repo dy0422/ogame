@@ -118,7 +118,7 @@ public enum StarterUniverseFactory {
         )
     }
 
-    private static let startingResources = ResourceBundle(metal: 500, crystal: 500, deuterium: 100)
+    private static let startingResources = ResourceBundle(metal: 2_000, crystal: 2_000, deuterium: 500)
     private static let startingStorage = ResourceStorage(metal: 100_000, crystal: 100_000, deuterium: 100_000)
     private static let startingEnergy = EnergyState(produced: 22, used: 22)
     private static let startingBuildingLevels: [BuildingKind: Int] = [
