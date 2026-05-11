@@ -140,6 +140,15 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
     public var victoryState: VictoryState
     public var explorationRecords: [ExplorationRecord]
     public var playerObjectiveRecords: [PlayerObjectiveRecord]
+    public var sectorEvents: [SectorEvent]
+    public var hostileSites: [HostileSite]
+    public var actionChains: [ActionChain]
+    public var sectorControlSummaries: [SectorControlSummary]
+    public var tradeRoutes: [TradeRoute]
+    public var deepIntelOperations: [DeepIntelOperation]
+    public var fleetDoctrineSummaries: [FleetDoctrineSummary]
+    public var artifacts: [Artifact]
+    public var crisisState: CrisisState?
 
     public init(
         id: UniverseID = UniverseID(),
@@ -157,7 +166,16 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         rankings: [FactionScore] = [],
         victoryState: VictoryState = VictoryState(),
         explorationRecords: [ExplorationRecord] = [],
-        playerObjectiveRecords: [PlayerObjectiveRecord] = []
+        playerObjectiveRecords: [PlayerObjectiveRecord] = [],
+        sectorEvents: [SectorEvent] = [],
+        hostileSites: [HostileSite] = [],
+        actionChains: [ActionChain] = [],
+        sectorControlSummaries: [SectorControlSummary] = [],
+        tradeRoutes: [TradeRoute] = [],
+        deepIntelOperations: [DeepIntelOperation] = [],
+        fleetDoctrineSummaries: [FleetDoctrineSummary] = [],
+        artifacts: [Artifact] = [],
+        crisisState: CrisisState? = nil
     ) {
         self.id = id
         self.name = name
@@ -175,6 +193,15 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         self.victoryState = victoryState
         self.explorationRecords = explorationRecords
         self.playerObjectiveRecords = playerObjectiveRecords
+        self.sectorEvents = sectorEvents
+        self.hostileSites = hostileSites
+        self.actionChains = actionChains
+        self.sectorControlSummaries = sectorControlSummaries
+        self.tradeRoutes = tradeRoutes
+        self.deepIntelOperations = deepIntelOperations
+        self.fleetDoctrineSummaries = fleetDoctrineSummaries
+        self.artifacts = artifacts
+        self.crisisState = crisisState
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -194,6 +221,15 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         case victoryState
         case explorationRecords
         case playerObjectiveRecords
+        case sectorEvents
+        case hostileSites
+        case actionChains
+        case sectorControlSummaries
+        case tradeRoutes
+        case deepIntelOperations
+        case fleetDoctrineSummaries
+        case artifacts
+        case crisisState
     }
 
     public init(from decoder: Decoder) throws {
@@ -215,6 +251,15 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         self.victoryState = try container.decodeIfPresentStrict(VictoryState.self, forKey: .victoryState) ?? VictoryState()
         self.explorationRecords = try container.decodeIfPresentStrict([ExplorationRecord].self, forKey: .explorationRecords) ?? []
         self.playerObjectiveRecords = try container.decodeIfPresentStrict([PlayerObjectiveRecord].self, forKey: .playerObjectiveRecords) ?? []
+        self.sectorEvents = try container.decodeIfPresentStrict([SectorEvent].self, forKey: .sectorEvents) ?? []
+        self.hostileSites = try container.decodeIfPresentStrict([HostileSite].self, forKey: .hostileSites) ?? []
+        self.actionChains = try container.decodeIfPresentStrict([ActionChain].self, forKey: .actionChains) ?? []
+        self.sectorControlSummaries = try container.decodeIfPresentStrict([SectorControlSummary].self, forKey: .sectorControlSummaries) ?? []
+        self.tradeRoutes = try container.decodeIfPresentStrict([TradeRoute].self, forKey: .tradeRoutes) ?? []
+        self.deepIntelOperations = try container.decodeIfPresentStrict([DeepIntelOperation].self, forKey: .deepIntelOperations) ?? []
+        self.fleetDoctrineSummaries = try container.decodeIfPresentStrict([FleetDoctrineSummary].self, forKey: .fleetDoctrineSummaries) ?? []
+        self.artifacts = try container.decodeIfPresentStrict([Artifact].self, forKey: .artifacts) ?? []
+        self.crisisState = try container.decodeIfPresentStrict(CrisisState.self, forKey: .crisisState)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -236,6 +281,15 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         try container.encode(victoryState, forKey: .victoryState)
         try container.encode(explorationRecords, forKey: .explorationRecords)
         try container.encode(playerObjectiveRecords, forKey: .playerObjectiveRecords)
+        try container.encode(sectorEvents, forKey: .sectorEvents)
+        try container.encode(hostileSites, forKey: .hostileSites)
+        try container.encode(actionChains, forKey: .actionChains)
+        try container.encode(sectorControlSummaries, forKey: .sectorControlSummaries)
+        try container.encode(tradeRoutes, forKey: .tradeRoutes)
+        try container.encode(deepIntelOperations, forKey: .deepIntelOperations)
+        try container.encode(fleetDoctrineSummaries, forKey: .fleetDoctrineSummaries)
+        try container.encode(artifacts, forKey: .artifacts)
+        try container.encodeIfPresent(crisisState, forKey: .crisisState)
     }
 }
 
@@ -425,6 +479,351 @@ public struct VictoryState: Codable, Equatable, Sendable {
         self.achievedAt = achievedAt
         self.didAnnounceVictory = didAnnounceVictory
         self.exploredPlanetIDs = exploredPlanetIDs
+    }
+}
+
+public struct SectorEvent: Codable, Equatable, Sendable, Identifiable {
+    public enum Kind: String, Codable, CaseIterable, Sendable {
+        case solarStorm
+        case pirateActivity
+        case debrisBloom
+        case ancientRelic
+        case resourceSurge
+        case aiExpansionWarning
+    }
+
+    public var id: UUID
+    public var kind: Kind
+    public var title: String
+    public var detail: String
+    public var coordinate: Coordinate
+    public var startedAt: TimeInterval
+    public var expiresAt: TimeInterval
+    public var resourceMultiplier: Double
+    public var fleetSpeedMultiplier: Double
+    public var riskModifier: Double
+
+    public init(
+        id: UUID = UUID(),
+        kind: Kind,
+        title: String,
+        detail: String,
+        coordinate: Coordinate,
+        startedAt: TimeInterval,
+        expiresAt: TimeInterval,
+        resourceMultiplier: Double = 1,
+        fleetSpeedMultiplier: Double = 1,
+        riskModifier: Double = 0
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.coordinate = coordinate
+        self.startedAt = startedAt.isFinite ? max(startedAt, 0) : 0
+        self.expiresAt = expiresAt.isFinite ? max(expiresAt, self.startedAt) : self.startedAt
+        self.resourceMultiplier = resourceMultiplier.isFinite ? max(resourceMultiplier, 0) : 1
+        self.fleetSpeedMultiplier = fleetSpeedMultiplier.isFinite ? max(fleetSpeedMultiplier, 0.1) : 1
+        self.riskModifier = riskModifier.isFinite ? riskModifier : 0
+    }
+}
+
+public struct HostileSite: Codable, Equatable, Sendable, Identifiable {
+    public enum Kind: String, Codable, CaseIterable, Sendable {
+        case pirateBase
+        case alienOutpost
+        case derelictArmada
+    }
+
+    public var id: UUID
+    public var kind: Kind
+    public var name: String
+    public var coordinate: Coordinate
+    public var targetPlanetID: PlanetID?
+    public var threatLevel: Int
+    public var requiredPower: Double
+    public var reward: ResourceBundle
+    public var expiresAt: TimeInterval
+
+    public init(
+        id: UUID = UUID(),
+        kind: Kind,
+        name: String,
+        coordinate: Coordinate,
+        targetPlanetID: PlanetID? = nil,
+        threatLevel: Int,
+        requiredPower: Double,
+        reward: ResourceBundle,
+        expiresAt: TimeInterval
+    ) {
+        self.id = id
+        self.kind = kind
+        self.name = name
+        self.coordinate = coordinate
+        self.targetPlanetID = targetPlanetID
+        self.threatLevel = max(threatLevel, 1)
+        self.requiredPower = requiredPower.isFinite ? max(requiredPower, 0) : 0
+        self.reward = reward.nonnegative
+        self.expiresAt = expiresAt.isFinite ? max(expiresAt, 0) : 0
+    }
+}
+
+public struct ActionChain: Codable, Equatable, Sendable, Identifiable {
+    public enum Kind: String, Codable, CaseIterable, Sendable {
+        case hostileRaid
+        case sectorDevelopment
+        case relicRecovery
+    }
+
+    public struct Step: Codable, Equatable, Sendable, Identifiable {
+        public enum Kind: String, Codable, CaseIterable, Sendable {
+            case scoutTarget
+            case strikeHostile
+            case recoverSpoils
+            case secureSector
+            case buildLogistics
+        }
+
+        public enum Status: String, Codable, CaseIterable, Sendable {
+            case ready
+            case locked
+            case complete
+        }
+
+        public var kind: Kind
+        public var title: String
+        public var status: Status
+
+        public var id: Kind { kind }
+
+        public init(kind: Kind, title: String, status: Status) {
+            self.kind = kind
+            self.title = title
+            self.status = status
+        }
+    }
+
+    public var id: UUID
+    public var kind: Kind
+    public var title: String
+    public var detail: String
+    public var steps: [Step]
+    public var reward: ResourceBundle
+    public var expiresAt: TimeInterval
+
+    public init(
+        id: UUID = UUID(),
+        kind: Kind,
+        title: String,
+        detail: String,
+        steps: [Step],
+        reward: ResourceBundle,
+        expiresAt: TimeInterval
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.steps = steps
+        self.reward = reward.nonnegative
+        self.expiresAt = expiresAt.isFinite ? max(expiresAt, 0) : 0
+    }
+}
+
+public struct SectorControlSummary: Codable, Equatable, Sendable, Identifiable {
+    public var ownerID: FactionID
+    public var galaxy: Int
+    public var system: Int
+    public var controlLevel: Int
+    public var resourceBonus: Double
+    public var sensorBonus: Double
+
+    public var id: String { "\(ownerID.rawValue.uuidString)|\(galaxy)|\(system)" }
+
+    public init(ownerID: FactionID, galaxy: Int, system: Int, controlLevel: Int, resourceBonus: Double, sensorBonus: Double) {
+        self.ownerID = ownerID
+        self.galaxy = max(galaxy, 1)
+        self.system = max(system, 1)
+        self.controlLevel = max(controlLevel, 0)
+        self.resourceBonus = resourceBonus.isFinite ? max(resourceBonus, 0) : 0
+        self.sensorBonus = sensorBonus.isFinite ? max(sensorBonus, 0) : 0
+    }
+}
+
+public struct TradeRoute: Codable, Equatable, Sendable, Identifiable {
+    public enum Status: String, Codable, CaseIterable, Sendable {
+        case profitable
+        case risky
+        case blocked
+    }
+
+    public var id: UUID
+    public var ownerID: FactionID
+    public var originPlanetID: PlanetID
+    public var targetPlanetID: PlanetID
+    public var status: Status
+    public var resourceFlow: ResourceBundle
+    public var riskLevel: Double
+    public var title: String
+
+    public init(
+        id: UUID = UUID(),
+        ownerID: FactionID,
+        originPlanetID: PlanetID,
+        targetPlanetID: PlanetID,
+        status: Status,
+        resourceFlow: ResourceBundle,
+        riskLevel: Double,
+        title: String
+    ) {
+        self.id = id
+        self.ownerID = ownerID
+        self.originPlanetID = originPlanetID
+        self.targetPlanetID = targetPlanetID
+        self.status = status
+        self.resourceFlow = resourceFlow.nonnegative
+        self.riskLevel = riskLevel.isFinite ? min(max(riskLevel, 0), 1) : 0
+        self.title = title
+    }
+}
+
+public struct DeepIntelOperation: Codable, Equatable, Sendable, Identifiable {
+    public enum Kind: String, Codable, CaseIterable, Sendable {
+        case signalIntercept
+        case falseSignal
+        case counterEspionage
+    }
+
+    public var id: UUID
+    public var ownerID: FactionID
+    public var targetFactionID: FactionID
+    public var kind: Kind
+    public var intelTier: Int
+    public var riskLevel: Double
+    public var title: String
+    public var detail: String
+
+    public init(
+        id: UUID = UUID(),
+        ownerID: FactionID,
+        targetFactionID: FactionID,
+        kind: Kind,
+        intelTier: Int,
+        riskLevel: Double,
+        title: String,
+        detail: String
+    ) {
+        self.id = id
+        self.ownerID = ownerID
+        self.targetFactionID = targetFactionID
+        self.kind = kind
+        self.intelTier = max(intelTier, 1)
+        self.riskLevel = riskLevel.isFinite ? min(max(riskLevel, 0), 1) : 0
+        self.title = title
+        self.detail = detail
+    }
+}
+
+public struct FleetDoctrineSummary: Codable, Equatable, Sendable, Identifiable {
+    public enum Doctrine: String, Codable, CaseIterable, Sendable {
+        case raiding
+        case expeditionary
+        case siege
+        case logistics
+        case defense
+    }
+
+    public var doctrine: Doctrine
+    public var title: String
+    public var detail: String
+    public var recommendedShips: [ShipKind: Int]
+    public var speedBonus: Double
+    public var lootBonus: Double
+    public var riskModifier: Double
+
+    public var id: Doctrine { doctrine }
+
+    public init(
+        doctrine: Doctrine,
+        title: String,
+        detail: String,
+        recommendedShips: [ShipKind: Int],
+        speedBonus: Double = 0,
+        lootBonus: Double = 0,
+        riskModifier: Double = 0
+    ) {
+        self.doctrine = doctrine
+        self.title = title
+        self.detail = detail
+        self.recommendedShips = recommendedShips.filter { $0.value > 0 }
+        self.speedBonus = speedBonus.isFinite ? speedBonus : 0
+        self.lootBonus = lootBonus.isFinite ? lootBonus : 0
+        self.riskModifier = riskModifier.isFinite ? riskModifier : 0
+    }
+}
+
+public struct Artifact: Codable, Equatable, Sendable, Identifiable {
+    public enum Kind: String, Codable, CaseIterable, Sendable {
+        case ancientBlueprint
+        case logisticsRelic
+        case combatAlgorithm
+        case surveyArchive
+    }
+
+    public var id: UUID
+    public var kind: Kind
+    public var title: String
+    public var effect: String
+    public var unlockedAt: TimeInterval
+
+    public init(id: UUID = UUID(), kind: Kind, title: String, effect: String, unlockedAt: TimeInterval) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.effect = effect
+        self.unlockedAt = unlockedAt.isFinite ? max(unlockedAt, 0) : 0
+    }
+}
+
+public struct CrisisState: Codable, Equatable, Sendable, Identifiable {
+    public enum Kind: String, Codable, CaseIterable, Sendable {
+        case pirateWarlord
+        case alienIncursion
+        case aiCoalition
+    }
+
+    public enum Phase: String, Codable, CaseIterable, Sendable {
+        case brewing
+        case active
+        case escalating
+    }
+
+    public var kind: Kind
+    public var phase: Phase
+    public var startedAt: TimeInterval
+    public var targetPower: Double
+    public var progress: Double
+    public var title: String
+    public var detail: String
+
+    public var id: Kind { kind }
+
+    public init(
+        kind: Kind,
+        phase: Phase,
+        startedAt: TimeInterval,
+        targetPower: Double,
+        progress: Double,
+        title: String,
+        detail: String
+    ) {
+        self.kind = kind
+        self.phase = phase
+        self.startedAt = startedAt.isFinite ? max(startedAt, 0) : 0
+        self.targetPower = targetPower.isFinite ? max(targetPower, 0) : 0
+        self.progress = progress.isFinite ? min(max(progress, 0), 1) : 0
+        self.title = title
+        self.detail = detail
     }
 }
 

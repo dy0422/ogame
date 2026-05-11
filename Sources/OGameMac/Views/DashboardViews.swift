@@ -63,6 +63,16 @@ struct StrategicAdvisorPanel: View {
 
     private func navigate(to recommendation: StrategicAdvisorRecommendation) {
         switch recommendation.kind {
+        case .crisis, .hostileSite, .actionChain:
+            model.selectedDestination = .fleets
+        case .sectorEvent:
+            model.selectedDestination = .starMap
+        case .tradeRoute:
+            model.selectedDestination = .dashboard
+        case .deepIntel:
+            model.selectedDestination = .relations
+        case .artifact:
+            model.selectedDestination = .victory
         case .victoryRoute:
             model.selectedDestination = .victory
         case .aiThreat:
@@ -278,6 +288,20 @@ extension BriefingUrgency {
 private extension StrategicAdvisorRecommendation.Kind {
     var systemImage: String {
         switch self {
+        case .crisis:
+            return "exclamationmark.triangle.fill"
+        case .hostileSite:
+            return "scope"
+        case .sectorEvent:
+            return "sparkle.magnifyingglass"
+        case .actionChain:
+            return "checklist"
+        case .tradeRoute:
+            return "arrow.left.arrow.right.circle"
+        case .deepIntel:
+            return "antenna.radiowaves.left.and.right"
+        case .artifact:
+            return "shippingbox.and.arrow.backward"
         case .victoryRoute:
             return "flag.checkered"
         case .aiThreat:

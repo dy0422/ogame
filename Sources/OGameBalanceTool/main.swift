@@ -26,7 +26,7 @@ struct OGameBalanceTool {
         let auditMinutes = durations.max() ?? 240
         print("")
         print("Autoplay gameplay audit")
-        print("seed,difficulty,minutes,used_guided_fixtures,first_ship,first_fleet,first_espionage,first_exploration,first_conflict,first_colony,victory_at,advisor_kinds,route_progress,route_next,ai_intents,notes")
+        print("seed,difficulty,minutes,used_guided_fixtures,first_ship,first_fleet,first_espionage,first_exploration,first_conflict,first_colony,victory_at,expansion_signals,advisor_kinds,route_progress,route_next,ai_intents,notes")
         for difficulty in GameSettings.Difficulty.allCases {
             let audit = GameplayAuditEngine.runAutoplayAudit(
                 seed: 1,
@@ -134,6 +134,7 @@ struct OGameBalanceTool {
             whole(audit.balance.firstCombatAt),
             whole(audit.balance.firstColonizationAt),
             whole(audit.balance.victoryAt),
+            String(audit.expansionSignalCount),
             advisorKinds,
             routeProgress,
             routeNext,
@@ -145,7 +146,7 @@ struct OGameBalanceTool {
     }
 
     private static func whole(_ value: Double) -> String {
-        guard value.isFinite else {
+        guard value.isFinite, abs(value) <= Double(Int.max) else {
             return "NA"
         }
 
@@ -161,7 +162,7 @@ struct OGameBalanceTool {
     }
 
     private static func percent(_ value: Double) -> String {
-        guard value.isFinite else {
+        guard value.isFinite, abs(value * 100) <= Double(Int.max) else {
             return "NA"
         }
 

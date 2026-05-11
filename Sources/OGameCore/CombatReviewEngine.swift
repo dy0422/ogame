@@ -346,7 +346,7 @@ public enum CombatReviewEngine {
     }
 
     private static func whole(_ value: Double) -> String {
-        guard value.isFinite else {
+        guard value.isFinite, abs(value) <= Double(Int.max) else {
             return "未知"
         }
         return String(Int(value.rounded()))

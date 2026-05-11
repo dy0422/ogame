@@ -43,6 +43,7 @@ public enum SimulationEngine {
             aiDifficulty: aiDifficulty
         )
         StrategicEngine.updateStrategicState(in: &universe)
+        GameplayExpansionEngine.refresh(in: &universe)
 
         if eventPolicy == .full {
             universe.events.append(

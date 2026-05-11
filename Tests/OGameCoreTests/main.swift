@@ -717,6 +717,15 @@ func testQueueFieldsDefaultWhenDecodingOlderUniverseJSON() throws {
     requireEqual(decoded.planets[0].debrisField, .zero, "Older planet JSON should default missing debris field to zero")
     requireEqual(decoded.reports, [], "Older universe JSON should default missing reports to empty")
     requireEqual(decoded.playerObjectiveRecords, [], "Older universe JSON should default missing player objective records to empty")
+    requireEqual(decoded.sectorEvents, [], "Older universe JSON should default missing sector events to empty")
+    requireEqual(decoded.hostileSites, [], "Older universe JSON should default missing hostile sites to empty")
+    requireEqual(decoded.actionChains, [], "Older universe JSON should default missing action chains to empty")
+    requireEqual(decoded.sectorControlSummaries, [], "Older universe JSON should default missing sector control summaries to empty")
+    requireEqual(decoded.tradeRoutes, [], "Older universe JSON should default missing trade routes to empty")
+    requireEqual(decoded.deepIntelOperations, [], "Older universe JSON should default missing deep intel operations to empty")
+    requireEqual(decoded.fleetDoctrineSummaries, [], "Older universe JSON should default missing doctrine summaries to empty")
+    requireEqual(decoded.artifacts, [], "Older universe JSON should default missing artifacts to empty")
+    requireEqual(decoded.crisisState, nil, "Older universe JSON should default missing crisis state to nil")
     requireEqual(decoded.planets[0].buildingLevels, [.metalMine: 2], "Older planet JSON should keep raw-value building map behavior")
     requireEqual(decoded.ruleSet.buildingRules, RuleSet.fastSkirmish.buildingRules, "Older universe JSON should keep RuleSet defaults")
 }
@@ -1169,6 +1178,7 @@ func testGameplayAuditAutoplayDoesNotUseGuidedFixtures() {
     require(result.auditNotes.contains { $0.kind == .organicPacing }, "Gameplay audit should label organic pacing evidence")
     require(result.advisorRecommendationKinds.isEmpty == false, "Gameplay audit should sample strategic advisor recommendations")
     require(result.routePlans.count == VictoryRoute.allCases.count, "Gameplay audit should expose all victory route plans")
+    require(result.expansionSignalCount > 0, "Gameplay audit should count expansion gameplay signals")
 }
 
 func testGameplayAuditAutoplayReachesNaturalFleetLoop() {
@@ -1239,6 +1249,63 @@ func testStrategicAdvisorRecommendsVictoryRouteAndAIThreat() {
 
     require(recommendations.contains { $0.kind == .victoryRoute }, "Advisor should recommend a victory route focus")
     require(recommendations.contains { $0.kind == .aiThreat }, "Advisor should surface active AI threat")
+}
+
+func testGameplayExpansionRefreshCreatesThreePhaseGameplayLoops() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+
+    GameplayExpansionEngine.refresh(in: &universe)
+
+    require(universe.sectorEvents.contains { $0.kind == .pirateActivity || $0.kind == .ancientRelic }, "Expansion should create dynamic sector events")
+    require(universe.hostileSites.contains { $0.kind == .pirateBase || $0.kind == .alienOutpost }, "Expansion should create PVE hostile targets")
+    require(
+        universe.actionChains.contains { chain in
+            chain.steps.contains { $0.kind == .scoutTarget } &&
+                chain.steps.contains { $0.kind == .strikeHostile } &&
+                chain.steps.contains { $0.kind == .recoverSpoils }
+        },
+        "Expansion should create action chains that link scouting, fighting, and recovery"
+    )
+    require(universe.sectorControlSummaries.contains { $0.ownerID == universe.playerFactionID && $0.controlLevel >= 2 }, "Expansion should reward clustered colonies with sector control")
+    require(universe.tradeRoutes.contains { $0.ownerID == universe.playerFactionID && $0.status == .profitable }, "Expansion should suggest useful trade routes")
+    require(universe.deepIntelOperations.contains { $0.ownerID == universe.playerFactionID && $0.kind == .signalIntercept }, "Expansion should expose deep intel operations")
+    require(universe.fleetDoctrineSummaries.contains { $0.doctrine == .raiding || $0.doctrine == .expeditionary }, "Expansion should expose fleet doctrine choices")
+    require(universe.artifacts.contains { $0.kind == .ancientBlueprint || $0.kind == .logisticsRelic }, "Expansion should add discoverable artifacts")
+    require(universe.crisisState?.kind == .pirateWarlord, "Late-game expansion should spawn a crisis once the universe matures")
+}
+
+func testStrategicAdvisorSurfacesExpansionOpportunities() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    GameplayExpansionEngine.refresh(in: &universe)
+
+    let recommendations = StrategicAdvisorEngine.recommendations(in: universe, limit: 12)
+    let kinds = Set(recommendations.map(\.kind))
+
+    require(kinds.contains(.sectorEvent), "Advisor should surface active sector events")
+    require(kinds.contains(.hostileSite), "Advisor should surface PVE hostile targets")
+    require(kinds.contains(.actionChain), "Advisor should surface action chains")
+    require(kinds.contains(.tradeRoute), "Advisor should surface profitable trade routes")
+    require(kinds.contains(.deepIntel), "Advisor should surface deep intel opportunities")
+    require(kinds.contains(.artifact), "Advisor should surface artifact choices")
+    require(kinds.contains(.crisis), "Advisor should surface active crises")
+}
+
+func testGameplayExpansionStateRoundTripsThroughJSON() throws {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    GameplayExpansionEngine.refresh(in: &universe)
+
+    let data = try JSONEncoder().encode(universe)
+    let decoded = try JSONDecoder().decode(Universe.self, from: data)
+
+    requireEqual(decoded.sectorEvents, universe.sectorEvents, "Sector events should survive JSON round trip")
+    requireEqual(decoded.hostileSites, universe.hostileSites, "Hostile sites should survive JSON round trip")
+    requireEqual(decoded.actionChains, universe.actionChains, "Action chains should survive JSON round trip")
+    requireEqual(decoded.sectorControlSummaries, universe.sectorControlSummaries, "Sector control should survive JSON round trip")
+    requireEqual(decoded.tradeRoutes, universe.tradeRoutes, "Trade routes should survive JSON round trip")
+    requireEqual(decoded.deepIntelOperations, universe.deepIntelOperations, "Deep intel operations should survive JSON round trip")
+    requireEqual(decoded.fleetDoctrineSummaries, universe.fleetDoctrineSummaries, "Fleet doctrine summaries should survive JSON round trip")
+    requireEqual(decoded.artifacts, universe.artifacts, "Artifacts should survive JSON round trip")
+    requireEqual(decoded.crisisState, universe.crisisState, "Crisis state should survive JSON round trip")
 }
 
 func testStarterUniverseProvidesServiceStyleColonyPool() {
@@ -1541,6 +1608,48 @@ func makeStrategicUniverse(
         ruleSet: .fastSkirmish,
         victoryState: VictoryState(exploredPlanetIDs: exploredIDs)
     )
+}
+
+func makeExpansionUniverse(gameTime: TimeInterval = 9_000) -> Universe {
+    var universe = makeStrategicUniverse(
+        playerTechnology: [.computer: 4, .energy: 3, .espionage: 3, .weapons: 3, .shielding: 2, .armor: 2, .combustionDrive: 2, .impulseDrive: 2],
+        playerPlanetCount: 3,
+        aiPlanetCount: 2,
+        neutralPlanetCount: 4,
+        exploredNeutralPlanetCount: 2,
+        playerResources: ResourceBundle(metal: 80_000, crystal: 50_000, deuterium: 20_000)
+    )
+    universe.gameTime = gameTime
+    universe.planets[1].coordinate = Coordinate(galaxy: 1, system: 1, position: 6)
+    universe.planets[2].coordinate = Coordinate(galaxy: 1, system: 1, position: 8)
+    universe.planets[0].shipInventory[.recycler] = 2
+    universe.planets[0].shipInventory[.cruiser] = 4
+    universe.planets[0].shipInventory[.espionageProbe] = 3
+    universe.planets[0].moon = Moon(
+        name: "Luna",
+        createdAt: 7_500,
+        buildingLevels: [.lunarBase: 2, .sensorPhalanx: 1, .jumpGate: 1]
+    )
+    universe.reports.append(
+        Report(
+            id: UUID(uuidString: "00000000-0000-0000-0000-0000000005aa")!,
+            time: 7_200,
+            kind: .battle,
+            title: "Skirmish",
+            summary: "Player cleared a raider screen.",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: strategicPlanetID(1), name: "Strategist", beforeShips: [.cruiser: 4], afterShips: [.cruiser: 3]),
+                ReportParticipant(role: .defender, factionID: strategicAIID(), planetID: strategicPlanetID(21), name: "Rival", beforeShips: [.lightFighter: 4], afterShips: [:])
+            ],
+            loot: ResourceBundle(metal: 2_000, crystal: 1_000),
+            debris: ResourceBundle(metal: 8_000, crystal: 4_000),
+            battleRounds: [
+                BattleRoundSummary(round: 1, attackerPower: 1_200, defenderPower: 400, rapidFireShots: 2, shieldDamage: 300, hullDamage: 600, explodedUnits: 2)
+            ]
+        )
+    )
+    StrategicEngine.updateStrategicState(in: &universe)
+    return universe
 }
 
 func requireStrategicScore(_ rankings: [FactionScore], for factionID: FactionID) -> FactionScore {
@@ -6868,6 +6977,9 @@ testVictoryRoutePlansExposeCompositeCheckpoints()
 testAIIntentSummariesExposeActionPlans()
 testMidgamePlayerObjectivesExposeStrategyDepth()
 testStrategicAdvisorRecommendsVictoryRouteAndAIThreat()
+testGameplayExpansionRefreshCreatesThreePhaseGameplayLoops()
+testStrategicAdvisorSurfacesExpansionOpportunities()
+try testGameplayExpansionStateRoundTripsThroughJSON()
 testStarterUniverseProvidesServiceStyleColonyPool()
 testServiceStyleMoonChanceUsesDebrisThresholdAndCap()
 testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized()

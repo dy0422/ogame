@@ -2,6 +2,13 @@ import Foundation
 
 public struct StrategicAdvisorRecommendation: Equatable, Identifiable, Sendable {
     public enum Kind: String, CaseIterable, Hashable, Sendable {
+        case crisis
+        case hostileSite
+        case sectorEvent
+        case actionChain
+        case tradeRoute
+        case deepIntel
+        case artifact
         case victoryRoute
         case aiThreat
         case energyDeficit
@@ -85,6 +92,7 @@ public enum StrategicAdvisorEngine {
         let playerFaction = universe.factions.first { $0.id == universe.playerFactionID }
 
         recommendations.append(contentsOf: strategicRouteRecommendations(playerFaction: playerFaction, universe: universe))
+        recommendations.append(contentsOf: expansionRecommendations(universe: universe))
         recommendations.append(contentsOf: economyRecommendations(for: playerPlanets, playerFaction: playerFaction, universe: universe))
         recommendations.append(contentsOf: queueRecommendations(for: playerPlanets, playerFaction: playerFaction, universe: universe))
         recommendations.append(contentsOf: fleetLoopRecommendations(for: playerPlanets, playerFaction: playerFaction, universe: universe))
@@ -137,6 +145,99 @@ public enum StrategicAdvisorEngine {
                     title: "AI 动向：\(threat.title)",
                     detail: threat.detail,
                     actionLabel: "查看关系"
+                )
+            )
+        }
+
+        return recommendations
+    }
+
+    private static func expansionRecommendations(universe: Universe) -> [StrategicAdvisorRecommendation] {
+        var recommendations: [StrategicAdvisorRecommendation] = []
+
+        if let crisis = universe.crisisState {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .crisis,
+                    priority: crisis.phase == .escalating ? .critical : .warning,
+                    title: "危机：\(crisis.title)",
+                    detail: "\(crisis.detail) 当前进度 \(whole(crisis.progress * 100))%。",
+                    actionLabel: "查看舰队"
+                )
+            )
+        }
+
+        if let hostile = universe.hostileSites.sorted(by: { $0.threatLevel > $1.threatLevel }).first {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .hostileSite,
+                    priority: .warning,
+                    title: "PVE 目标：\(hostile.name)",
+                    detail: "威胁 \(hostile.threatLevel)，建议战力 \(whole(hostile.requiredPower))，奖励约 \(whole(hostile.reward.metal + hostile.reward.crystal + hostile.reward.deuterium)) 资源。",
+                    actionLabel: "准备打击",
+                    targetCoordinate: hostile.coordinate
+                )
+            )
+        }
+
+        if let event = universe.sectorEvents.sorted(by: { $0.expiresAt < $1.expiresAt }).first {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .sectorEvent,
+                    priority: event.riskModifier > 0 ? .warning : .opportunity,
+                    title: "星区事件：\(event.title)",
+                    detail: "\(event.detail) 坐标 \(event.coordinate.displayText)，剩余 \(whole(event.expiresAt - universe.gameTime)) 秒。",
+                    actionLabel: "查看星图",
+                    targetCoordinate: event.coordinate
+                )
+            )
+        }
+
+        if let chain = universe.actionChains.sorted(by: { $0.expiresAt < $1.expiresAt }).first {
+            let nextStep = chain.steps.first { $0.status != .complete }?.title ?? "领取奖励"
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .actionChain,
+                    priority: .opportunity,
+                    title: "行动链：\(chain.title)",
+                    detail: "下一步：\(nextStep)。完成后可获得 \(whole(chain.reward.metal + chain.reward.crystal + chain.reward.deuterium)) 资源。",
+                    actionLabel: "查看任务"
+                )
+            )
+        }
+
+        if let route = universe.tradeRoutes.first(where: { $0.ownerID == universe.playerFactionID }) {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .tradeRoute,
+                    priority: route.status == .profitable ? .opportunity : .warning,
+                    title: "贸易线：\(route.title)",
+                    detail: "预估流量 \(whole(route.resourceFlow.metal + route.resourceFlow.crystal + route.resourceFlow.deuterium))，风险 \(whole(route.riskLevel * 100))%。",
+                    actionLabel: "查看星球"
+                )
+            )
+        }
+
+        if let intel = universe.deepIntelOperations.first(where: { $0.ownerID == universe.playerFactionID }) {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .deepIntel,
+                    priority: intel.riskLevel >= 0.4 ? .warning : .opportunity,
+                    title: "深度情报：\(intel.title)",
+                    detail: "\(intel.detail) 风险 \(whole(intel.riskLevel * 100))%。",
+                    actionLabel: "查看关系"
+                )
+            )
+        }
+
+        if let artifact = universe.artifacts.sorted(by: { $0.unlockedAt > $1.unlockedAt }).first {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .artifact,
+                    priority: .opportunity,
+                    title: "遗物：\(artifact.title)",
+                    detail: artifact.effect,
+                    actionLabel: "查看胜利"
                 )
             )
         }
@@ -481,7 +582,7 @@ public enum StrategicAdvisorEngine {
     }
 
     private static func whole(_ value: Double) -> String {
-        guard value.isFinite else {
+        guard value.isFinite, abs(value) <= Double(Int.max) else {
             return "未知"
         }
         return String(Int(value.rounded()))

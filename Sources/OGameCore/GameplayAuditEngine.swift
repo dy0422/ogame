@@ -29,6 +29,7 @@ public struct GameplayAuditResult: Equatable, Sendable {
     public var routePlans: [VictoryRoutePlan]
     public var aiIntents: [AIIntentSummary]
     public var auditNotes: [GameplayAuditNote]
+    public var expansionSignalCount: Int
 
     public init(
         usedGuidedFixtures: Bool,
@@ -36,7 +37,8 @@ public struct GameplayAuditResult: Equatable, Sendable {
         advisorRecommendationKinds: [StrategicAdvisorRecommendation.Kind],
         routePlans: [VictoryRoutePlan],
         aiIntents: [AIIntentSummary],
-        auditNotes: [GameplayAuditNote]
+        auditNotes: [GameplayAuditNote],
+        expansionSignalCount: Int
     ) {
         self.usedGuidedFixtures = usedGuidedFixtures
         self.balance = balance
@@ -44,6 +46,7 @@ public struct GameplayAuditResult: Equatable, Sendable {
         self.routePlans = routePlans
         self.aiIntents = aiIntents
         self.auditNotes = auditNotes
+        self.expansionSignalCount = max(expansionSignalCount, 0)
     }
 }
 
@@ -85,13 +88,21 @@ public enum GameplayAuditEngine {
 
         let plans = VictoryRoutePlanEngine.plans(for: universe.playerFactionID, in: universe)
         let aiIntents = AIIntentEngine.intentSummaries(in: universe)
+        let expansionSignalCount = universe.sectorEvents.count +
+            universe.hostileSites.count +
+            universe.actionChains.count +
+            universe.tradeRoutes.count +
+            universe.deepIntelOperations.count +
+            universe.artifacts.count +
+            (universe.crisisState == nil ? 0 : 1)
         return GameplayAuditResult(
             usedGuidedFixtures: false,
             balance: result,
             advisorRecommendationKinds: sampledRecommendationKinds.uniqued(),
             routePlans: plans,
             aiIntents: aiIntents,
-            auditNotes: notes(for: result, plans: plans, aiIntents: aiIntents, recommendationKinds: sampledRecommendationKinds.uniqued())
+            auditNotes: notes(for: result, plans: plans, aiIntents: aiIntents, recommendationKinds: sampledRecommendationKinds.uniqued()),
+            expansionSignalCount: expansionSignalCount
         )
     }
 
