@@ -9,6 +9,7 @@ public enum FleetLaunchFailure: Equatable, Sendable {
     case insufficientFuel
     case invalidMission
     case fleetSlotLimit
+    case commanderUnavailable
 }
 
 public enum FleetLaunchResult: Equatable, Sendable {
@@ -45,7 +46,8 @@ public enum FleetEngine {
         ships requestedShips: [ShipKind: Int],
         cargo: ResourceBundle = .zero,
         speedPercent: Double = 1,
-        holdDuration: TimeInterval = 900
+        holdDuration: TimeInterval = 900,
+        commanderID: CommanderID? = nil
     ) -> FleetLaunchResult {
         guard let originIndex = universe.planets.firstIndex(where: { $0.id == originPlanetID }) else {
             return .failure(.missingOrigin)
@@ -69,6 +71,10 @@ public enum FleetEngine {
         guard activeFleetCount < TechnologyEffects.maxFleetSlots(for: ownerResearch) else {
             return .failure(.fleetSlotLimit)
         }
+        guard commanderIsAvailable(commanderID, ownerID: ownerID, in: universe) else {
+            return .failure(.commanderUnavailable)
+        }
+        let commanderBonus = CommanderBonusEngine.fleetBonus(for: commanderID, in: universe)
         let speedPercent = normalizedSpeedPercent(speedPercent)
 
         let ships = normalizedShips(requestedShips)
@@ -107,7 +113,8 @@ public enum FleetEngine {
             ships: ships,
             ruleSet: universe.ruleSet,
             research: ownerResearch,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderBonus: commanderBonus
         )
         guard fuel.isFinite, fuel >= 0 else {
             return .failure(.invalidMission)
@@ -124,7 +131,8 @@ public enum FleetEngine {
             ships: ships,
             ruleSet: universe.ruleSet,
             research: ownerResearch,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderBonus: commanderBonus
         )
         guard universe.gameTime.isFinite, travelTime.isFinite, travelTime > 0 else {
             return .failure(.invalidMission)
@@ -181,7 +189,8 @@ public enum FleetEngine {
             phase: .outbound,
             originPlanetID: originPlanetID,
             targetPlanetID: targetPlanetID,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderID: commanderID
         )
 
         universe.fleets.append(fleet)
@@ -346,7 +355,8 @@ public enum FleetEngine {
         ships: [ShipKind: Int],
         ruleSet: RuleSet,
         research: ResearchState = ResearchState(),
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        commanderBonus: CommanderFleetBonus = .none
     ) -> TimeInterval {
         let normalized = normalizedShips(ships)
         guard !normalized.isEmpty else {
@@ -358,7 +368,8 @@ public enum FleetEngine {
                 return nil
             }
 
-            return TechnologyEffects.effectiveSpeed(for: kind, baseSpeed: baseSpeed, research: research)
+            return TechnologyEffects.effectiveSpeed(for: kind, baseSpeed: baseSpeed, research: research) *
+                commanderBonus.speedMultiplier
         }.min() ?? 0
         guard slowestSpeed.isFinite, slowestSpeed > 0 else {
             return 0
@@ -383,7 +394,8 @@ public enum FleetEngine {
         ships: [ShipKind: Int],
         ruleSet: RuleSet,
         research: ResearchState = ResearchState(),
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        commanderBonus: CommanderFleetBonus = .none
     ) -> Double {
         let normalized = normalizedShips(ships)
         guard !normalized.isEmpty else {
@@ -413,7 +425,7 @@ public enum FleetEngine {
 
         let speed = normalizedSpeedPercent(speedPercent)
         let speedFuelMultiplier = 0.35 + pow(speed, 2) * 0.65
-        return ceil((distance / 1_000) * baseCost * speedFuelMultiplier)
+        return ceil((distance / 1_000) * baseCost * speedFuelMultiplier * commanderBonus.fuelMultiplier)
     }
 
     public static func recallFleet(_ fleetID: FleetID, ownerID: FactionID, in universe: inout Universe) -> Bool {
@@ -552,7 +564,13 @@ public enum FleetEngine {
                 universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .system, title: "Debris Recovered"))
             }
         case .explore:
-            let outcome = ExplorationEventEngine.resolve(fleet: fleet, universe: universe)
+            let commanderBonus = CommanderBonusEngine.fleetBonus(for: fleet.commanderID, in: universe)
+            var outcome = ExplorationEventEngine.resolve(
+                fleet: fleet,
+                universe: universe,
+                riskModifier: commanderBonus.expeditionRiskModifier
+            )
+            outcome.reward = scaled(outcome.reward, by: commanderBonus.expeditionRewardMultiplier)
             returningFleet.cargo = safeAdding(fleet.cargo, outcome.reward)
             returningFleet.ships = applyExplorationShipOutcome(outcome, to: returningFleet.ships)
             returningFleet.returnTime = adjustedExplorationReturnTime(for: returningFleet, outcome: outcome)
@@ -560,6 +578,7 @@ public enum FleetEngine {
                 universe.reports.append(explorationReport(for: fleet, record: record, in: universe))
             }
             universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .exploration, title: "Exploration \(outcome.kind.rawValue)"))
+            CommanderGrowthEngine.addExperience(explorationExperience(for: outcome), to: fleet.commanderID, in: &universe)
             if returningFleet.ships.isEmpty {
                 return nil
             }
@@ -901,6 +920,20 @@ public enum FleetEngine {
         }
 
         return faction.ownedPlanetIDs.count < TechnologyEffects.maxColonies(for: faction.technology)
+    }
+
+    private static func commanderIsAvailable(_ commanderID: CommanderID?, ownerID: FactionID, in universe: Universe) -> Bool {
+        guard let commanderID else {
+            return true
+        }
+        guard universe.commanderRoster.ownedCommanders.contains(where: { $0.id == commanderID }) else {
+            return false
+        }
+        return !universe.fleets.contains { fleet in
+            fleet.ownerID == ownerID &&
+                fleet.phase != .completed &&
+                fleet.commanderID == commanderID
+        }
     }
 
     private static func normalizedShips(_ ships: [ShipKind: Int]) -> [ShipKind: Int] {
@@ -1258,6 +1291,26 @@ public enum FleetEngine {
         }
 
         return result
+    }
+
+    private static func scaled(_ resources: ResourceBundle, by multiplier: Double) -> ResourceBundle {
+        let safeMultiplier = multiplier.isFinite ? max(multiplier, 0) : 1
+        return ResourceBundle(
+            metal: max(resources.metal, 0) * safeMultiplier,
+            crystal: max(resources.crystal, 0) * safeMultiplier,
+            deuterium: max(resources.deuterium, 0) * safeMultiplier
+        )
+    }
+
+    private static func explorationExperience(for outcome: ExplorationOutcome) -> Double {
+        switch outcome.kind {
+        case .pirateAmbush, .alienEncounter:
+            return 40
+        case .blackHole:
+            return 60
+        default:
+            return 15
+        }
     }
 
     private static func isValidResources(_ resources: ResourceBundle) -> Bool {

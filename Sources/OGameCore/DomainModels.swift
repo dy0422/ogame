@@ -149,6 +149,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
     public var fleetDoctrineSummaries: [FleetDoctrineSummary]
     public var artifacts: [Artifact]
     public var crisisState: CrisisState?
+    public var commanderRoster: CommanderRoster
 
     public init(
         id: UniverseID = UniverseID(),
@@ -175,7 +176,8 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         deepIntelOperations: [DeepIntelOperation] = [],
         fleetDoctrineSummaries: [FleetDoctrineSummary] = [],
         artifacts: [Artifact] = [],
-        crisisState: CrisisState? = nil
+        crisisState: CrisisState? = nil,
+        commanderRoster: CommanderRoster = CommanderRoster()
     ) {
         self.id = id
         self.name = name
@@ -202,6 +204,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         self.fleetDoctrineSummaries = fleetDoctrineSummaries
         self.artifacts = artifacts
         self.crisisState = crisisState
+        self.commanderRoster = commanderRoster
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -230,6 +233,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         case fleetDoctrineSummaries
         case artifacts
         case crisisState
+        case commanderRoster
     }
 
     public init(from decoder: Decoder) throws {
@@ -260,6 +264,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         self.fleetDoctrineSummaries = try container.decodeIfPresentStrict([FleetDoctrineSummary].self, forKey: .fleetDoctrineSummaries) ?? []
         self.artifacts = try container.decodeIfPresentStrict([Artifact].self, forKey: .artifacts) ?? []
         self.crisisState = try container.decodeIfPresentStrict(CrisisState.self, forKey: .crisisState)
+        self.commanderRoster = try container.decodeIfPresentStrict(CommanderRoster.self, forKey: .commanderRoster) ?? CommanderRoster()
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -290,6 +295,7 @@ public struct Universe: Codable, Equatable, Sendable, Identifiable {
         try container.encode(fleetDoctrineSummaries, forKey: .fleetDoctrineSummaries)
         try container.encode(artifacts, forKey: .artifacts)
         try container.encodeIfPresent(crisisState, forKey: .crisisState)
+        try container.encode(commanderRoster, forKey: .commanderRoster)
     }
 }
 
@@ -824,6 +830,100 @@ public struct CrisisState: Codable, Equatable, Sendable, Identifiable {
         self.progress = progress.isFinite ? min(max(progress, 0), 1) : 0
         self.title = title
         self.detail = detail
+    }
+}
+
+public enum CommanderRarity: String, Codable, CaseIterable, Comparable, Sendable {
+    case common
+    case elite
+    case epic
+    case legendary
+
+    public static func < (lhs: CommanderRarity, rhs: CommanderRarity) -> Bool {
+        lhs.sortOrder < rhs.sortOrder
+    }
+
+    public var sortOrder: Int {
+        switch self {
+        case .common:
+            return 0
+        case .elite:
+            return 1
+        case .epic:
+            return 2
+        case .legendary:
+            return 3
+        }
+    }
+}
+
+public enum CommanderSpecialty: String, Codable, CaseIterable, Sendable {
+    case fleetAdmiral
+    case engineer
+    case geologist
+    case technocrat
+    case explorer
+}
+
+public struct OwnedCommander: Codable, Equatable, Sendable, Identifiable {
+    public var id: CommanderID
+    public var definitionID: String
+    public var rarity: CommanderRarity
+    public var level: Int
+    public var experience: Double
+    public var stars: Int
+    public var acquiredAt: TimeInterval
+
+    public init(
+        id: CommanderID = CommanderID(),
+        definitionID: String,
+        rarity: CommanderRarity,
+        level: Int = 1,
+        experience: Double = 0,
+        stars: Int = 0,
+        acquiredAt: TimeInterval
+    ) {
+        self.id = id
+        self.definitionID = definitionID
+        self.rarity = rarity
+        self.level = max(level, 1)
+        self.experience = experience.isFinite ? max(experience, 0) : 0
+        self.stars = min(max(stars, 0), 5)
+        self.acquiredAt = acquiredAt.isFinite ? max(acquiredAt, 0) : 0
+    }
+}
+
+public struct CommanderRecruitmentState: Codable, Equatable, Sendable {
+    public var totalPulls: Int
+    public var pullsSinceEliteOrBetter: Int
+    public var pullsSinceLegendary: Int
+
+    public init(totalPulls: Int = 0, pullsSinceEliteOrBetter: Int = 0, pullsSinceLegendary: Int = 0) {
+        self.totalPulls = max(totalPulls, 0)
+        self.pullsSinceEliteOrBetter = max(pullsSinceEliteOrBetter, 0)
+        self.pullsSinceLegendary = max(pullsSinceLegendary, 0)
+    }
+}
+
+public struct CommanderRoster: Codable, Equatable, Sendable {
+    public var ownedCommanders: [OwnedCommander]
+    public var recruitmentTickets: Int
+    public var trainingData: Int
+    public var shardsByDefinitionID: [String: Int]
+    public var recruitmentState: CommanderRecruitmentState
+
+    public init(
+        ownedCommanders: [OwnedCommander] = [],
+        recruitmentTickets: Int = 0,
+        trainingData: Int = 0,
+        shardsByDefinitionID: [String: Int] = [:],
+        recruitmentState: CommanderRecruitmentState = CommanderRecruitmentState()
+    ) {
+        self.ownedCommanders = ownedCommanders
+        self.recruitmentTickets = max(recruitmentTickets, 0)
+        self.trainingData = max(trainingData, 0)
+        self.shardsByDefinitionID = shardsByDefinitionID.filter { !$0.key.isEmpty && $0.value > 0 }
+        self.recruitmentState = recruitmentState
     }
 }
 
@@ -1534,6 +1634,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
     public var speedPercent: Double
     public var recalledAt: TimeInterval?
     public var originSite: OriginSite
+    public var commanderID: CommanderID?
 
     public init(
         id: FleetID = FleetID(),
@@ -1551,7 +1652,8 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         targetPlanetID: PlanetID? = nil,
         speedPercent: Double = 1,
         recalledAt: TimeInterval? = nil,
-        originSite: OriginSite = .planet
+        originSite: OriginSite = .planet,
+        commanderID: CommanderID? = nil
     ) {
         self.id = id
         self.ownerID = ownerID
@@ -1569,6 +1671,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         self.speedPercent = Self.normalizedSpeedPercent(speedPercent)
         self.recalledAt = recalledAt.flatMap(Self.normalizedOptionalTime)
         self.originSite = originSite
+        self.commanderID = commanderID
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -1588,6 +1691,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         case speedPercent
         case recalledAt
         case originSite
+        case commanderID
     }
 
     public init(from decoder: Decoder) throws {
@@ -1612,6 +1716,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         self.recalledAt = try container.decodeIfPresentStrict(TimeInterval.self, forKey: .recalledAt)
             .flatMap(Self.normalizedOptionalTime)
         self.originSite = try container.decodeIfPresentStrict(OriginSite.self, forKey: .originSite) ?? .planet
+        self.commanderID = try container.decodeIfPresentStrict(CommanderID.self, forKey: .commanderID)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -1633,6 +1738,7 @@ public struct Fleet: Codable, Equatable, Sendable, Identifiable {
         try container.encode(speedPercent, forKey: .speedPercent)
         try container.encodeIfPresent(recalledAt, forKey: .recalledAt)
         try container.encode(originSite, forKey: .originSite)
+        try container.encodeIfPresent(commanderID, forKey: .commanderID)
     }
 
     private static func normalizedSpeedPercent(_ value: Double) -> Double {

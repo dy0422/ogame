@@ -1,7 +1,7 @@
 import Foundation
 
 public enum ExplorationEventEngine {
-    public static func resolve(fleet: Fleet, universe: Universe) -> ExplorationOutcome {
+    public static func resolve(fleet: Fleet, universe: Universe, riskModifier: Double = 0) -> ExplorationOutcome {
         let payload = [
             "exploration-event",
             String(universe.seed),
@@ -12,7 +12,8 @@ public enum ExplorationEventEngine {
         ].joined(separator: "|")
         var generator = SeededGenerator(seed: stableHash(payload))
         let capacity = availableCargoCapacity(for: fleet, ruleSet: universe.ruleSet)
-        let roll = generator.nextInt(in: 0...99)
+        let riskShift = riskModifier.isFinite ? Int((riskModifier * 100).rounded()) : 0
+        let roll = min(max(generator.nextInt(in: 0...99) + riskShift, 0), 99)
 
         switch roll {
         case 0..<32:

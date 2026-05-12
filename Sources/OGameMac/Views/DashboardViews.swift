@@ -73,6 +73,8 @@ struct StrategicAdvisorPanel: View {
             model.selectedDestination = .relations
         case .artifact:
             model.selectedDestination = .victory
+        case .commanderRecruitment, .commanderTraining, .commanderAssignment:
+            model.selectedDestination = .commanders
         case .victoryRoute:
             model.selectedDestination = .victory
         case .aiThreat:
@@ -302,6 +304,12 @@ private extension StrategicAdvisorRecommendation.Kind {
             return "antenna.radiowaves.left.and.right"
         case .artifact:
             return "shippingbox.and.arrow.backward"
+        case .commanderRecruitment:
+            return "person.crop.circle.badge.plus"
+        case .commanderTraining:
+            return "arrow.up.forward.circle"
+        case .commanderAssignment:
+            return "person.crop.rectangle.stack"
         case .victoryRoute:
             return "flag.checkered"
         case .aiThreat:

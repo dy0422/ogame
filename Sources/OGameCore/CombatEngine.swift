@@ -29,6 +29,7 @@ public enum CombatEngine {
         let defenderFaction = universe.planets[targetIndex].ownerID.flatMap { faction(for: $0, in: universe) }
         let attackerTech = attackerFaction?.technology ?? ResearchState()
         let defenderTech = defenderFaction?.technology ?? ResearchState()
+        let attackerCommanderBonus = CommanderBonusEngine.fleetBonus(for: fleet.commanderID, in: universe)
         let attackerBeforeShips = normalizedShips(fleet.ships)
         let defenderBeforeShips = normalizedShips(universe.planets[targetIndex].shipInventory)
         let defenderBeforeDefenses = normalizedDefenses(universe.planets[targetIndex].defenseInventory)
@@ -61,7 +62,8 @@ public enum CombatEngine {
                 attackerResearch: attackerTech,
                 defenderResearch: defenderTech,
                 ruleSet: universe.ruleSet,
-                seed: stableHash(fleet.id.rawValue.uuidString)
+                seed: stableHash(fleet.id.rawValue.uuidString),
+                attackerCommanderBonus: attackerCommanderBonus
             )
         )
         let attackerAfterShips = simulation.remainingAttackerShips
@@ -152,6 +154,8 @@ public enum CombatEngine {
             battleRounds: simulation.rounds
         )
         universe.reports.append(report)
+        let commanderXP = max(25, (attackerLosses.totalAmount + defenderLosses.totalAmount) / 500)
+        CommanderGrowthEngine.addExperience(commanderXP, to: fleet.commanderID, in: &universe)
         createMoonIfEligible(
             targetIndex: targetIndex,
             reportID: reportID,
@@ -242,6 +246,7 @@ public enum CombatEngine {
         let attackerShips = normalizedShips(fleet.ships)
         let defenderShips = normalizedShips(universe.planets[targetIndex].shipInventory)
         let defenderDefenses = normalizedDefenses(universe.planets[targetIndex].defenseInventory)
+        let attackerCommanderBonus = CommanderBonusEngine.fleetBonus(for: fleet.commanderID, in: universe)
 
         return BattleSimulationEngine.resolve(
             BattleSimulationInput(
@@ -251,7 +256,8 @@ public enum CombatEngine {
                 attackerResearch: attackerFaction?.technology ?? ResearchState(),
                 defenderResearch: defenderFaction?.technology ?? ResearchState(),
                 ruleSet: universe.ruleSet,
-                seed: stableHash(fleet.id.rawValue.uuidString)
+                seed: stableHash(fleet.id.rawValue.uuidString),
+                attackerCommanderBonus: attackerCommanderBonus
             )
         )
     }

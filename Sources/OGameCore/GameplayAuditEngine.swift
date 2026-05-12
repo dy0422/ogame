@@ -30,6 +30,7 @@ public struct GameplayAuditResult: Equatable, Sendable {
     public var aiIntents: [AIIntentSummary]
     public var auditNotes: [GameplayAuditNote]
     public var expansionSignalCount: Int
+    public var commanderSignalCount: Int
 
     public init(
         usedGuidedFixtures: Bool,
@@ -38,7 +39,8 @@ public struct GameplayAuditResult: Equatable, Sendable {
         routePlans: [VictoryRoutePlan],
         aiIntents: [AIIntentSummary],
         auditNotes: [GameplayAuditNote],
-        expansionSignalCount: Int
+        expansionSignalCount: Int,
+        commanderSignalCount: Int
     ) {
         self.usedGuidedFixtures = usedGuidedFixtures
         self.balance = balance
@@ -47,6 +49,7 @@ public struct GameplayAuditResult: Equatable, Sendable {
         self.aiIntents = aiIntents
         self.auditNotes = auditNotes
         self.expansionSignalCount = max(expansionSignalCount, 0)
+        self.commanderSignalCount = max(commanderSignalCount, 0)
     }
 }
 
@@ -95,6 +98,9 @@ public enum GameplayAuditEngine {
             universe.deepIntelOperations.count +
             universe.artifacts.count +
             (universe.crisisState == nil ? 0 : 1)
+        let commanderSignalCount = universe.commanderRoster.ownedCommanders.count +
+            universe.commanderRoster.recruitmentTickets +
+            universe.commanderRoster.trainingData / 100
         return GameplayAuditResult(
             usedGuidedFixtures: false,
             balance: result,
@@ -102,7 +108,8 @@ public enum GameplayAuditEngine {
             routePlans: plans,
             aiIntents: aiIntents,
             auditNotes: notes(for: result, plans: plans, aiIntents: aiIntents, recommendationKinds: sampledRecommendationKinds.uniqued()),
-            expansionSignalCount: expansionSignalCount
+            expansionSignalCount: expansionSignalCount,
+            commanderSignalCount: commanderSignalCount
         )
     }
 

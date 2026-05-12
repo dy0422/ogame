@@ -8,6 +8,8 @@ public struct BattleSimulationInput: Equatable, Sendable {
     public var defenderResearch: ResearchState
     public var ruleSet: RuleSet
     public var seed: UInt64
+    public var attackerCommanderBonus: CommanderFleetBonus
+    public var defenderCommanderBonus: CommanderFleetBonus
 
     public init(
         attackerShips: [ShipKind: Int],
@@ -16,7 +18,9 @@ public struct BattleSimulationInput: Equatable, Sendable {
         attackerResearch: ResearchState,
         defenderResearch: ResearchState,
         ruleSet: RuleSet,
-        seed: UInt64
+        seed: UInt64,
+        attackerCommanderBonus: CommanderFleetBonus = .none,
+        defenderCommanderBonus: CommanderFleetBonus = .none
     ) {
         self.attackerShips = attackerShips
         self.defenderShips = defenderShips
@@ -25,6 +29,8 @@ public struct BattleSimulationInput: Equatable, Sendable {
         self.defenderResearch = defenderResearch
         self.ruleSet = ruleSet
         self.seed = seed
+        self.attackerCommanderBonus = attackerCommanderBonus
+        self.defenderCommanderBonus = defenderCommanderBonus
     }
 }
 
@@ -172,8 +178,8 @@ public enum BattleSimulationEngine {
 
     private static func combatUnits(for input: BattleSimulationInput) -> [CombatUnit] {
         var units: [CombatUnit] = []
-        appendShips(input.attackerShips, side: .attacker, research: input.attackerResearch, ruleSet: input.ruleSet, to: &units)
-        appendShips(input.defenderShips, side: .defender, research: input.defenderResearch, ruleSet: input.ruleSet, to: &units)
+        appendShips(input.attackerShips, side: .attacker, research: input.attackerResearch, ruleSet: input.ruleSet, commanderBonus: input.attackerCommanderBonus, to: &units)
+        appendShips(input.defenderShips, side: .defender, research: input.defenderResearch, ruleSet: input.ruleSet, commanderBonus: input.defenderCommanderBonus, to: &units)
         appendDefenses(input.defenderDefenses, side: .defender, research: input.defenderResearch, ruleSet: input.ruleSet, to: &units)
         return units
     }
@@ -183,6 +189,7 @@ public enum BattleSimulationEngine {
         side: Side,
         research: ResearchState,
         ruleSet: RuleSet,
+        commanderBonus: CommanderFleetBonus,
         to units: inout [CombatUnit]
     ) {
         let attackMultiplier = multiplier(for: .weapons, research: research)
@@ -198,11 +205,11 @@ public enum BattleSimulationEngine {
             let unit = CombatUnit(
                 side: side,
                 kind: .ship(kind),
-                attack: safe(rule.attack) * attackMultiplier,
-                maxShield: safe(rule.shield) * shieldMultiplier,
-                shield: safe(rule.shield) * shieldMultiplier,
-                maxHull: combatHull(rule.hull, multiplier: hullMultiplier),
-                hull: combatHull(rule.hull, multiplier: hullMultiplier),
+                attack: safe(rule.attack) * attackMultiplier * commanderBonus.attackMultiplier,
+                maxShield: safe(rule.shield) * shieldMultiplier * commanderBonus.shieldMultiplier,
+                shield: safe(rule.shield) * shieldMultiplier * commanderBonus.shieldMultiplier,
+                maxHull: combatHull(rule.hull, multiplier: hullMultiplier * commanderBonus.hullMultiplier),
+                hull: combatHull(rule.hull, multiplier: hullMultiplier * commanderBonus.hullMultiplier),
                 isDestroyed: false
             )
             units.append(contentsOf: Array(repeating: unit, count: quantity))

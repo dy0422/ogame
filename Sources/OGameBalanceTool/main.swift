@@ -26,7 +26,7 @@ struct OGameBalanceTool {
         let auditMinutes = durations.max() ?? 240
         print("")
         print("Autoplay gameplay audit")
-        print("seed,difficulty,minutes,used_guided_fixtures,first_ship,first_fleet,first_espionage,first_exploration,first_conflict,first_colony,victory_at,expansion_signals,advisor_kinds,route_progress,route_next,ai_intents,notes")
+        print("seed,difficulty,minutes,used_guided_fixtures,first_ship,first_fleet,first_espionage,first_exploration,first_conflict,first_colony,victory_at,expansion_signals,commander_signals,advisor_kinds,route_progress,route_next,ai_intents,notes")
         for difficulty in GameSettings.Difficulty.allCases {
             let audit = GameplayAuditEngine.runAutoplayAudit(
                 seed: 1,
@@ -135,6 +135,7 @@ struct OGameBalanceTool {
             whole(audit.balance.firstColonizationAt),
             whole(audit.balance.victoryAt),
             String(audit.expansionSignalCount),
+            String(audit.commanderSignalCount),
             advisorKinds,
             routeProgress,
             routeNext,

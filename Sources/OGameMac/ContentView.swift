@@ -27,6 +27,7 @@ struct ContentView: View {
 enum SidebarDestination: Hashable {
     case dashboard
     case fleets
+    case commanders
     case starMap
     case rankings
     case victory
@@ -49,6 +50,9 @@ private struct SidebarView: View {
 
                 Label("舰队", systemImage: "paperplane")
                     .tag(SidebarDestination.fleets)
+
+                Label("指挥官", systemImage: "person.crop.rectangle.stack")
+                    .tag(SidebarDestination.commanders)
 
                 Label("研究", systemImage: "atom")
                     .tag(SidebarDestination.research)
@@ -185,6 +189,8 @@ private struct DetailView: View {
             }
         case .fleets:
             FleetOverviewView(model: model)
+        case .commanders:
+            CommanderOverviewView(model: model)
         case .starMap:
             StarMapView(model: model)
         case .rankings:
@@ -2253,12 +2259,189 @@ private struct QuantityStepper: View {
     }
 }
 
+private struct CommanderOverviewView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        GamePage(title: "指挥官", model: model) {
+            CommanderRecruitmentPanel(model: model)
+            CommanderRosterPanel(model: model)
+        }
+        .navigationTitle("指挥官")
+    }
+}
+
+private struct CommanderRecruitmentPanel: View {
+    @ObservedObject var model: AppModel
+
+    private var preview: CommanderRecruitmentPreview {
+        model.commanderRecruitmentPreview
+    }
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 16) {
+                SectionTitle(title: "招募", detail: "\(preview.tickets) 张招募令")
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    StrategicMetric(title: "已拥有", value: "\(preview.ownedCount)")
+                    StrategicMetric(title: "训练数据", value: "\(preview.trainingData)")
+                    StrategicMetric(title: "累计招募", value: "\(preview.totalPulls)")
+                    StrategicMetric(title: "传奇保底", value: preview.legendaryPityText)
+                }
+
+                Label(preview.eliteGuaranteeText, systemImage: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                HStack(spacing: 10) {
+                    Button {
+                        model.recruitCommanders(count: 1)
+                    } label: {
+                        Label("招募一次", systemImage: "person.crop.circle.badge.plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(preview.tickets < 1)
+
+                    Button {
+                        model.recruitCommanders(count: 10)
+                    } label: {
+                        Label("招募十次", systemImage: "person.3.sequence")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(preview.tickets < 10)
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct CommanderRosterPanel: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionTitle(title: "名册", detail: "\(model.commanderSummaries.count) 名")
+
+                if model.commanderSummaries.isEmpty {
+                    QueueEmptyLine(title: "尚未招募指挥官", systemImage: "person.crop.rectangle.stack")
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(model.commanderSummaries) { commander in
+                            CommanderRow(summary: commander, model: model)
+
+                            if commander.id != model.commanderSummaries.last?.id {
+                                Divider()
+                                    .padding(.leading, 52)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct CommanderRow: View {
+    let summary: CommanderSummary
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "person.crop.square")
+                .font(.title2)
+                .foregroundStyle(summary.rarity.tint)
+                .frame(width: 40, height: 40)
+                .background(summary.rarity.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(summary.name)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    Text(summary.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Text(summary.rarityText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(summary.rarity.tint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(summary.rarity.tint.opacity(0.12), in: Capsule())
+                }
+
+                Text(summary.bonusText)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(summary.lore)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 120), alignment: .leading)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    StrategicMetric(title: "等级", value: "\(summary.level)/\(summary.levelCap)")
+                    StrategicMetric(title: "星级", value: summary.starText)
+                    StrategicMetric(title: "碎片", value: "\(summary.shards)/\(summary.nextStarCost ?? 0)")
+                    StrategicMetric(title: "状态", value: summary.assignmentText)
+                    StrategicMetric(title: "定位", value: summary.specialtyText)
+                }
+
+                ProgressView(value: summary.experienceProgress) {
+                    Text("经验 \(summary.experienceText)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .tint(summary.rarity.tint)
+
+                HStack(spacing: 10) {
+                    Button {
+                        model.trainCommander(summary.id)
+                    } label: {
+                        Label("训练", systemImage: "arrow.up.forward.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!summary.canTrain)
+
+                    Button {
+                        model.promoteCommander(summary.id)
+                    } label: {
+                        Label("升星", systemImage: "star.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!summary.canPromote)
+                }
+            }
+        }
+        .padding(.vertical, 12)
+    }
+}
+
 private struct FleetOverviewView: View {
     @ObservedObject var model: AppModel
     @State private var originID: PlanetID?
     @State private var targetID: PlanetID?
     @State private var mission: Fleet.Mission = .transport
     @State private var selectedShips: [ShipKind: Int] = [:]
+    @State private var commanderID: CommanderID?
     @State private var metalCargo = 0.0
     @State private var crystalCargo = 0.0
     @State private var deuteriumCargo = 0.0
@@ -2287,6 +2470,12 @@ private struct FleetOverviewView: View {
         model.fleetTargetStateSignature(targetID: targetID)
     }
 
+    private var commanderAvailabilitySignature: String {
+        model.availableCommandersForFleet
+            .map { "\($0.id.rawValue.uuidString):\($0.level):\($0.stars)" }
+            .joined(separator: "|")
+    }
+
     var body: some View {
         GamePage(title: "舰队", model: model) {
             FleetDispatchPanel(
@@ -2299,6 +2488,7 @@ private struct FleetOverviewView: View {
                 crystalCargo: $crystalCargo,
                 deuteriumCargo: $deuteriumCargo,
                 speedPercent: $speedPercent,
+                commanderID: $commanderID,
                 launchCargo: launchCargo
             )
 
@@ -2320,6 +2510,9 @@ private struct FleetOverviewView: View {
             synchronizeFleetSelection()
         }
         .onChange(of: targetStateSignature) { _ in
+            synchronizeFleetSelection()
+        }
+        .onChange(of: commanderAvailabilitySignature) { _ in
             synchronizeFleetSelection()
         }
         .onChange(of: metalCargo) { value in
@@ -2351,6 +2544,7 @@ private struct FleetOverviewView: View {
         }
 
         clampShipSelection()
+        clampCommanderSelection()
 
         if !model.isMissionAvailable(mission, originID: originID, targetID: targetID, ships: selectedShips) {
             mission = model.firstAvailableMission(originID: originID, targetID: targetID, ships: selectedShips) ?? .transport
@@ -2379,6 +2573,17 @@ private struct FleetOverviewView: View {
             selectedShips = clampedShips
         }
     }
+
+    private func clampCommanderSelection() {
+        guard let commanderID,
+              model.availableCommandersForFleet.contains(where: { $0.id == commanderID })
+        else {
+            if commanderID != nil {
+                self.commanderID = nil
+            }
+            return
+        }
+    }
 }
 
 private struct FleetDispatchPanel: View {
@@ -2391,6 +2596,7 @@ private struct FleetDispatchPanel: View {
     @Binding var crystalCargo: Double
     @Binding var deuteriumCargo: Double
     @Binding var speedPercent: Double
+    @Binding var commanderID: CommanderID?
     @State private var missileCount = 1
     let launchCargo: ResourceBundle
 
@@ -2448,6 +2654,8 @@ private struct FleetDispatchPanel: View {
                         .labelsHidden()
                         .frame(maxWidth: .infinity)
                     }
+
+                    CommanderPicker(model: model, selection: $commanderID)
                 }
 
                 FleetShipSelector(origin: origin, model: model, selectedShips: $selectedShips)
@@ -2469,7 +2677,8 @@ private struct FleetDispatchPanel: View {
                     cargo: launchCargo,
                     cargoUsed: cargoUsed,
                     cargoCapacity: cargoCapacity,
-                    speedPercent: speedPercent
+                    speedPercent: speedPercent,
+                    commanderID: commanderID
                 )
 
                 if model.canShowMissileStrikeControls(originID: originID) {
@@ -2492,7 +2701,8 @@ private struct FleetDispatchPanel: View {
                             mission: mission,
                             ships: selectedShips,
                             cargo: launchCargo,
-                            speedPercent: speedPercent
+                            speedPercent: speedPercent,
+                            commanderID: commanderID
                         )
                     } label: {
                         Label("派遣", systemImage: "paperplane.fill")
@@ -2504,7 +2714,8 @@ private struct FleetDispatchPanel: View {
                         mission: mission,
                         ships: selectedShips,
                         cargo: launchCargo,
-                        speedPercent: speedPercent
+                        speedPercent: speedPercent,
+                        commanderID: commanderID
                     ))
                 }
             }
@@ -2627,6 +2838,50 @@ private struct FleetTargetPicker: View {
 
             if let selected = targets.first(where: { $0.id == selection }) {
                 Label(selected.detailText, systemImage: selected.isVisible ? "location.viewfinder" : "questionmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+private struct CommanderPicker: View {
+    @ObservedObject var model: AppModel
+    @Binding var selection: CommanderID?
+
+    private var selectedCommander: CommanderSummary? {
+        model.availableCommandersForFleet.first { $0.id == selection }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("指挥官")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Picker("指挥官", selection: $selection) {
+                Text("不派驻")
+                    .tag(Optional<CommanderID>.none)
+
+                ForEach(model.availableCommandersForFleet) { commander in
+                    Text(commander.pickerTitle)
+                        .lineLimit(1)
+                        .tag(Optional(commander.id))
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: .infinity)
+
+            if let selectedCommander {
+                Label(selectedCommander.bonusText, systemImage: "person.crop.square")
+                    .font(.caption)
+                    .foregroundStyle(selectedCommander.rarity.tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            } else if model.availableCommandersForFleet.isEmpty {
+                Label("没有空闲指挥官", systemImage: "person.crop.circle.badge.exclamationmark")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -2806,6 +3061,7 @@ private struct FleetDispatchSummary: View {
     let cargoUsed: Double
     let cargoCapacity: Double
     let speedPercent: Double
+    let commanderID: CommanderID?
 
     private var hasShipsSelected: Bool {
         ships.values.contains { $0 > 0 }
@@ -2832,6 +3088,9 @@ private struct FleetDispatchSummary: View {
                 DispatchMetric(title: "容量", value: "\(Formatters.wholeNumber(plan.cargoUsed)) / \(Formatters.wholeNumber(plan.cargoCapacity))")
                 DispatchMetric(title: "燃料", value: fuelText, isWarning: hasShipsSelected && plan.blockers.contains(.insufficientFuel))
                 DispatchMetric(title: "航程", value: model.durationText(plan.travelDuration))
+                if commanderID != nil {
+                    DispatchMetric(title: "指挥官", value: model.commanderName(for: commanderID))
+                }
                 DispatchMetric(
                     title: "状态",
                     value: plan.isLaunchable ? "可发射" : plan.blockers.first?.localizedName ?? "不可发射",
@@ -2860,7 +3119,8 @@ private struct FleetDispatchSummary: View {
             mission: mission,
             ships: ships,
             cargo: cargo,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderID: commanderID
         )
     }
 }
@@ -5570,6 +5830,21 @@ private extension RelationPosture {
             return .red
         case .pressured:
             return .purple
+        }
+    }
+}
+
+private extension CommanderRarity {
+    var tint: Color {
+        switch self {
+        case .common:
+            return .secondary
+        case .elite:
+            return .blue
+        case .epic:
+            return .purple
+        case .legendary:
+            return .orange
         }
     }
 }

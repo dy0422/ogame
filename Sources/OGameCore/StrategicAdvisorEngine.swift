@@ -9,6 +9,9 @@ public struct StrategicAdvisorRecommendation: Equatable, Identifiable, Sendable 
         case tradeRoute
         case deepIntel
         case artifact
+        case commanderRecruitment
+        case commanderTraining
+        case commanderAssignment
         case victoryRoute
         case aiThreat
         case energyDeficit
@@ -93,6 +96,7 @@ public enum StrategicAdvisorEngine {
 
         recommendations.append(contentsOf: strategicRouteRecommendations(playerFaction: playerFaction, universe: universe))
         recommendations.append(contentsOf: expansionRecommendations(universe: universe))
+        recommendations.append(contentsOf: commanderRecommendations(universe: universe, playerPlanets: playerPlanets))
         recommendations.append(contentsOf: economyRecommendations(for: playerPlanets, playerFaction: playerFaction, universe: universe))
         recommendations.append(contentsOf: queueRecommendations(for: playerPlanets, playerFaction: playerFaction, universe: universe))
         recommendations.append(contentsOf: fleetLoopRecommendations(for: playerPlanets, playerFaction: playerFaction, universe: universe))
@@ -238,6 +242,64 @@ public enum StrategicAdvisorEngine {
                     title: "遗物：\(artifact.title)",
                     detail: artifact.effect,
                     actionLabel: "查看胜利"
+                )
+            )
+        }
+
+        return recommendations
+    }
+
+    private static func commanderRecommendations(
+        universe: Universe,
+        playerPlanets: [Planet]
+    ) -> [StrategicAdvisorRecommendation] {
+        var recommendations: [StrategicAdvisorRecommendation] = []
+
+        if universe.commanderRoster.recruitmentTickets > 0 {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .commanderRecruitment,
+                    priority: .opportunity,
+                    title: "指挥官招募可用",
+                    detail: "当前有 \(universe.commanderRoster.recruitmentTickets) 张招募令，可补充舰队领袖或转换碎片用于升星。",
+                    actionLabel: "招募"
+                )
+            )
+        }
+
+        if !universe.commanderRoster.ownedCommanders.isEmpty,
+           universe.commanderRoster.trainingData >= 100
+        {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .commanderTraining,
+                    priority: .info,
+                    title: "指挥官可训练",
+                    detail: "已有 \(universe.commanderRoster.trainingData) 点训练数据，可提升等级并放大舰队加成。",
+                    actionLabel: "训练"
+                )
+            )
+        }
+
+        let activeCommanderIDs = Set(
+            universe.fleets.compactMap { fleet in
+                fleet.phase == .completed ? nil : fleet.commanderID
+            }
+        )
+        let hasAvailableCommander = universe.commanderRoster.ownedCommanders.contains { commander in
+            !activeCommanderIDs.contains(commander.id)
+        }
+        let dockedShips = summedShips(on: playerPlanets)
+        let hasLaunchableShips = dockedShips.values.contains { $0 > 0 }
+
+        if hasAvailableCommander && hasLaunchableShips {
+            recommendations.append(
+                StrategicAdvisorRecommendation(
+                    kind: .commanderAssignment,
+                    priority: .opportunity,
+                    title: "舰队可派驻指挥官",
+                    detail: "空闲舰船和指挥官都已就绪。派驻后可获得速度、战斗、货舱或远征收益加成。",
+                    actionLabel: "派驻"
                 )
             )
         }

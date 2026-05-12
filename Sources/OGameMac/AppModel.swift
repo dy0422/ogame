@@ -150,6 +150,59 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var commanderSummaries: [CommanderSummary] {
+        let activeAssignments = activeCommanderAssignments()
+        return universe.commanderRoster.ownedCommanders.compactMap { commander in
+            guard let definition = CommanderCatalog.definition(id: commander.definitionID) else {
+                return nil
+            }
+
+            let levelCap = CommanderGrowthEngine.levelCap(for: commander.rarity)
+            let shards = universe.commanderRoster.shardsByDefinitionID[commander.definitionID] ?? 0
+            let nextStarCost = CommanderGrowthEngine.shardCostForNextStar(currentStars: commander.stars)
+            let activeFleet = activeAssignments[commander.id]
+            return CommanderSummary(
+                id: commander.id,
+                definitionID: commander.definitionID,
+                name: definition.name,
+                title: definition.title,
+                rarity: commander.rarity,
+                rarityText: Self.commanderRarityText(commander.rarity),
+                specialtyText: Self.commanderSpecialtyText(definition.specialty),
+                level: commander.level,
+                levelCap: levelCap,
+                experienceProgress: min(max(commander.experience / 100, 0), 1),
+                experienceText: "\(Self.formattedWholeNumber(commander.experience)) / 100",
+                stars: commander.stars,
+                shards: shards,
+                nextStarCost: nextStarCost,
+                canTrain: universe.commanderRoster.trainingData > 0 && commander.level < levelCap,
+                canPromote: nextStarCost.map { shards >= $0 } ?? false,
+                bonusText: CommanderBonusEngine.summaryText(for: commander, in: universe),
+                lore: definition.lore,
+                isAssigned: activeFleet != nil,
+                assignmentText: activeFleet.map { "执行\($0.mission.localizedName)至 \($0.target.displayText)" } ?? "空闲"
+            )
+        }
+    }
+
+    var availableCommandersForFleet: [CommanderSummary] {
+        let activeIDs = Set(activeCommanderAssignments().keys)
+        return commanderSummaries.filter { !activeIDs.contains($0.id) }
+    }
+
+    var commanderRecruitmentPreview: CommanderRecruitmentPreview {
+        let state = universe.commanderRoster.recruitmentState
+        return CommanderRecruitmentPreview(
+            tickets: universe.commanderRoster.recruitmentTickets,
+            trainingData: universe.commanderRoster.trainingData,
+            ownedCount: universe.commanderRoster.ownedCommanders.count,
+            totalPulls: state.totalPulls,
+            legendaryPityText: "\(max(0, 40 - state.pullsSinceLegendary)) 抽内必出传奇",
+            eliteGuaranteeText: "十连至少精英级"
+        )
+    }
+
     var starMapSections: [StarMapPlanetSection] {
         let factionNamesByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.name.displayName) })
         let factionKindsByID = Dictionary(uniqueKeysWithValues: universe.factions.map { ($0.id, $0.kind) })
@@ -813,13 +866,81 @@ final class AppModel: ObservableObject {
         autosaveAfterQueueing(successStatus: "已通过跳跃门转移\(fleetShipsSummary(ships))。")
     }
 
+    func recruitCommanders(count: Int) {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再招募指挥官。"
+            return
+        }
+
+        let result = CommanderRecruitmentEngine.recruit(count: count, in: &universe)
+        guard result.ticketsSpent > 0 else {
+            statusMessage = "招募令不足，暂时无法招募指挥官。"
+            return
+        }
+
+        let pullSummary = result.pulls
+            .prefix(4)
+            .map { pull in
+                pull.isDuplicate ? "\(pull.name)+\(pull.shardsGranted)碎片" : pull.name
+            }
+            .joined(separator: "、")
+        let extraCount = max(result.pulls.count - 4, 0)
+        let suffix = extraCount > 0 ? " 等 \(result.pulls.count) 名结果" : ""
+        autosaveAfterQueueing(successStatus: "已招募 \(result.ticketsSpent) 次：\(pullSummary)\(suffix)。")
+    }
+
+    func trainCommander(_ commanderID: CommanderID) {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再训练指挥官。"
+            return
+        }
+
+        let amount = min(100, universe.commanderRoster.trainingData)
+        guard amount > 0 else {
+            statusMessage = "训练数据不足，暂时无法训练指挥官。"
+            return
+        }
+
+        let name = commanderName(for: commanderID)
+        guard CommanderGrowthEngine.train(commanderID, usingTrainingData: amount, in: &universe) else {
+            statusMessage = "\(name) 暂时无法训练。"
+            return
+        }
+
+        autosaveAfterQueueing(successStatus: "已为\(name)投入 \(amount) 点训练数据。")
+    }
+
+    func promoteCommander(_ commanderID: CommanderID) {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再升星指挥官。"
+            return
+        }
+
+        let name = commanderName(for: commanderID)
+        guard CommanderGrowthEngine.promote(commanderID, in: &universe) else {
+            statusMessage = "\(name) 碎片不足，暂时无法升星。"
+            return
+        }
+
+        autosaveAfterQueueing(successStatus: "\(name) 已完成升星。")
+    }
+
+    func commanderName(for commanderID: CommanderID?) -> String {
+        guard let commanderID else {
+            return "无指挥官"
+        }
+
+        return commanderSummaries.first { $0.id == commanderID }?.name ?? "未知指挥官"
+    }
+
     func launchFleet(
         originID: PlanetID?,
         targetID: PlanetID?,
         mission: Fleet.Mission,
         ships: [ShipKind: Int],
         cargo: ResourceBundle,
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        commanderID: CommanderID? = nil
     ) {
         if let validationFailure = fleetLaunchValidationFailure(
             originID: originID,
@@ -827,7 +948,8 @@ final class AppModel: ObservableObject {
             mission: mission,
             ships: ships,
             cargo: cargo,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderID: commanderID
         ) {
             statusMessage = "无法派遣舰队：\(validationFailure.description)。"
             return
@@ -845,7 +967,8 @@ final class AppModel: ObservableObject {
             mission: mission,
             ships: normalizedShips(ships),
             cargo: cargo,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderID: commanderID
         )
 
         switch result {
@@ -1339,7 +1462,8 @@ final class AppModel: ObservableObject {
         mission: Fleet.Mission,
         ships: [ShipKind: Int],
         cargo: ResourceBundle,
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        commanderID: CommanderID? = nil
     ) -> Bool {
         fleetLaunchValidationFailure(
             originID: originID,
@@ -1347,7 +1471,8 @@ final class AppModel: ObservableObject {
             mission: mission,
             ships: ships,
             cargo: cargo,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderID: commanderID
         ) == nil
     }
 
@@ -1468,7 +1593,8 @@ final class AppModel: ObservableObject {
         originID: PlanetID?,
         targetID: PlanetID?,
         ships: [ShipKind: Int],
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        commanderID: CommanderID? = nil
     ) -> Double? {
         guard
             let origin = planet(for: originID),
@@ -1482,7 +1608,8 @@ final class AppModel: ObservableObject {
             to: target.coordinate,
             ships: normalizedShips(ships),
             ruleSet: universe.ruleSet,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderBonus: CommanderBonusEngine.fleetBonus(for: commanderID, in: universe)
         )
         return fuel.isFinite ? fuel : nil
     }
@@ -1492,11 +1619,18 @@ final class AppModel: ObservableObject {
         targetID: PlanetID?,
         ships: [ShipKind: Int],
         cargo: ResourceBundle,
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        commanderID: CommanderID? = nil
     ) -> Bool {
         guard
             let origin = planet(for: originID),
-            let fuel = fleetFuelCost(originID: originID, targetID: targetID, ships: ships, speedPercent: speedPercent),
+            let fuel = fleetFuelCost(
+                originID: originID,
+                targetID: targetID,
+                ships: ships,
+                speedPercent: speedPercent,
+                commanderID: commanderID
+            ),
             fuel >= 0
         else {
             return false
@@ -1511,9 +1645,16 @@ final class AppModel: ObservableObject {
         targetID: PlanetID?,
         ships: [ShipKind: Int],
         cargo: ResourceBundle,
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        commanderID: CommanderID? = nil
     ) -> String {
-        guard let fuel = fleetFuelCost(originID: originID, targetID: targetID, ships: ships, speedPercent: speedPercent) else {
+        guard let fuel = fleetFuelCost(
+            originID: originID,
+            targetID: targetID,
+            ships: ships,
+            speedPercent: speedPercent,
+            commanderID: commanderID
+        ) else {
             return "未知"
         }
 
@@ -1533,7 +1674,8 @@ final class AppModel: ObservableObject {
         originID: PlanetID?,
         targetID: PlanetID?,
         ships: [ShipKind: Int],
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        commanderID: CommanderID? = nil
     ) -> TimeInterval? {
         guard
             let origin = planet(for: originID),
@@ -1548,7 +1690,8 @@ final class AppModel: ObservableObject {
             ships: normalizedShips(ships),
             ruleSet: universe.ruleSet,
             research: researchState(for: origin),
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderBonus: CommanderBonusEngine.fleetBonus(for: commanderID, in: universe)
         )
         return duration.isFinite && duration > 0 ? duration : nil
     }
@@ -1559,7 +1702,8 @@ final class AppModel: ObservableObject {
         mission: Fleet.Mission,
         ships: [ShipKind: Int],
         cargo: ResourceBundle,
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        commanderID: CommanderID? = nil
     ) -> String? {
         guard mission == .attack,
               let origin = planet(for: originID),
@@ -1573,7 +1717,8 @@ final class AppModel: ObservableObject {
             originID: originID,
             targetID: targetID,
             ships: ships,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderID: commanderID
         ) ?? 1
         let fleet = Fleet(
             ownerID: ownerID,
@@ -1587,7 +1732,8 @@ final class AppModel: ObservableObject {
             returnTime: universe.gameTime + duration * 2,
             originPlanetID: origin.id,
             targetPlanetID: target.id,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderID: commanderID
         )
 
         guard let preview = CombatEngine.previewAttack(fleet, in: universe),
@@ -2246,6 +2392,24 @@ final class AppModel: ObservableObject {
         return universe.factions.first { $0.id == factionID }
     }
 
+    private func activeCommanderAssignments() -> [CommanderID: Fleet] {
+        universe.fleets.reduce(into: [:]) { result, fleet in
+            guard fleet.phase != .completed, let commanderID = fleet.commanderID else {
+                return
+            }
+            result[commanderID] = fleet
+        }
+    }
+
+    private func commanderIsAvailableForLaunch(_ commanderID: CommanderID?) -> Bool {
+        guard let commanderID else {
+            return true
+        }
+
+        return universe.commanderRoster.ownedCommanders.contains { $0.id == commanderID } &&
+            activeCommanderAssignments()[commanderID] == nil
+    }
+
     private func buildingUpgradeTerms(for planet: Planet, kind: BuildingKind) -> (cost: ResourceBundle, duration: TimeInterval)? {
         guard let rule = universe.ruleSet.buildingRules[kind] else {
             return nil
@@ -2454,7 +2618,8 @@ final class AppModel: ObservableObject {
     }
 
     private func fleetLaunchStatus(for fleet: Fleet) -> String {
-        "已派遣\(fleet.mission.localizedName)舰队前往 \(fleet.target.displayText)。"
+        let commanderText = fleet.commanderID.map { "，指挥官 \(commanderName(for: $0))" } ?? ""
+        return "已派遣\(fleet.mission.localizedName)舰队前往 \(fleet.target.displayText)\(commanderText)。"
     }
 
     private static func buildingQueueFailureStatus(_ result: QueueResult, kind: BuildingKind) -> String {
@@ -2516,6 +2681,8 @@ final class AppModel: ObservableObject {
             return "所选舰船或目标无法执行该任务"
         case .fleetSlotLimit:
             return "舰队槽已满"
+        case .commanderUnavailable:
+            return "指挥官不可用"
         }
     }
 
@@ -2553,6 +2720,7 @@ final class AppModel: ObservableObject {
         case insufficientCargoCapacity
         case insufficientFuel
         case fleetSlotLimit
+        case commanderUnavailable
 
         var description: String {
             switch self {
@@ -2580,6 +2748,8 @@ final class AppModel: ObservableObject {
                 return "重氢燃料不足"
             case .fleetSlotLimit:
                 return "舰队槽已满，请等待舰队返航或提升计算机技术"
+            case .commanderUnavailable:
+                return "指挥官正在执行任务或不存在"
             }
         }
     }
@@ -2622,7 +2792,8 @@ final class AppModel: ObservableObject {
         mission: Fleet.Mission,
         ships: [ShipKind: Int],
         cargo: ResourceBundle,
-        speedPercent: Double = 1
+        speedPercent: Double = 1,
+        commanderID: CommanderID? = nil
     ) -> FleetLaunchValidationFailure? {
         guard canSave else {
             return .saveUnavailable
@@ -2673,6 +2844,10 @@ final class AppModel: ObservableObject {
             return .fleetSlotLimit
         }
 
+        guard commanderIsAvailableForLaunch(commanderID) else {
+            return .commanderUnavailable
+        }
+
         guard origin.resources.canAfford(cargo) else {
             return .insufficientCargo
         }
@@ -2686,7 +2861,8 @@ final class AppModel: ObservableObject {
             targetID: targetID,
             ships: normalizedShips,
             cargo: cargo,
-            speedPercent: speedPercent
+            speedPercent: speedPercent,
+            commanderID: commanderID
         ) else {
             return .insufficientFuel
         }
@@ -2987,6 +3163,34 @@ final class AppModel: ObservableObject {
         return value.formatted(.percent.precision(.fractionLength(0)))
     }
 
+    private static func commanderRarityText(_ rarity: CommanderRarity) -> String {
+        switch rarity {
+        case .common:
+            return "普通"
+        case .elite:
+            return "精英"
+        case .epic:
+            return "史诗"
+        case .legendary:
+            return "传奇"
+        }
+    }
+
+    private static func commanderSpecialtyText(_ specialty: CommanderSpecialty) -> String {
+        switch specialty {
+        case .fleetAdmiral:
+            return "舰队"
+        case .engineer:
+            return "工程"
+        case .geologist:
+            return "采掠"
+        case .technocrat:
+            return "科技"
+        case .explorer:
+            return "远征"
+        }
+    }
+
     private static func stablePlaceholderUUID(payload: String) -> UUID {
         let hash = stableHash("app-placeholder|\(payload)")
         return UUID(uuidString: String(format: "00000000-0000-0000-%04x-%012llx", Int(hash & 0xffff), hash & 0xffffffffffff))!
@@ -3171,6 +3375,46 @@ struct CommanderBriefingItem: Identifiable {
         self.detail = detail
         self.systemImage = systemImage
         self.urgency = urgency
+    }
+}
+
+struct CommanderRecruitmentPreview {
+    let tickets: Int
+    let trainingData: Int
+    let ownedCount: Int
+    let totalPulls: Int
+    let legendaryPityText: String
+    let eliteGuaranteeText: String
+}
+
+struct CommanderSummary: Identifiable {
+    let id: CommanderID
+    let definitionID: String
+    let name: String
+    let title: String
+    let rarity: CommanderRarity
+    let rarityText: String
+    let specialtyText: String
+    let level: Int
+    let levelCap: Int
+    let experienceProgress: Double
+    let experienceText: String
+    let stars: Int
+    let shards: Int
+    let nextStarCost: Int?
+    let canTrain: Bool
+    let canPromote: Bool
+    let bonusText: String
+    let lore: String
+    let isAssigned: Bool
+    let assignmentText: String
+
+    var pickerTitle: String {
+        "\(name) Lv.\(level) · \(bonusText)"
+    }
+
+    var starText: String {
+        stars > 0 ? "\(stars) 星" : "未升星"
     }
 }
 

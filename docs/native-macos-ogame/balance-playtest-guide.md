@@ -43,6 +43,7 @@ swift run OGameBalanceTool
 - `route_progress`：经济、科技、统治、探索四条胜利路线的检查点完成度。
 - `route_next`：每条路线的下一项未完成检查点。
 - `expansion_signals`：星区事件、PVE 目标、行动链、贸易线、深度情报、遗物和危机的总信号数。
+- `commander_signals`：指挥官本体、招募令和训练数据折算后的总信号数，用于确认指挥官模块在真实开局中可见。
 - `ai_intents`：AI 当前行为意图，例如扩张、侦察、掠袭、防御或回收。
 - `notes`：审计结论，例如真实推进、舰队启动受阻、AI 压力可见、顾问覆盖良好。
 

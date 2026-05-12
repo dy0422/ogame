@@ -325,6 +325,26 @@ func testFleetDecodesMissingSpeedPercentAsFullSpeed() throws {
     requireEqual(fleet.recalledAt, nil, "Old fleets should default to unrecalled")
 }
 
+func testFleetCommanderIDDefaultsWhenDecodingOlderFleetJSON() throws {
+    let fleet = Fleet(
+        ownerID: FactionID(UUID(uuidString: "00000000-0000-0000-0000-000000000101")!),
+        mission: .transport,
+        origin: Coordinate(galaxy: 1, system: 1, position: 4),
+        target: Coordinate(galaxy: 1, system: 2, position: 4),
+        ships: [.smallCargo: 1],
+        launchTime: 0,
+        arrivalTime: 60,
+        returnTime: 120
+    )
+    let data = try JSONEncoder().encode(fleet)
+    var json = try requireDictionary(JSONSerialization.jsonObject(with: data), "Fleet should encode as a dictionary")
+    json.removeValue(forKey: "commanderID")
+    let legacyData = try JSONSerialization.data(withJSONObject: json)
+    let decoded = try JSONDecoder().decode(Fleet.self, from: legacyData)
+
+    requireEqual(decoded.commanderID, nil, "Older fleet JSON should default missing commander assignment to nil")
+}
+
 func testAutomationPolicyDefaultsToBalancedEconomySafeMode() {
     let policy = AutoUpgradePolicy()
 
@@ -726,6 +746,10 @@ func testQueueFieldsDefaultWhenDecodingOlderUniverseJSON() throws {
     requireEqual(decoded.fleetDoctrineSummaries, [], "Older universe JSON should default missing doctrine summaries to empty")
     requireEqual(decoded.artifacts, [], "Older universe JSON should default missing artifacts to empty")
     requireEqual(decoded.crisisState, nil, "Older universe JSON should default missing crisis state to nil")
+    requireEqual(decoded.commanderRoster.ownedCommanders, [], "Older universe JSON should default missing commander roster to no commanders")
+    requireEqual(decoded.commanderRoster.recruitmentTickets, 0, "Older universe JSON should default commander tickets to zero")
+    requireEqual(decoded.commanderRoster.trainingData, 0, "Older universe JSON should default commander training data to zero")
+    requireEqual(decoded.commanderRoster.recruitmentState.totalPulls, 0, "Older universe JSON should default commander pull counters to zero")
     requireEqual(decoded.planets[0].buildingLevels, [.metalMine: 2], "Older planet JSON should keep raw-value building map behavior")
     requireEqual(decoded.ruleSet.buildingRules, RuleSet.fastSkirmish.buildingRules, "Older universe JSON should keep RuleSet defaults")
 }
@@ -772,6 +796,170 @@ func testQueueFieldsRejectExplicitNullWhenDecodingJSON() {
     requireThrowsDecodingError("Explicit null shipBuildQueue should fail decoding") {
         _ = try JSONDecoder().decode(Planet.self, from: Data(planetWithNullShipQueueJSON.utf8))
     }
+}
+
+func testCommanderRecruitmentUsesTicketsAndTenPullGuarantee() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 42, playerName: "Commander")
+    universe.commanderRoster.recruitmentTickets = 10
+
+    let result = CommanderRecruitmentEngine.recruit(count: 10, in: &universe)
+
+    requireEqual(result.pulls.count, 10, "Ten-pull should return ten results")
+    requireEqual(universe.commanderRoster.recruitmentTickets, 0, "Recruitment should spend one ticket per pull")
+    require(result.pulls.contains { $0.rarity >= .elite }, "Ten-pull should guarantee elite or better")
+}
+
+func testCommanderRecruitmentIsDeterministicForSameSeedAndState() {
+    var first = StarterUniverseFactory.makeNewGame(seed: 99, playerName: "Commander")
+    var second = StarterUniverseFactory.makeNewGame(seed: 99, playerName: "Commander")
+    first.commanderRoster.recruitmentTickets = 10
+    second.commanderRoster.recruitmentTickets = 10
+
+    let firstResult = CommanderRecruitmentEngine.recruit(count: 10, in: &first)
+    let secondResult = CommanderRecruitmentEngine.recruit(count: 10, in: &second)
+
+    requireEqual(firstResult.pulls.map(\.definitionID), secondResult.pulls.map(\.definitionID), "Same seed and counters should pull the same commanders")
+    requireEqual(first.commanderRoster, second.commanderRoster, "Same recruitment should produce same roster state")
+}
+
+func testCommanderRecruitmentConvertsDuplicatesToShards() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 7, playerName: "Commander")
+    guard let definition = CommanderCatalog.definitions.first(where: { $0.rarity == .epic }) else {
+        fatalError("Commander catalog should include an epic commander")
+    }
+    universe.commanderRoster.ownedCommanders = [
+        OwnedCommander(definitionID: definition.id, rarity: definition.rarity, acquiredAt: 0)
+    ]
+
+    _ = CommanderRecruitmentEngine.applyPull(definitionID: definition.id, in: &universe)
+
+    requireEqual(universe.commanderRoster.ownedCommanders.count, 1, "Duplicate commander should not create a second owned copy")
+    requireEqual(universe.commanderRoster.shardsByDefinitionID[definition.id], 25, "Duplicate epic should convert to 25 shards")
+}
+
+func testCommanderTrainingConsumesDataAndLevelsWithinCap() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 2, playerName: "Commander")
+    let commander = OwnedCommander(definitionID: "mira-pathfinder", rarity: .elite, level: 1, acquiredAt: 0)
+    universe.commanderRoster.ownedCommanders = [commander]
+    universe.commanderRoster.trainingData = 1_000
+
+    let didTrain = CommanderGrowthEngine.train(commander.id, usingTrainingData: 600, in: &universe)
+
+    guard let updated = universe.commanderRoster.ownedCommanders.first(where: { $0.id == commander.id }) else {
+        fatalError("Expected trained commander to remain in roster")
+    }
+    require(didTrain, "Training should succeed when data is available")
+    require(updated.level > 1, "Training should increase commander level")
+    require(updated.level <= 30, "Elite commander should not exceed level 30")
+    requireEqual(universe.commanderRoster.trainingData, 400, "Training should consume data")
+}
+
+func testCommanderPromotionConsumesShardsAndRaisesStars() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 3, playerName: "Commander")
+    let commander = OwnedCommander(definitionID: "qiao-reactor", rarity: .epic, level: 10, stars: 0, acquiredAt: 0)
+    universe.commanderRoster.ownedCommanders = [commander]
+    universe.commanderRoster.shardsByDefinitionID["qiao-reactor"] = 20
+
+    let didPromote = CommanderGrowthEngine.promote(commander.id, in: &universe)
+
+    guard let updated = universe.commanderRoster.ownedCommanders.first(where: { $0.id == commander.id }) else {
+        fatalError("Expected promoted commander to remain in roster")
+    }
+    require(didPromote, "Promotion should succeed with enough shards")
+    requireEqual(updated.stars, 1, "Promotion should raise star level")
+    requireEqual(universe.commanderRoster.shardsByDefinitionID["qiao-reactor"], nil, "Promotion should consume first-star shard cost")
+}
+
+func testFleetLaunchCanAssignAvailableCommanderAndPersistsID() {
+    var setup = makeCommanderFleetTestUniverse()
+    let commander = OwnedCommander(definitionID: "lin-vanguard", rarity: .legendary, level: 10, stars: 1, acquiredAt: 0)
+    setup.universe.commanderRoster.ownedCommanders = [commander]
+
+    let result = FleetEngine.launchFleet(
+        from: setup.originID,
+        to: setup.targetID,
+        in: &setup.universe,
+        mission: .attack,
+        ships: [.lightFighter: 4],
+        commanderID: commander.id
+    )
+
+    guard case .launched(let fleet) = result else {
+        fatalError("Expected fleet launch with commander to succeed")
+    }
+    requireEqual(fleet.commanderID, commander.id, "Launched fleet should persist commander assignment")
+}
+
+func testAssignedCommanderCannotLeadTwoActiveFleets() {
+    var setup = makeCommanderFleetTestUniverse()
+    let commander = OwnedCommander(definitionID: "lin-vanguard", rarity: .legendary, acquiredAt: 0)
+    setup.universe.commanderRoster.ownedCommanders = [commander]
+
+    _ = FleetEngine.launchFleet(from: setup.originID, to: setup.targetID, in: &setup.universe, mission: .attack, ships: [.lightFighter: 1], commanderID: commander.id)
+    let second = FleetEngine.launchFleet(from: setup.originID, to: setup.secondTargetID, in: &setup.universe, mission: .attack, ships: [.lightFighter: 1], commanderID: commander.id)
+
+    requireEqual(second, .failure(.commanderUnavailable), "A commander already assigned to an active fleet should be unavailable")
+}
+
+func testFleetCommanderSpeedBonusShortensTravelTime() {
+    var setup = makeCommanderFleetTestUniverse()
+    let commander = OwnedCommander(definitionID: "lin-vanguard", rarity: .legendary, level: 20, stars: 2, acquiredAt: 0)
+    setup.universe.commanderRoster.ownedCommanders = [commander]
+
+    let base = FleetEngine.travelDuration(from: setup.originCoordinate, to: setup.targetCoordinate, ships: [.lightFighter: 4], ruleSet: setup.universe.ruleSet)
+    let boosted = FleetEngine.travelDuration(from: setup.originCoordinate, to: setup.targetCoordinate, ships: [.lightFighter: 4], ruleSet: setup.universe.ruleSet, commanderBonus: CommanderBonusEngine.fleetBonus(for: commander, in: setup.universe))
+
+    require(boosted < base, "Fleet admiral commander should shorten travel time")
+}
+
+func testBattleSimulationAppliesCommanderAttackBonus() {
+    let base = BattleSimulationEngine.resolve(
+        BattleSimulationInput(
+            attackerShips: [.lightFighter: 3],
+            defenderShips: [.lightFighter: 3],
+            defenderDefenses: [:],
+            attackerResearch: ResearchState(),
+            defenderResearch: ResearchState(),
+            ruleSet: .fastSkirmish,
+            seed: 11
+        )
+    )
+
+    let boosted = BattleSimulationEngine.resolve(
+        BattleSimulationInput(
+            attackerShips: [.lightFighter: 3],
+            defenderShips: [.lightFighter: 3],
+            defenderDefenses: [:],
+            attackerResearch: ResearchState(),
+            defenderResearch: ResearchState(),
+            ruleSet: .fastSkirmish,
+            seed: 11,
+            attackerCommanderBonus: CommanderFleetBonus(attackMultiplier: 1.25)
+        )
+    )
+
+    require((boosted.rounds.first?.attackerPower ?? 0) > (base.rounds.first?.attackerPower ?? 0), "Commander attack bonus should increase attacker round power")
+}
+
+func testAttackMissionGrantsCommanderExperience() {
+    var setup = makeCommanderFleetTestUniverse()
+    let commander = OwnedCommander(definitionID: "lin-vanguard", rarity: .legendary, acquiredAt: 0)
+    setup.universe.commanderRoster.ownedCommanders = [commander]
+
+    let launch = FleetEngine.launchFleet(from: setup.originID, to: setup.targetID, in: &setup.universe, mission: .attack, ships: [.lightFighter: 4], commanderID: commander.id)
+    guard case .launched = launch else {
+        fatalError("Expected launch")
+    }
+    guard let fleet = setup.universe.fleets.first else {
+        fatalError("Expected launched fleet")
+    }
+    setup.universe.gameTime = fleet.arrivalTime
+    FleetEngine.resolveDueFleets(in: &setup.universe)
+
+    guard let updated = setup.universe.commanderRoster.ownedCommanders.first(where: { $0.id == commander.id }) else {
+        fatalError("Expected commander to remain in roster")
+    }
+    require(updated.experience > 0 || updated.level > commander.level, "Commander should gain XP from resolved combat")
 }
 
 func testUniverseModelRoundTripsThroughJSON() throws {
@@ -1290,6 +1478,36 @@ func testStrategicAdvisorSurfacesExpansionOpportunities() {
     require(kinds.contains(.crisis), "Advisor should surface active crises")
 }
 
+func testStrategicAdvisorSurfacesCommanderRecruitmentAndAssignment() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 5, playerName: "Commander")
+    universe.commanderRoster.recruitmentTickets = 10
+    universe.commanderRoster.ownedCommanders = [
+        OwnedCommander(definitionID: "lin-vanguard", rarity: .legendary, acquiredAt: 0)
+    ]
+    universe.commanderRoster.trainingData = 500
+    if let originIndex = universe.planets.firstIndex(where: { $0.ownerID == universe.playerFactionID }) {
+        universe.planets[originIndex].shipInventory[.lightFighter] = 2
+    }
+    StrategicEngine.updateStrategicState(in: &universe)
+
+    let recommendations = StrategicAdvisorEngine.recommendations(in: universe, limit: 12)
+    let kinds = Set(recommendations.map(\.kind))
+
+    require(kinds.contains(.commanderRecruitment), "Advisor should surface available commander recruitment")
+    require(kinds.contains(.commanderTraining), "Advisor should surface commander training")
+    require(kinds.contains(.commanderAssignment), "Advisor should surface commander fleet assignment")
+}
+
+func testGameplayAuditCountsCommanderSignals() {
+    let result = GameplayAuditEngine.runAutoplayAudit(
+        seed: 1,
+        duration: 14_400,
+        settings: GameSettings(difficulty: .standard)
+    )
+
+    require(result.commanderSignalCount > 0, "Gameplay audit should count commander module signals")
+}
+
 func testGameplayExpansionStateRoundTripsThroughJSON() throws {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     GameplayExpansionEngine.refresh(in: &universe)
@@ -1650,6 +1868,47 @@ func makeExpansionUniverse(gameTime: TimeInterval = 9_000) -> Universe {
     )
     StrategicEngine.updateStrategicState(in: &universe)
     return universe
+}
+
+func makeCommanderFleetTestUniverse() -> (
+    universe: Universe,
+    originID: PlanetID,
+    targetID: PlanetID,
+    secondTargetID: PlanetID,
+    originCoordinate: Coordinate,
+    targetCoordinate: Coordinate
+) {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 501, playerName: "Commander")
+    let playerPlanets = PlayerVisibilityEngine.playerOwnedPlanets(in: universe).sorted {
+        $0.coordinate.displayText < $1.coordinate.displayText
+    }
+    guard let origin = playerPlanets.first else {
+        fatalError("Expected starter universe to contain a player planet")
+    }
+    guard let originIndex = universe.planets.firstIndex(where: { $0.id == origin.id }) else {
+        fatalError("Expected origin planet index")
+    }
+    universe.planets[originIndex].shipInventory[.lightFighter] = 8
+    universe.planets[originIndex].resources.deuterium = 100_000
+    if let playerIndex = universe.factions.firstIndex(where: { $0.id == universe.playerFactionID }) {
+        universe.factions[playerIndex].technology.levels[.computer] = 3
+    }
+
+    let targets = universe.planets
+        .filter { $0.ownerID != nil && $0.ownerID != universe.playerFactionID }
+        .sorted { $0.coordinate.displayText < $1.coordinate.displayText }
+    guard targets.count >= 2 else {
+        fatalError("Expected at least two non-player targets")
+    }
+
+    return (
+        universe,
+        origin.id,
+        targets[0].id,
+        targets[1].id,
+        origin.coordinate,
+        targets[0].coordinate
+    )
 }
 
 func requireStrategicScore(_ rankings: [FactionScore], for factionID: FactionID) -> FactionScore {
@@ -6948,6 +7207,7 @@ testGameContentExplainsBuildingAndTechnologyEffects()
 testTechnologyEffectsExposeFleetSlotsAndDriveSpeed()
 testResearchLabSpeedsResearchDuration()
 try testFleetDecodesMissingSpeedPercentAsFullSpeed()
+try testFleetCommanderIDDefaultsWhenDecodingOlderFleetJSON()
 testAutomationPolicyDefaultsToBalancedEconomySafeMode()
 testAutoUpgradeEconomyStrategyFillsMultipleBuildQueueItems()
 testAutoUpgradeFleetStrategyCanBuildShipsWhenAllowed()
@@ -6960,6 +7220,16 @@ try testUnitBuildQueueItemRoundTripsThroughJSON()
 try testPlanetFactionAndUniverseQueuesRoundTripThroughJSON()
 try testQueueFieldsDefaultWhenDecodingOlderUniverseJSON()
 testQueueFieldsRejectExplicitNullWhenDecodingJSON()
+testCommanderRecruitmentUsesTicketsAndTenPullGuarantee()
+testCommanderRecruitmentIsDeterministicForSameSeedAndState()
+testCommanderRecruitmentConvertsDuplicatesToShards()
+testCommanderTrainingConsumesDataAndLevelsWithinCap()
+testCommanderPromotionConsumesShardsAndRaisesStars()
+testFleetLaunchCanAssignAvailableCommanderAndPersistsID()
+testAssignedCommanderCannotLeadTwoActiveFleets()
+testFleetCommanderSpeedBonusShortensTravelTime()
+testBattleSimulationAppliesCommanderAttackBonus()
+testAttackMissionGrantsCommanderExperience()
 try testUniverseModelRoundTripsThroughJSON()
 try testPlanetEnumDictionaryDecodesRawValueKeysAndRejectsUnknownKeys()
 testSeededGeneratorProducesDeterministicDistinctSequences()
@@ -6979,6 +7249,8 @@ testMidgamePlayerObjectivesExposeStrategyDepth()
 testStrategicAdvisorRecommendsVictoryRouteAndAIThreat()
 testGameplayExpansionRefreshCreatesThreePhaseGameplayLoops()
 testStrategicAdvisorSurfacesExpansionOpportunities()
+testStrategicAdvisorSurfacesCommanderRecruitmentAndAssignment()
+testGameplayAuditCountsCommanderSignals()
 try testGameplayExpansionStateRoundTripsThroughJSON()
 testStarterUniverseProvidesServiceStyleColonyPool()
 testServiceStyleMoonChanceUsesDebrisThresholdAndCap()

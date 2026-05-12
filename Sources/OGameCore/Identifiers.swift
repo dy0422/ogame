@@ -32,6 +32,14 @@ public struct FleetID: Codable, Hashable, Sendable {
     }
 }
 
+public struct CommanderID: Codable, Hashable, Sendable {
+    public var rawValue: UUID
+
+    public init(_ rawValue: UUID = UUID()) {
+        self.rawValue = rawValue
+    }
+}
+
 public struct EventID: Codable, Hashable, Sendable {
     public var rawValue: UUID
 

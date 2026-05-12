@@ -114,7 +114,8 @@ public enum StarterUniverseFactory {
             planets: planets,
             fleets: [],
             events: [welcome],
-            ruleSet: .fastSkirmish
+            ruleSet: .fastSkirmish,
+            commanderRoster: CommanderRoster(recruitmentTickets: 10, trainingData: 500)
         )
     }
 
