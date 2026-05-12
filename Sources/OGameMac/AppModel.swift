@@ -1015,6 +1015,34 @@ final class AppModel: ObservableObject {
         launchFleet(originID: origin.id, targetID: targetID, mission: mission, ships: plan.ships, cargo: .zero)
     }
 
+    func ensureColonizationTarget(galaxy: Int, system: Int, position: Int) -> PlanetID? {
+        let coordinate = Coordinate(galaxy: galaxy, system: system, position: position)
+        guard UniverseTopologyEngine.isValidPlanetCoordinate(coordinate) else {
+            statusMessage = "无法选择殖民坐标：请输入有效星位。"
+            return nil
+        }
+
+        if let existing = universe.planets.first(where: { $0.coordinate == coordinate }),
+           existing.ownerID != nil
+        {
+            statusMessage = "无法选择殖民坐标：\(coordinate.displayText) 已被占领。"
+            return nil
+        }
+
+        guard let targetID = ColonizationTargetEngine.ensureNeutralTarget(
+            at: coordinate,
+            visibleTo: universe.playerFactionID,
+            in: &universe
+        ) else {
+            statusMessage = "无法选择殖民坐标：目标星位不可用。"
+            return nil
+        }
+
+        refreshStrategicState()
+        statusMessage = "已选择殖民坐标 \(coordinate.displayText)。"
+        return targetID
+    }
+
     func recallFleet(_ fleet: Fleet) {
         guard canSave else {
             statusMessage = "自动存档载入失败。请先开始新游戏再召回舰队。"
@@ -2987,9 +3015,15 @@ final class AppModel: ObservableObject {
             return existing.id
         }
 
-        guard UniverseTopologyEngine.isValidPlanetCoordinate(slot.coordinate) ||
-            UniverseTopologyEngine.isExpeditionCoordinate(slot.coordinate)
-        else {
+        if UniverseTopologyEngine.isValidPlanetCoordinate(slot.coordinate) {
+            return ColonizationTargetEngine.ensureNeutralTarget(
+                at: slot.coordinate,
+                visibleTo: universe.playerFactionID,
+                in: &universe
+            )
+        }
+
+        guard UniverseTopologyEngine.isExpeditionCoordinate(slot.coordinate) else {
             return nil
         }
 

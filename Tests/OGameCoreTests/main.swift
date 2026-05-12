@@ -1638,6 +1638,41 @@ func testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized() 
     }
 }
 
+func testColonizationTargetEngineSeedsVisibleEmptySlotForFleetPage() {
+    var universe = makeFleetUniverse(originResources: ResourceBundle(metal: 20_000, crystal: 20_000, deuterium: 20_000))
+    let coordinate = Coordinate(galaxy: 1, system: 3, position: 8)
+    let originalPlanetCount = universe.planets.count
+
+    guard let targetID = ColonizationTargetEngine.ensureNeutralTarget(
+        at: coordinate,
+        visibleTo: fleetPlayerID(),
+        in: &universe
+    ) else {
+        fatalError("Empty valid planet slot should be seeded as a neutral colonization target")
+    }
+
+    requireEqual(universe.planets.count, originalPlanetCount + 1, "Seeding should append one neutral target planet")
+    let target = requirePlanet(targetID, in: universe, "Seeded target should exist")
+    requireEqual(target.coordinate, coordinate, "Seeded target should use the requested coordinate")
+    requireEqual(target.ownerID, nil, "Seeded target should be unowned before colonization")
+    require(
+        universe.explorationRecords.contains { $0.factionID == fleetPlayerID() && $0.targetPlanetID == targetID && $0.discoveredNeutral },
+        "Seeded target should be visible to the requesting faction"
+    )
+
+    let launch = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: targetID,
+        in: &universe,
+        mission: .colonize,
+        ships: [.colonyShip: 1],
+        cargo: .zero
+    )
+    guard case .launched = launch else {
+        fatalError("Fleet page seeded target should be immediately launchable for colonization")
+    }
+}
+
 func testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources() {
     var universe = makeStrategicUniverse(playerPlanetCount: 2, aiPlanetCount: 1, neutralPlanetCount: 1)
     let playerPlanetIDs = Set(universe.factions.first { $0.id == universe.playerFactionID }?.ownedPlanetIDs ?? [])
@@ -7255,6 +7290,7 @@ try testGameplayExpansionStateRoundTripsThroughJSON()
 testStarterUniverseProvidesServiceStyleColonyPool()
 testServiceStyleMoonChanceUsesDebrisThresholdAndCap()
 testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized()
+testColonizationTargetEngineSeedsVisibleEmptySlotForFleetPage()
 testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources()
 testPlayerObjectivesAwardRewardsOnce()
 testPlayerObjectiveStatesExposeProgressAndCompletedRecords()
