@@ -44,6 +44,9 @@ public enum SimulationEngine {
         )
         StrategicEngine.updateStrategicState(in: &universe)
         GameplayExpansionEngine.refresh(in: &universe)
+        if isPlayerAutoUpgradeEnabled {
+            _ = PlayerAutoUpgradeEngine.claimCompletedActionChains(in: &universe)
+        }
 
         if eventPolicy == .full {
             universe.events.append(

@@ -70,7 +70,7 @@ public enum PlayerAutoUpgradeEngine {
         return result
     }
 
-    private static func claimCompletedActionChains(in universe: inout Universe) -> Int {
+    static func claimCompletedActionChains(in universe: inout Universe) -> Int {
         let claimableIDs = universe.actionChains
             .filter { ActionChainRewardEngine.canClaim($0, at: universe.gameTime) }
             .sorted { lhs, rhs in

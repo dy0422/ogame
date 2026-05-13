@@ -1790,6 +1790,79 @@ func testAutoUpgradeClaimsCompletedActionChainRewardsWithoutSelectingCommanderCa
     requireEqual(universe.commanderRoster.ownedCommanders.count, 0, "Automation claim should not auto-select commander candidates")
 }
 
+func testSimulationAutoUpgradeClaimsActionChainCompletedByDueRecoveryFleet() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    universe.reports = []
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let origin = universe.planets.first(where: { $0.ownerID == universe.playerFactionID }),
+          let site = universe.hostileSites.sorted(by: { $0.threatLevel < $1.threatLevel }).first,
+          let targetID = site.targetPlanetID,
+          let targetIndex = universe.planets.firstIndex(where: { $0.id == targetID })
+    else {
+        fatalError("Expansion should create a player origin and hostile target")
+    }
+    universe.planets[targetIndex].debrisField = ResourceBundle(metal: 600, crystal: 300)
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 90,
+            kind: .espionage,
+            title: "Espionage at \(site.coordinate.displayText)",
+            summary: "Intel",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: origin.id, name: "Scout"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ]
+        )
+    )
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 60,
+            kind: .battle,
+            title: "Battle at \(site.coordinate.displayText)",
+            summary: "Attacker wins.",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: origin.id, name: "Raider"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ],
+            debris: ResourceBundle(metal: 600, crystal: 300)
+        )
+    )
+    GameplayExpansionEngine.refresh(in: &universe)
+    let chain = requireHostileActionChain(in: universe)
+    requireEqual(stepStatus(.recoverSpoils, in: chain), .ready, "Recovery step should be ready before the due fleet arrives")
+    universe.fleets = [
+        Fleet(
+            ownerID: universe.playerFactionID,
+            mission: .recycle,
+            origin: origin.coordinate,
+            target: site.coordinate,
+            ships: [.recycler: 1],
+            launchTime: universe.gameTime - 60,
+            arrivalTime: universe.gameTime + 60,
+            returnTime: universe.gameTime + 120,
+            originPlanetID: origin.id,
+            targetPlanetID: targetID
+        )
+    ]
+
+    SimulationEngine.tick(
+        universe: &universe,
+        delta: 60,
+        isPlayerAutoUpgradeEnabled: true,
+        autoUpgradePolicy: AutoUpgradePolicy(resourceReserveRatio: 0.8),
+        eventPolicy: .domainOnly
+    )
+
+    require(
+        !universe.actionChains.contains { $0.id == chain.id },
+        "Automation should claim an action chain completed by a due recovery fleet within the same simulation tick"
+    )
+    require(
+        universe.events.contains { $0.title == "行动链奖励领取" },
+        "Same-tick action chain claim should add the normal readable reward event"
+    )
+}
+
 func testClaimedHostileActionChainClearsHostileSiteAndSuppressesRefresh() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     GameplayExpansionEngine.refresh(in: &universe)
@@ -8171,6 +8244,7 @@ testGameplayExpansionSkipsHostileSitesWhenNeutralTargetsAreBusy()
 testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop()
 testActionChainRewardClaimRequiresCompletedSteps()
 testAutoUpgradeClaimsCompletedActionChainRewardsWithoutSelectingCommanderCandidate()
+testSimulationAutoUpgradeClaimsActionChainCompletedByDueRecoveryFleet()
 testClaimedHostileActionChainClearsHostileSiteAndSuppressesRefresh()
 testHostileActionChainProgressesFromReportsAndRecoveryEvents()
 testActionChainFleetPlannerRecommendsNextHostileMission()
