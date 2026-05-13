@@ -1598,8 +1598,8 @@ func testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop()
         title: "清剿测试据点",
         detail: "验证 PVE 行动链奖励领取闭环。",
         steps: [
-            ActionChain.Step(kind: .scoutTarget, title: "侦察目标", status: .ready),
-            ActionChain.Step(kind: .strikeHostile, title: "打击据点", status: .ready),
+            ActionChain.Step(kind: .scoutTarget, title: "侦察目标", status: .complete),
+            ActionChain.Step(kind: .strikeHostile, title: "打击据点", status: .complete),
             ActionChain.Step(kind: .recoverSpoils, title: "回收战利品", status: .complete)
         ],
         reward: reward,
@@ -1622,6 +1622,119 @@ func testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop()
     requireEqual(universe.commanderRoster.ownedCommanders.count, 0, "Commander drops should not bypass candidate selection")
     require(universe.actionChains.isEmpty, "Claimed action chain should be removed to prevent duplicate rewards")
     require(universe.events.contains { $0.kind == .system && $0.title == "行动链奖励领取" }, "Claim should add a readable system event")
+}
+
+func testActionChainRewardClaimRequiresCompletedSteps() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    guard let receiverIndex = universe.planets.firstIndex(where: { $0.ownerID == universe.playerFactionID }) else {
+        fatalError("Expansion universe should include a player planet")
+    }
+    let startingResources = universe.planets[receiverIndex].resources
+    let chain = ActionChain(
+        id: UUID(uuidString: "00000000-0000-0000-0000-00000000a702")!,
+        kind: .hostileRaid,
+        title: "未完成测试据点",
+        detail: "ready 步骤不能直接领奖。",
+        steps: [
+            ActionChain.Step(kind: .scoutTarget, title: "侦察目标", status: .complete),
+            ActionChain.Step(kind: .strikeHostile, title: "打击据点", status: .ready),
+            ActionChain.Step(kind: .recoverSpoils, title: "回收战利品", status: .complete)
+        ],
+        reward: ResourceBundle(metal: 900),
+        commanderReward: CommanderRewardBundle(recruitmentTickets: 1, trainingData: 40),
+        expiresAt: universe.gameTime + 600
+    )
+    universe.actionChains = [chain]
+
+    let result = ActionChainRewardEngine.claim(chain.id, in: &universe)
+
+    requireEqual(result.status, .locked, "Ready action chain steps should not be claimable until completed")
+    requireEqual(universe.planets[receiverIndex].resources, startingResources, "Incomplete chain should not grant resources")
+    requireEqual(universe.commanderRoster.recruitmentTickets, 0, "Incomplete chain should not grant commander tickets")
+    requireEqual(universe.actionChains.count, 1, "Incomplete chain should remain available")
+}
+
+func testHostileActionChainProgressesFromReportsAndRecoveryEvents() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    universe.reports = []
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let site = universe.hostileSites.sorted(by: { $0.threatLevel < $1.threatLevel }).first,
+          let targetID = site.targetPlanetID
+    else {
+        fatalError("Expansion should create a hostile site with a target")
+    }
+
+    var chain = requireHostileActionChain(in: universe)
+    requireEqual(stepStatus(.scoutTarget, in: chain), .ready, "Hostile chain should start with scouting ready")
+    requireEqual(stepStatus(.strikeHostile, in: chain), .locked, "Hostile strike should wait for scouting evidence")
+    requireEqual(stepStatus(.recoverSpoils, in: chain), .locked, "Spoils recovery should wait for battle evidence")
+    require(!ActionChainRewardEngine.canClaim(chain, at: universe.gameTime), "Unfinished hostile chain should not be claimable")
+
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 60,
+            kind: .espionage,
+            title: "Espionage at \(site.coordinate.displayText)",
+            summary: "Intel",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: strategicPlanetID(1), name: "Scout"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ]
+        )
+    )
+    GameplayExpansionEngine.refresh(in: &universe)
+    chain = requireHostileActionChain(in: universe)
+    requireEqual(stepStatus(.scoutTarget, in: chain), .complete, "Recent espionage report should complete scouting")
+    requireEqual(stepStatus(.strikeHostile, in: chain), .ready, "Strike should become ready after scouting and sufficient power")
+    requireEqual(stepStatus(.recoverSpoils, in: chain), .locked, "Recovery should still wait for a battle report")
+
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 30,
+            kind: .battle,
+            title: "Battle at \(site.coordinate.displayText)",
+            summary: "Attacker wins.",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: strategicPlanetID(1), name: "Raider"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ],
+            debris: ResourceBundle(metal: 2_000, crystal: 1_000)
+        )
+    )
+    GameplayExpansionEngine.refresh(in: &universe)
+    chain = requireHostileActionChain(in: universe)
+    requireEqual(stepStatus(.strikeHostile, in: chain), .complete, "Recent battle report should complete the strike")
+    requireEqual(stepStatus(.recoverSpoils, in: chain), .ready, "Recovery should become ready after battle when recycler exists")
+    require(!ActionChainRewardEngine.canClaim(chain, at: universe.gameTime), "Chain should still require a recovery event before claiming")
+
+    universe.events.append(
+        GameEvent(
+            time: universe.gameTime - 10,
+            kind: .system,
+            title: "Debris Recovered",
+            message: "Recycle fleet resolved at \(site.coordinate.displayText)."
+        )
+    )
+    GameplayExpansionEngine.refresh(in: &universe)
+    chain = requireHostileActionChain(in: universe)
+    requireEqual(stepStatus(.recoverSpoils, in: chain), .complete, "Recent recovery event should complete spoils recovery")
+    require(ActionChainRewardEngine.canClaim(chain, at: universe.gameTime), "Fully evidenced hostile chain should become claimable")
+}
+
+func testClaimedActionChainDoesNotRegenerateOnExpansionRefresh() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let originalChain = universe.actionChains.first(where: { $0.kind == .sectorDevelopment }) else {
+        fatalError("Expansion should create a claimable sector development chain")
+    }
+    require(ActionChainRewardEngine.canClaim(originalChain, at: universe.gameTime), "Sector chain should be claimable with an existing trade route")
+
+    let result = ActionChainRewardEngine.claim(originalChain.id, in: &universe)
+    requireEqual(result.status, .claimed, "Sector chain should claim successfully")
+
+    GameplayExpansionEngine.refresh(in: &universe)
+
+    require(!universe.actionChains.contains { $0.id == originalChain.id }, "Claimed action chain should not regenerate on refresh")
 }
 
 func testStrategicAdvisorSurfacesExpansionOpportunities() {
@@ -2135,6 +2248,18 @@ func makeExpansionUniverse(gameTime: TimeInterval = 9_000) -> Universe {
     )
     StrategicEngine.updateStrategicState(in: &universe)
     return universe
+}
+
+func requireHostileActionChain(in universe: Universe) -> ActionChain {
+    guard let chain = universe.actionChains.first(where: { $0.kind == .hostileRaid }) else {
+        fatalError("Expected hostile raid action chain")
+    }
+
+    return chain
+}
+
+func stepStatus(_ kind: ActionChain.Step.Kind, in chain: ActionChain) -> ActionChain.Step.Status? {
+    chain.steps.first { $0.kind == kind }?.status
 }
 
 func makeCommanderFleetTestUniverse() -> (
@@ -7519,6 +7644,9 @@ testStrategicAdvisorRecommendsVictoryRouteAndAIThreat()
 testGameplayExpansionRefreshCreatesThreePhaseGameplayLoops()
 testGameplayExpansionRewardsCommanderRecruitmentMaterials()
 testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop()
+testActionChainRewardClaimRequiresCompletedSteps()
+testHostileActionChainProgressesFromReportsAndRecoveryEvents()
+testClaimedActionChainDoesNotRegenerateOnExpansionRefresh()
 testStrategicAdvisorSurfacesExpansionOpportunities()
 testStrategicAdvisorSurfacesCommanderRecruitmentAndAssignment()
 testGameplayAuditCountsCommanderSignals()

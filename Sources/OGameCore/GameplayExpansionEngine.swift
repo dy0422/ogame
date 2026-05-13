@@ -116,43 +116,109 @@ public enum GameplayExpansionEngine {
     private static func generatedActionChains(in universe: Universe) -> [ActionChain] {
         var chains: [ActionChain] = []
         if let site = universe.hostileSites.sorted(by: { $0.threatLevel < $1.threatLevel }).first {
-            chains.append(
-                ActionChain(
-                    id: stableUUID("action-chain|hostile|\(site.id.uuidString)"),
-                    kind: .hostileRaid,
-                    title: "清剿 \(site.name)",
-                    detail: "先侦察、再打击、最后回收残骸，形成一条完整 PVE 收益链。",
-                    steps: [
-                        ActionChain.Step(kind: .scoutTarget, title: "侦察目标", status: .ready),
-                        ActionChain.Step(kind: .strikeHostile, title: "打击据点", status: playerCombatPower(in: universe) >= site.requiredPower ? .ready : .locked),
-                        ActionChain.Step(kind: .recoverSpoils, title: "回收战利品", status: hasRecycler(in: universe) ? .ready : .locked)
-                    ],
-                    reward: site.reward,
-                    commanderReward: site.commanderReward,
-                    expiresAt: min(site.expiresAt, universe.gameTime + actionChainDuration)
+            let chainID = stableUUID("action-chain|hostile|\(site.id.uuidString)")
+            let hostileSteps = hostileRaidSteps(for: site, in: universe)
+            if !hasClaimedActionChain(chainID, in: universe) {
+                chains.append(
+                    ActionChain(
+                        id: chainID,
+                        kind: .hostileRaid,
+                        title: "清剿 \(site.name)",
+                        detail: "先侦察、再打击、最后回收残骸，形成一条完整 PVE 收益链。",
+                        steps: hostileSteps,
+                        reward: site.reward,
+                        commanderReward: site.commanderReward,
+                        expiresAt: min(site.expiresAt, universe.gameTime + actionChainDuration)
+                    )
                 )
-            )
+            }
         }
 
         if let control = generatedSectorControl(in: universe).first(where: { $0.ownerID == universe.playerFactionID }) {
-            chains.append(
-                ActionChain(
-                    id: stableUUID("action-chain|sector|\(control.id)"),
-                    kind: .sectorDevelopment,
-                    title: "巩固 \(control.galaxy):\(control.system) 星区",
-                    detail: "用贸易路线和驻防把殖民地变成稳定势力范围。",
-                    steps: [
-                        ActionChain.Step(kind: .secureSector, title: "维持双星控制", status: .complete),
-                        ActionChain.Step(kind: .buildLogistics, title: "建立补给线", status: universe.tradeRoutes.isEmpty ? .locked : .ready)
-                    ],
-                    reward: ResourceBundle(metal: 3_000, crystal: 2_000, deuterium: 1_000),
-                    commanderReward: CommanderRewardBundle(recruitmentTickets: 1, trainingData: 80),
-                    expiresAt: universe.gameTime + actionChainDuration
+            let chainID = stableUUID("action-chain|sector|\(control.id)")
+            if !hasClaimedActionChain(chainID, in: universe) {
+                chains.append(
+                    ActionChain(
+                        id: chainID,
+                        kind: .sectorDevelopment,
+                        title: "巩固 \(control.galaxy):\(control.system) 星区",
+                        detail: "用贸易路线和驻防把殖民地变成稳定势力范围。",
+                        steps: [
+                            ActionChain.Step(kind: .secureSector, title: "维持双星控制", status: .complete),
+                            ActionChain.Step(kind: .buildLogistics, title: "建立补给线", status: universe.tradeRoutes.isEmpty ? .locked : .complete)
+                        ],
+                        reward: ResourceBundle(metal: 3_000, crystal: 2_000, deuterium: 1_000),
+                        commanderReward: CommanderRewardBundle(recruitmentTickets: 1, trainingData: 80),
+                        expiresAt: universe.gameTime + actionChainDuration
+                    )
                 )
-            )
+            }
         }
 
         return chains
+    }
+
+    private static func hasClaimedActionChain(_ chainID: UUID, in universe: Universe) -> Bool {
+        let claimedEventID = stableUUID("event|action-chain-claim|\(universe.id.rawValue.uuidString)|\(chainID.uuidString)")
+        return universe.events.contains { event in
+            event.id.rawValue == claimedEventID
+        }
+    }
+
+    private static func hostileRaidSteps(for site: HostileSite, in universe: Universe) -> [ActionChain.Step] {
+        let scouted = hasRecentReport(kind: .espionage, for: site, in: universe)
+        let struck = hasRecentReport(kind: .battle, for: site, in: universe)
+        let recovered = hasRecentRecoveryEvent(for: site, in: universe)
+        let hasPower = playerCombatPower(in: universe) >= site.requiredPower
+        let canRecover = hasRecycler(in: universe)
+
+        return [
+            ActionChain.Step(
+                kind: .scoutTarget,
+                title: "侦察目标",
+                status: scouted ? .complete : .ready
+            ),
+            ActionChain.Step(
+                kind: .strikeHostile,
+                title: "打击据点",
+                status: struck ? .complete : (scouted && hasPower ? .ready : .locked)
+            ),
+            ActionChain.Step(
+                kind: .recoverSpoils,
+                title: "回收战利品",
+                status: recovered ? .complete : (struck && canRecover ? .ready : .locked)
+            )
+        ]
+    }
+
+    private static func hasRecentReport(kind: Report.Kind, for site: HostileSite, in universe: Universe) -> Bool {
+        universe.reports.contains { report in
+            report.kind == kind &&
+                isRecent(report.time, in: universe) &&
+                report.participants.contains { $0.role == .attacker && $0.factionID == universe.playerFactionID } &&
+                reportMatches(site: site, report: report)
+        }
+    }
+
+    private static func reportMatches(site: HostileSite, report: Report) -> Bool {
+        if let targetPlanetID = site.targetPlanetID,
+           report.participants.contains(where: { $0.role == .defender && $0.planetID == targetPlanetID }) {
+            return true
+        }
+
+        return report.title.contains(site.coordinate.displayText) || report.summary.contains(site.coordinate.displayText)
+    }
+
+    private static func hasRecentRecoveryEvent(for site: HostileSite, in universe: Universe) -> Bool {
+        universe.events.contains { event in
+            event.title == "Debris Recovered" &&
+                isRecent(event.time, in: universe) &&
+                event.message.contains(site.coordinate.displayText)
+        }
+    }
+
+    private static func isRecent(_ time: TimeInterval, in universe: Universe) -> Bool {
+        time <= universe.gameTime && time >= universe.gameTime - actionChainDuration
     }
 
     private static func generatedSectorControl(in universe: Universe) -> [SectorControlSummary] {

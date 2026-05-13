@@ -84,7 +84,7 @@ public enum ActionChainRewardEngine {
     }
 
     public static func canClaim(_ chain: ActionChain, at gameTime: TimeInterval) -> Bool {
-        chain.expiresAt > gameTime && !chain.steps.contains { $0.status == .locked }
+        chain.expiresAt > gameTime && chain.steps.allSatisfy { $0.status == .complete }
     }
 
     private static func firstPlayerPlanetIndex(in universe: Universe) -> Int? {
