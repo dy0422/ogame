@@ -1015,6 +1015,53 @@ final class AppModel: ObservableObject {
         launchFleet(originID: origin.id, targetID: targetID, mission: mission, ships: plan.ships, cargo: .zero)
     }
 
+    func launchStarMapMission(
+        originID: PlanetID?,
+        slot: SolarSystemSlotSummary,
+        mission: Fleet.Mission,
+        ships: [ShipKind: Int],
+        cargo: ResourceBundle,
+        speedPercent: Double = 1,
+        commanderID: CommanderID? = nil
+    ) {
+        guard starMapMissionIsAllowed(mission, for: slot) else {
+            statusMessage = "无法从星图派遣：该目标不支持\(mission.localizedName)。"
+            return
+        }
+
+        guard let plan = starMapMissionPlan(
+            originID: originID,
+            mission: mission,
+            slot: slot,
+            ships: ships,
+            cargo: cargo,
+            speedPercent: speedPercent
+        ) else {
+            statusMessage = "无法从星图派遣：无法生成任务计划。"
+            return
+        }
+
+        guard plan.isLaunchable else {
+            statusMessage = "无法从星图派遣：\(plan.blockers.map(\.localizedName).joined(separator: "、"))。"
+            return
+        }
+
+        guard let targetID = ensureStarMapFleetTarget(for: slot) else {
+            statusMessage = "无法从星图派遣：目标槽位无效。"
+            return
+        }
+
+        launchFleet(
+            originID: originID,
+            targetID: targetID,
+            mission: mission,
+            ships: ships,
+            cargo: cargo,
+            speedPercent: speedPercent,
+            commanderID: commanderID
+        )
+    }
+
     func ensureFleetTarget(galaxy: Int, system: Int, position: Int) -> PlanetID? {
         let coordinate = Coordinate(galaxy: galaxy, system: system, position: position)
         guard UniverseTopologyEngine.isValidPlanetCoordinate(coordinate) ||
@@ -1580,15 +1627,45 @@ final class AppModel: ObservableObject {
         }
 
         let ships = defaultShips(for: mission, on: origin)
-        return FleetMissionPlannerEngine.plan(
+        return starMapMissionPlan(
             originID: origin.id,
+            mission: mission,
+            slot: slot,
+            ships: ships
+        )
+    }
+
+    func starMapMissionPlan(
+        originID: PlanetID?,
+        mission: Fleet.Mission,
+        slot: SolarSystemSlotSummary,
+        ships: [ShipKind: Int],
+        cargo: ResourceBundle = .zero,
+        speedPercent: Double = 1
+    ) -> FleetMissionPlan? {
+        guard originID != nil else {
+            return nil
+        }
+
+        return FleetMissionPlannerEngine.plan(
+            originID: originID,
             targetID: slot.planetID,
             targetCoordinate: slot.coordinate,
             targetIsVisible: slot.isVisible,
             in: universe,
             mission: mission,
-            ships: ships
+            ships: ships,
+            cargo: cargo,
+            speedPercent: speedPercent
         )
+    }
+
+    func recommendedStarMapShips(for mission: Fleet.Mission, originID: PlanetID?) -> [ShipKind: Int] {
+        guard let origin = planet(for: originID) else {
+            return [:]
+        }
+
+        return defaultShips(for: mission, on: origin)
     }
 
     func primaryStarMapMissionPlan(for slot: SolarSystemSlotSummary) -> FleetMissionPlan? {
@@ -2988,7 +3065,7 @@ final class AppModel: ObservableObject {
     private func starMapMissionIsAllowed(_ mission: Fleet.Mission, for slot: SolarSystemSlotSummary) -> Bool {
         switch mission {
         case .colonize:
-            return slot.planetID == nil &&
+            return (slot.planetID == nil || (slot.isVisible && !slot.isPlayerOwned && slot.ownerKind == nil)) &&
                 !slot.isExpedition &&
                 UniverseTopologyEngine.isValidPlanetCoordinate(slot.coordinate)
         case .explore:
@@ -3001,7 +3078,9 @@ final class AppModel: ObservableObject {
             return slot.planetID != nil && slot.isVisible && !slot.isPlayerOwned && slot.ownerKind != nil
         case .defend:
             return slot.planetID != nil && slot.isVisible && slot.isPlayerOwned
-        case .transport, .returning:
+        case .transport:
+            return slot.planetID != nil && slot.isVisible && slot.isPlayerOwned
+        case .returning:
             return false
         }
     }

@@ -3829,6 +3829,7 @@ private struct StarMapView: View {
     @ObservedObject var model: AppModel
     @SceneStorage("starMap.selectedGalaxy") private var selectedGalaxy = 1
     @SceneStorage("starMap.selectedSystem") private var selectedSystem = 1
+    @SceneStorage("starMap.selectedPosition") private var selectedPosition = UniverseTopologyEngine.expeditionPosition
 
     private var allPlanets: [StarMapPlanetSummary] {
         model.starMapSections.flatMap(\.planets)
@@ -3861,6 +3862,7 @@ private struct StarMapView: View {
             SolarSystemPanel(
                 galaxy: $selectedGalaxy,
                 system: $selectedSystem,
+                selectedPosition: $selectedPosition,
                 model: model,
                 slots: model.solarSystemSlots(galaxy: selectedGalaxy, system: selectedSystem)
             )
@@ -3880,8 +3882,13 @@ private struct StarMapView: View {
 private struct SolarSystemPanel: View {
     @Binding var galaxy: Int
     @Binding var system: Int
+    @Binding var selectedPosition: Int
     @ObservedObject var model: AppModel
     let slots: [SolarSystemSlotSummary]
+
+    private var selectedSlot: SolarSystemSlotSummary? {
+        slots.first { $0.position == selectedPosition } ?? slots.first
+    }
 
     var body: some View {
         PanelSurface {
@@ -3913,8 +3920,21 @@ private struct SolarSystemPanel: View {
                     spacing: 8
                 ) {
                     ForEach(slots) { slot in
-                        SolarSystemSlotTile(slot: slot, model: model)
+                        SolarSystemSlotTile(
+                            slot: slot,
+                            model: model,
+                            isSelected: slot.position == selectedPosition
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectedPosition = slot.position
+                        }
                     }
+                }
+
+                if let selectedSlot {
+                    Divider()
+                    StarMapFleetDispatchPanel(model: model, slot: selectedSlot)
                 }
             }
         }
@@ -3925,6 +3945,7 @@ private struct SolarSystemPanel: View {
 private struct SolarSystemSlotTile: View {
     let slot: SolarSystemSlotSummary
     @ObservedObject var model: AppModel
+    let isSelected: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -3988,7 +4009,7 @@ private struct SolarSystemSlotTile: View {
         .background(tint.opacity(backgroundOpacity), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(tint.opacity(0.18))
+                .stroke(isSelected ? tint.opacity(0.72) : tint.opacity(0.18), lineWidth: isSelected ? 2 : 1)
         }
     }
 
@@ -4051,6 +4072,221 @@ private struct SolarSystemSlotTile: View {
 
     private var backgroundOpacity: Double {
         slot.planetID == nil ? 0.08 : 0.12
+    }
+}
+
+private struct StarMapFleetDispatchPanel: View {
+    @ObservedObject var model: AppModel
+    let slot: SolarSystemSlotSummary
+    @State private var originID: PlanetID?
+    @State private var mission: Fleet.Mission = .explore
+    @State private var selectedShips: [ShipKind: Int] = [:]
+    @State private var metalCargo = 0.0
+    @State private var crystalCargo = 0.0
+    @State private var deuteriumCargo = 0.0
+    @State private var speedPercent = 1.0
+    @State private var commanderID: CommanderID?
+
+    private var missionOptions: [Fleet.Mission] {
+        starMapMissionOptions(for: slot)
+    }
+
+    private var launchCargo: ResourceBundle {
+        ResourceBundle(
+            metal: max(0, metalCargo),
+            crystal: max(0, crystalCargo),
+            deuterium: max(0, deuteriumCargo)
+        )
+    }
+
+    private var origin: Planet? {
+        model.planet(for: originID)
+    }
+
+    private var plan: FleetMissionPlan? {
+        model.starMapMissionPlan(
+            originID: originID,
+            mission: mission,
+            slot: slot,
+            ships: selectedShips,
+            cargo: launchCargo,
+            speedPercent: speedPercent
+        )
+    }
+
+    private var slotSignature: String {
+        [
+            slot.coordinate.displayText,
+            slot.planetID?.rawValue.uuidString ?? "empty",
+            slot.ownerName,
+            slot.isVisible ? "visible" : "hidden",
+            slot.isPlayerOwned ? "owned" : "not-owned"
+        ].joined(separator: "|")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionTitle(title: "舰队派遣", detail: "\(slot.displayName) \(slot.coordinate.displayText)")
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 190), alignment: .topLeading)],
+                alignment: .leading,
+                spacing: 12
+            ) {
+                PlanetPicker(title: "出发地", selection: $originID, planets: model.playerPlanets, emptyTitle: "无殖民地")
+                StarMapMissionPicker(mission: $mission, missions: missionOptions)
+                CommanderPicker(model: model, selection: $commanderID)
+            }
+
+            FleetShipSelector(origin: origin, model: model, selectedShips: $selectedShips)
+
+            CargoEditor(
+                metalCargo: $metalCargo,
+                crystalCargo: $crystalCargo,
+                deuteriumCargo: $deuteriumCargo
+            )
+
+            FleetSpeedPicker(speedPercent: $speedPercent)
+
+            if let plan {
+                StarMapDispatchPlanSummary(plan: plan)
+            }
+
+            HStack {
+                Spacer()
+
+                Button {
+                    model.launchStarMapMission(
+                        originID: originID,
+                        slot: slot,
+                        mission: mission,
+                        ships: selectedShips,
+                        cargo: launchCargo,
+                        speedPercent: speedPercent,
+                        commanderID: commanderID
+                    )
+                } label: {
+                    Label("从星图派遣", systemImage: "paperplane.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!(plan?.isLaunchable ?? false))
+            }
+        }
+        .padding(.top, 4)
+        .onAppear {
+            configureForSlot(resetShips: true)
+        }
+        .onChange(of: slotSignature) { _ in
+            configureForSlot(resetShips: true)
+        }
+        .onChange(of: originID) { _ in
+            configureForSlot(resetShips: selectedShips.isEmpty)
+        }
+        .onChange(of: mission) { _ in
+            applyRecommendedShips()
+        }
+    }
+
+    private func configureForSlot(resetShips: Bool) {
+        if originID == nil {
+            originID = model.defaultOriginPlanetID()
+        }
+
+        if !missionOptions.contains(mission) {
+            mission = missionOptions.first ?? .explore
+        }
+
+        clampShipSelection()
+        clampCommanderSelection()
+
+        if resetShips || selectedShips.isEmpty {
+            applyRecommendedShips()
+        }
+    }
+
+    private func applyRecommendedShips() {
+        let recommended = model.recommendedStarMapShips(for: mission, originID: originID)
+        if !recommended.isEmpty {
+            selectedShips = recommended
+        }
+    }
+
+    private func clampShipSelection() {
+        guard let origin else {
+            selectedShips = [:]
+            return
+        }
+
+        var clampedShips: [ShipKind: Int] = [:]
+        for kind in model.availableShipKinds {
+            let available = origin.shipInventory[kind, default: 0]
+            let selected = selectedShips[kind, default: 0]
+            let clamped = min(max(0, selected), max(0, available))
+            if clamped > 0 {
+                clampedShips[kind] = clamped
+            }
+        }
+        selectedShips = clampedShips
+    }
+
+    private func clampCommanderSelection() {
+        guard let commanderID,
+              model.availableCommandersForFleet.contains(where: { $0.id == commanderID })
+        else {
+            if commanderID != nil {
+                self.commanderID = nil
+            }
+            return
+        }
+    }
+}
+
+private struct StarMapMissionPicker: View {
+    @Binding var mission: Fleet.Mission
+    let missions: [Fleet.Mission]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("任务")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Picker("任务", selection: $mission) {
+                ForEach(missions, id: \.rawValue) { option in
+                    Label(option.localizedName, systemImage: option.systemImage)
+                        .tag(option)
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+private struct StarMapDispatchPlanSummary: View {
+    let plan: FleetMissionPlan
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 140), alignment: .topLeading)],
+                alignment: .leading,
+                spacing: 10
+            ) {
+                DispatchMetric(title: "任务", value: plan.mission.localizedName)
+                DispatchMetric(title: "容量", value: "\(Formatters.wholeNumber(plan.cargoUsed)) / \(Formatters.wholeNumber(plan.cargoCapacity))")
+                DispatchMetric(title: "燃料", value: Formatters.wholeNumber(plan.fuelCost), isWarning: plan.blockers.contains(.insufficientFuel))
+                DispatchMetric(title: "航程", value: Formatters.wholeSeconds(plan.travelDuration))
+                DispatchMetric(
+                    title: "状态",
+                    value: plan.isLaunchable ? "可发射" : plan.blockers.first?.localizedName ?? "不可发射",
+                    isWarning: !plan.isLaunchable
+                )
+            }
+
+            FleetPlanNotesView(plan: plan)
+        }
     }
 }
 
@@ -4149,27 +4385,7 @@ private struct StarMapSlotActions: View {
     @ObservedObject var model: AppModel
 
     private var missions: [Fleet.Mission] {
-        if slot.isExpedition {
-            return [.explore]
-        }
-        if slot.planetID == nil {
-            return [.colonize]
-        }
-        if slot.isPlayerOwned {
-            return [.defend]
-        }
-
-        var result: [Fleet.Mission] = []
-        if slot.isVisible && slot.ownerKind != nil {
-            result.append(.espionage)
-            result.append(.attack)
-        } else {
-            result.append(.explore)
-        }
-        if slot.debrisTotal > 0 {
-            result.append(.recycle)
-        }
-        return result
+        starMapMissionOptions(for: slot)
     }
 
     var body: some View {
@@ -4192,6 +4408,32 @@ private struct StarMapSlotActions: View {
             }
         }
     }
+}
+
+private func starMapMissionOptions(for slot: SolarSystemSlotSummary) -> [Fleet.Mission] {
+    if slot.isExpedition {
+        return [.explore]
+    }
+
+    if slot.isPlayerOwned {
+        return [.transport, .defend]
+    }
+
+    var result: [Fleet.Mission] = []
+    if slot.planetID == nil || (slot.isVisible && slot.ownerKind == nil) {
+        result.append(.colonize)
+    } else if slot.isVisible && slot.ownerKind != nil {
+        result.append(.espionage)
+        result.append(.attack)
+    } else {
+        result.append(.explore)
+    }
+
+    if slot.debrisTotal > 0 {
+        result.append(.recycle)
+    }
+
+    return result
 }
 
 private struct StarMapGalaxyStrip: View {
