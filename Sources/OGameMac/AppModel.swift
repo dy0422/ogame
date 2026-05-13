@@ -145,7 +145,7 @@ final class AppModel: ObservableObject {
                     statusText: statusText,
                     canClaim: canClaim,
                     quickActionTitle: Self.actionChainQuickActionTitle(for: quickPlan),
-                    quickActionDetail: Self.actionChainQuickActionDetail(for: quickPlan),
+                    quickActionDetail: Self.actionChainQuickActionDetail(for: quickPlan, in: universe),
                     feedbackText: Self.actionChainFeedbackText(for: feedback),
                     canQuickLaunch: quickPlan.isLaunchable
                 )
@@ -1070,7 +1070,8 @@ final class AppModel: ObservableObject {
             to: targetID,
             in: &universe,
             mission: mission,
-            ships: plan.ships
+            ships: plan.ships,
+            commanderID: plan.commanderID
         )
 
         switch result {
@@ -3523,7 +3524,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private static func actionChainQuickActionDetail(for plan: ActionChainFleetActionPlan) -> String? {
+    private static func actionChainQuickActionDetail(for plan: ActionChainFleetActionPlan, in universe: Universe) -> String? {
         guard let title = actionChainQuickActionTitle(for: plan) else {
             return nil
         }
@@ -3542,7 +3543,8 @@ final class AppModel: ObservableObject {
                 .map { "\($0.key.localizedName) x\($0.value)" }
                 .joined(separator: "、")
             let powerText = actionChainPowerText(for: plan)
-            return "\(title)：\(mission.localizedName) · \(shipText)\(powerText)"
+            let commanderText = actionChainCommanderText(for: plan.commanderID, in: universe)
+            return "\(title)：\(mission.localizedName) · \(shipText)\(powerText)\(commanderText)"
         }
         if !plan.blockers.isEmpty {
             return "\(title)：\(plan.blockers.map(\.localizedName).joined(separator: "、"))"
@@ -3556,6 +3558,17 @@ final class AppModel: ObservableObject {
         }
 
         return "\(feedback.title) · \(feedback.detail)"
+    }
+
+    private static func actionChainCommanderText(for commanderID: CommanderID?, in universe: Universe) -> String {
+        guard let commanderID,
+              let commander = universe.commanderRoster.ownedCommanders.first(where: { $0.id == commanderID }),
+              let definition = CommanderCatalog.definition(id: commander.definitionID)
+        else {
+            return ""
+        }
+
+        return " · 指挥官 \(definition.name)"
     }
 
     private static func actionChainPowerText(for plan: ActionChainFleetActionPlan) -> String {

@@ -34,6 +34,7 @@ public struct ActionChainFleetActionPlan: Equatable, Sendable {
     public var mission: Fleet.Mission?
     public var originID: PlanetID?
     public var targetID: PlanetID?
+    public var commanderID: CommanderID?
     public var ships: [ShipKind: Int]
     public var blockers: [FleetMissionPlan.Blocker]
     public var selectedPower: Double
@@ -46,6 +47,7 @@ public struct ActionChainFleetActionPlan: Equatable, Sendable {
         mission: Fleet.Mission? = nil,
         originID: PlanetID? = nil,
         targetID: PlanetID? = nil,
+        commanderID: CommanderID? = nil,
         ships: [ShipKind: Int] = [:],
         blockers: [FleetMissionPlan.Blocker] = [],
         selectedPower: Double = 0,
@@ -57,6 +59,7 @@ public struct ActionChainFleetActionPlan: Equatable, Sendable {
         self.mission = mission
         self.originID = originID
         self.targetID = targetID
+        self.commanderID = commanderID
         self.ships = ships.filter { $0.value > 0 }
         self.blockers = blockers
         self.selectedPower = selectedPower.isFinite ? max(selectedPower, 0) : 0
@@ -167,7 +170,7 @@ public enum ActionChainFleetPlannerEngine {
             guard !ships.isEmpty else {
                 continue
             }
-            let selectedPower = combatPower(for: ships, ruleSet: universe.ruleSet)
+            let commanderID = recommendedCommanderID(for: mission, ownerID: universe.playerFactionID, in: universe)
 
             let fleetPlan = FleetMissionPlannerEngine.plan(
                 originID: origin.id,
@@ -183,9 +186,14 @@ public enum ActionChainFleetPlannerEngine {
                 mission: mission,
                 originID: origin.id,
                 targetID: targetID,
+                commanderID: commanderID,
                 ships: ships,
                 blockers: fleetPlan.blockers,
-                selectedPower: selectedPower,
+                selectedPower: combatPower(
+                    for: ships,
+                    ruleSet: universe.ruleSet,
+                    commanderBonus: CommanderBonusEngine.fleetBonus(for: commanderID, in: universe)
+                ),
                 requiredPower: requiredPower
             )
             if actionPlan.isLaunchable {
@@ -234,12 +242,112 @@ public enum ActionChainFleetPlannerEngine {
         }
     }
 
-    private static func combatPower(for ships: [ShipKind: Int], ruleSet: RuleSet) -> Double {
+    private static func recommendedCommanderID(
+        for mission: Fleet.Mission,
+        ownerID: FactionID,
+        in universe: Universe
+    ) -> CommanderID? {
+        let busyCommanderIDs = Set(
+            universe.fleets
+                .filter { $0.ownerID == ownerID && $0.phase != .completed }
+                .compactMap(\.commanderID)
+        )
+
+        return universe.commanderRoster.ownedCommanders
+            .filter { !busyCommanderIDs.contains($0.id) }
+            .sorted { lhs, rhs in
+                let lhsScore = commanderPreferenceScore(lhs, mission: mission)
+                let rhsScore = commanderPreferenceScore(rhs, mission: mission)
+                if lhsScore != rhsScore {
+                    return lhsScore > rhsScore
+                }
+                if lhs.rarity != rhs.rarity {
+                    return lhs.rarity > rhs.rarity
+                }
+                if lhs.level != rhs.level {
+                    return lhs.level > rhs.level
+                }
+                return lhs.id.rawValue.uuidString < rhs.id.rawValue.uuidString
+            }
+            .first?
+            .id
+    }
+
+    private static func commanderPreferenceScore(_ commander: OwnedCommander, mission: Fleet.Mission) -> Int {
+        guard let definition = CommanderCatalog.definition(id: commander.definitionID) else {
+            return 0
+        }
+
+        switch mission {
+        case .attack, .defend:
+            switch definition.specialty {
+            case .fleetAdmiral:
+                return 100
+            case .technocrat:
+                return 80
+            case .engineer:
+                return 70
+            case .geologist:
+                return 40
+            case .explorer:
+                return 30
+            }
+        case .espionage:
+            switch definition.specialty {
+            case .technocrat:
+                return 100
+            case .explorer:
+                return 70
+            case .fleetAdmiral:
+                return 60
+            case .engineer:
+                return 40
+            case .geologist:
+                return 30
+            }
+        case .recycle, .transport:
+            switch definition.specialty {
+            case .geologist:
+                return 100
+            case .engineer:
+                return 70
+            case .fleetAdmiral:
+                return 50
+            case .technocrat:
+                return 40
+            case .explorer:
+                return 30
+            }
+        case .explore, .colonize:
+            switch definition.specialty {
+            case .explorer:
+                return 100
+            case .geologist:
+                return 60
+            case .engineer:
+                return 50
+            case .technocrat:
+                return 40
+            case .fleetAdmiral:
+                return 30
+            }
+        case .returning:
+            return 0
+        }
+    }
+
+    private static func combatPower(
+        for ships: [ShipKind: Int],
+        ruleSet: RuleSet,
+        commanderBonus: CommanderFleetBonus = .none
+    ) -> Double {
         ships.reduce(0) { total, element in
             guard let rule = ruleSet.shipRules[element.key] else {
                 return total
             }
-            return total + (max(rule.attack, 0) + max(rule.shield, 0)) * Double(max(element.value, 0))
+            let attack = max(rule.attack, 0) * commanderBonus.attackMultiplier
+            let shield = max(rule.shield, 0) * commanderBonus.shieldMultiplier
+            return total + (attack + shield) * Double(max(element.value, 0))
         }
     }
 

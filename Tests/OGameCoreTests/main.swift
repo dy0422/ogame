@@ -1942,6 +1942,49 @@ func testActionChainFleetPlannerChoosesSufficientHostileStrikeOrigin() {
     requireEqual(plan.riskLevel, .low, "Sufficient strike should be marked low risk")
 }
 
+func testActionChainFleetPlannerRecommendsAvailableCommanderForHostileStrike() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    universe.reports = []
+    let commander = OwnedCommander(
+        id: CommanderID(UUID(uuidString: "00000000-0000-0000-0000-00000000c701")!),
+        definitionID: "lin-vanguard",
+        rarity: .legendary,
+        level: 12,
+        acquiredAt: 0
+    )
+    universe.commanderRoster.ownedCommanders = [commander]
+    for index in universe.planets.indices where universe.planets[index].ownerID == universe.playerFactionID {
+        universe.planets[index].resources.deuterium = 1_000_000
+    }
+
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let site = universe.hostileSites.sorted(by: { $0.threatLevel < $1.threatLevel }).first,
+          let targetID = site.targetPlanetID
+    else {
+        fatalError("Expansion should create a hostile site")
+    }
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 60,
+            kind: .espionage,
+            title: "Espionage at \(site.coordinate.displayText)",
+            summary: "Intel",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: strategicPlanetID(1), name: "Scout"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ]
+        )
+    )
+    GameplayExpansionEngine.refresh(in: &universe)
+    let chain = requireHostileActionChain(in: universe)
+
+    let plan = ActionChainFleetPlannerEngine.nextActionPlan(for: chain.id, in: universe)
+
+    requireEqual(plan.stepKind, .strikeHostile, "Planner should advance to hostile strike")
+    requireEqual(plan.commanderID, commander.id, "Hostile quick strike should recommend an available commander")
+    require(plan.selectedPower >= plan.requiredPower, "Commander-backed strike should still expose sufficient power")
+}
+
 func testActionChainFeedbackSummarizesLatestHostileBattleReport() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     universe.reports = []
@@ -7962,6 +8005,7 @@ testClaimedHostileActionChainClearsHostileSiteAndSuppressesRefresh()
 testHostileActionChainProgressesFromReportsAndRecoveryEvents()
 testActionChainFleetPlannerRecommendsNextHostileMission()
 testActionChainFleetPlannerChoosesSufficientHostileStrikeOrigin()
+testActionChainFleetPlannerRecommendsAvailableCommanderForHostileStrike()
 testActionChainFeedbackSummarizesLatestHostileBattleReport()
 testClaimedActionChainDoesNotRegenerateOnExpansionRefresh()
 testStrategicAdvisorSurfacesExpansionOpportunities()
