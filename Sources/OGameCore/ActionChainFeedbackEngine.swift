@@ -3,6 +3,7 @@ import Foundation
 public struct ActionChainFeedback: Equatable, Sendable {
     public enum Kind: String, Equatable, Sendable {
         case battle
+        case recovery
     }
 
     public var kind: Kind
@@ -50,9 +51,20 @@ public enum ActionChainFeedbackEngine {
     public static func feedback(for chainID: UUID, in universe: Universe) -> ActionChainFeedback? {
         guard let chain = universe.actionChains.first(where: { $0.id == chainID }),
               chain.kind == .hostileRaid,
-              let site = hostileSite(for: chain, in: universe),
-              let report = latestBattleReport(for: site, in: universe)
+              let site = hostileSite(for: chain, in: universe)
         else {
+            return nil
+        }
+
+        let report = latestBattleReport(for: site, in: universe)
+        let recoveryEvent = latestRecoveryEvent(for: site, in: universe)
+        if let recoveryEvent,
+           report == nil || recoveryEvent.time >= (report?.time ?? 0)
+        {
+            return recoveryFeedback(for: recoveryEvent)
+        }
+
+        guard let report else {
             return nil
         }
 
@@ -83,6 +95,22 @@ public enum ActionChainFeedbackEngine {
         )
     }
 
+    private static func recoveryFeedback(for event: GameEvent) -> ActionChainFeedback {
+        ActionChainFeedback(
+            kind: .recovery,
+            title: "最近回收",
+            detail: event.message,
+            reportID: event.id.rawValue,
+            reportTime: event.time,
+            loot: .zero,
+            debris: .zero,
+            losses: .zero,
+            moonChancePercent: 0,
+            commanderExperienceEstimate: 0,
+            roundCount: 0
+        )
+    }
+
     private static func latestBattleReport(for site: HostileSite, in universe: Universe) -> Report? {
         universe.reports
             .filter { report in
@@ -96,6 +124,22 @@ public enum ActionChainFeedbackEngine {
                     return lhs.time > rhs.time
                 }
                 return lhs.id.uuidString > rhs.id.uuidString
+            }
+            .first
+    }
+
+    private static func latestRecoveryEvent(for site: HostileSite, in universe: Universe) -> GameEvent? {
+        universe.events
+            .filter { event in
+                event.title == "Debris Recovered" &&
+                    isRecent(event.time, in: universe) &&
+                    event.message.contains(site.coordinate.displayText)
+            }
+            .sorted { lhs, rhs in
+                if lhs.time != rhs.time {
+                    return lhs.time > rhs.time
+                }
+                return lhs.id.rawValue.uuidString > rhs.id.rawValue.uuidString
             }
             .first
     }

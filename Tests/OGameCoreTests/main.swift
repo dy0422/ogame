@@ -2131,6 +2131,49 @@ func testActionChainFeedbackSummarizesLatestHostileBattleReport() {
     require(feedback.detail.contains("月球"), "Feedback detail should mention moon chance for follow-up decisions")
 }
 
+func testActionChainFeedbackPrefersRecentHostileRecoveryEvent() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    universe.reports = []
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let site = universe.hostileSites.sorted(by: { $0.threatLevel < $1.threatLevel }).first,
+          let targetID = site.targetPlanetID
+    else {
+        fatalError("Expansion should create a hostile site with a target")
+    }
+    let recoveryEvent = GameEvent(
+        id: EventID(UUID(uuidString: "00000000-0000-0000-0000-00000000b801")!),
+        time: universe.gameTime - 10,
+        kind: .system,
+        title: "Debris Recovered",
+        message: "回收舰队在 \(site.coordinate.displayText) 回收 金属 600 / 晶体 300 / 重氢 0。"
+    )
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 40,
+            kind: .battle,
+            title: "Battle at \(site.coordinate.displayText)",
+            summary: "Attacker wins.",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: strategicPlanetID(1), name: "Raider"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ],
+            debris: ResourceBundle(metal: 600, crystal: 300)
+        )
+    )
+    universe.events.append(recoveryEvent)
+    GameplayExpansionEngine.refresh(in: &universe)
+    let chain = requireHostileActionChain(in: universe)
+
+    guard let feedback = ActionChainFeedbackEngine.feedback(for: chain.id, in: universe) else {
+        fatalError("Completed hostile action chain should expose recovery feedback")
+    }
+
+    requireEqual(feedback.kind, .recovery, "Feedback should prefer a newer debris recovery event over the battle report")
+    requireEqual(feedback.reportID, recoveryEvent.id.rawValue, "Recovery feedback should keep the source event id")
+    require(feedback.title.contains("最近回收"), "Recovery feedback should be titled as recovery")
+    require(feedback.detail.contains("金属 600"), "Recovery feedback should keep recovered resource details")
+}
+
 func testClaimedActionChainDoesNotRegenerateOnExpansionRefresh() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     GameplayExpansionEngine.refresh(in: &universe)
@@ -4378,6 +4421,14 @@ func testRecycleMissionCollectsDebrisFromTargetPlanet() {
 
     requireEqual(requirePlanet(fleetPlanetID(2), in: universe, "Debris target should remain").debrisField, .zero, "Recycle mission should clear collected debris")
     requireApproxEqual(universe.fleets[0].cargo, ResourceBundle(metal: 600, crystal: 300), "Recycle mission should carry collected debris home")
+    require(
+        universe.events.contains { event in
+            event.title == "Debris Recovered" &&
+                event.message.contains("金属 600") &&
+                event.message.contains("晶体 300")
+        },
+        "Recycle mission should record the recovered resource amounts for player feedback"
+    )
 
     universe.gameTime = launchedFleet.returnTime
     FleetEngine.resolveDueFleets(in: &universe)
@@ -8065,6 +8116,7 @@ testActionChainFleetPlannerChoosesSufficientHostileStrikeOrigin()
 testActionChainFleetPlannerRecommendsAvailableCommanderForHostileStrike()
 testActionChainFleetPlannerSizesRecyclerWaveForHostileDebris()
 testActionChainFeedbackSummarizesLatestHostileBattleReport()
+testActionChainFeedbackPrefersRecentHostileRecoveryEvent()
 testClaimedActionChainDoesNotRegenerateOnExpansionRefresh()
 testStrategicAdvisorSurfacesExpansionOpportunities()
 testStrategicAdvisorSurfacesCommanderRecruitmentAndAssignment()

@@ -561,7 +561,7 @@ public enum FleetEngine {
                 let collected = collectResources(from: universe.planets[targetIndex].debrisField, limit: availableCapacity)
                 universe.planets[targetIndex].debrisField = universe.planets[targetIndex].debrisField.subtracting(collected).nonnegative
                 returningFleet.cargo = safeAdding(fleet.cargo, collected)
-                universe.events.append(missionEvent(for: fleet, time: fleet.arrivalTime, kind: .system, title: "Debris Recovered"))
+                universe.events.append(recycleEvent(for: fleet, time: fleet.arrivalTime, collected: collected))
             }
         case .explore:
             let commanderBonus = CommanderBonusEngine.fleetBonus(for: fleet.commanderID, in: universe)
@@ -1374,6 +1374,29 @@ public enum FleetEngine {
         )
     }
 
+    private static func recycleEvent(for fleet: Fleet, time: TimeInterval, collected: ResourceBundle) -> GameEvent {
+        GameEvent(
+            id: EventID(
+                stableUUID(
+                    namespace: "000e",
+                    payload: [
+                        "Debris Recovered",
+                        fleet.id.rawValue.uuidString,
+                        fleet.mission.rawValue,
+                        fleet.phase.rawValue,
+                        String(time),
+                        resourcePayload(collected),
+                        shipPayload(fleet.ships)
+                    ].joined(separator: "|")
+                )
+            ),
+            time: time,
+            kind: .system,
+            title: "Debris Recovered",
+            message: "回收舰队在 \(fleet.target.displayText) 回收 \(resourceSummary(collected))。"
+        )
+    }
+
     private static func stableUUID(namespace: String, payload: String) -> UUID {
         let tail = String(format: "%012llx", stableHash(payload) & 0x0000_FFFF_FFFF_FFFF)
         return UUID(uuidString: "00000000-0000-0000-\(namespace)-\(tail)")!
@@ -1400,6 +1423,18 @@ public enum FleetEngine {
 
     private static func resourcePayload(_ resources: ResourceBundle) -> String {
         "\(resources.metal),\(resources.crystal),\(resources.deuterium)"
+    }
+
+    private static func resourceSummary(_ resources: ResourceBundle) -> String {
+        "金属 \(wholeNumber(resources.metal)) / 晶体 \(wholeNumber(resources.crystal)) / 重氢 \(wholeNumber(resources.deuterium))"
+    }
+
+    private static func wholeNumber(_ value: Double) -> String {
+        guard value.isFinite, abs(value) <= Double(Int.max) else {
+            return "未知"
+        }
+
+        return String(Int(value.rounded()))
     }
 }
 
