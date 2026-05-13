@@ -6,9 +6,15 @@ public struct PlayerAutoUpgradeResult: Equatable, Sendable {
     public var queuedShips: Int
     public var queuedDefenses: Int
     public var queuedMissiles: Int
+    public var claimedActionChains: Int
 
     public var didQueue: Bool {
-        queuedBuildings > 0 || queuedResearch > 0 || queuedShips > 0 || queuedDefenses > 0 || queuedMissiles > 0
+        queuedBuildings > 0 ||
+            queuedResearch > 0 ||
+            queuedShips > 0 ||
+            queuedDefenses > 0 ||
+            queuedMissiles > 0 ||
+            claimedActionChains > 0
     }
 
     public init(
@@ -16,13 +22,15 @@ public struct PlayerAutoUpgradeResult: Equatable, Sendable {
         queuedResearch: Int = 0,
         queuedShips: Int = 0,
         queuedDefenses: Int = 0,
-        queuedMissiles: Int = 0
+        queuedMissiles: Int = 0,
+        claimedActionChains: Int = 0
     ) {
         self.queuedBuildings = queuedBuildings
         self.queuedResearch = queuedResearch
         self.queuedShips = queuedShips
         self.queuedDefenses = queuedDefenses
         self.queuedMissiles = queuedMissiles
+        self.claimedActionChains = claimedActionChains
     }
 }
 
@@ -37,6 +45,7 @@ public enum PlayerAutoUpgradeEngine {
         }
 
         var result = PlayerAutoUpgradeResult()
+        result.claimedActionChains += claimCompletedActionChains(in: &universe)
         let shouldQueueShipsFirst = policy.allowShipConstruction && shouldQueueShipsBeforeInfrastructure(
             for: player,
             policy: policy,
@@ -59,6 +68,28 @@ public enum PlayerAutoUpgradeEngine {
         }
 
         return result
+    }
+
+    private static func claimCompletedActionChains(in universe: inout Universe) -> Int {
+        let claimableIDs = universe.actionChains
+            .filter { ActionChainRewardEngine.canClaim($0, at: universe.gameTime) }
+            .sorted { lhs, rhs in
+                if lhs.expiresAt != rhs.expiresAt {
+                    return lhs.expiresAt < rhs.expiresAt
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            .map(\.id)
+
+        var claimed = 0
+        for chainID in claimableIDs {
+            let result = ActionChainRewardEngine.claim(chainID, in: &universe)
+            if result.status == .claimed {
+                claimed += 1
+            }
+        }
+
+        return claimed
     }
 
     private static func queueBuildings(

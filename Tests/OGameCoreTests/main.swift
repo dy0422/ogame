@@ -1753,6 +1753,43 @@ func testActionChainRewardClaimRequiresCompletedSteps() {
     requireEqual(universe.actionChains.count, 1, "Incomplete chain should remain available")
 }
 
+func testAutoUpgradeClaimsCompletedActionChainRewardsWithoutSelectingCommanderCandidate() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    guard let receiverIndex = universe.planets.firstIndex(where: { $0.ownerID == universe.playerFactionID }) else {
+        fatalError("Expansion universe should include a player planet")
+    }
+    for index in universe.planets.indices where universe.planets[index].ownerID == universe.playerFactionID {
+        universe.planets[index].resources = .zero
+    }
+    let startingResources = universe.planets[receiverIndex].resources
+    let chain = ActionChain(
+        id: UUID(uuidString: "00000000-0000-0000-0000-00000000a703")!,
+        kind: .hostileRaid,
+        title: "托管领取测试",
+        detail: "托管可以领取奖励，但不自动确认指挥官候选。",
+        steps: [
+            ActionChain.Step(kind: .scoutTarget, title: "侦察目标", status: .complete),
+            ActionChain.Step(kind: .strikeHostile, title: "打击据点", status: .complete),
+            ActionChain.Step(kind: .recoverSpoils, title: "回收战利品", status: .complete)
+        ],
+        reward: ResourceBundle(metal: 1_000, crystal: 500),
+        commanderReward: CommanderRewardBundle(recruitmentTickets: 1, trainingData: 50, commanderDropChance: 1),
+        expiresAt: universe.gameTime + 600
+    )
+    universe.actionChains = [chain]
+
+    let result = PlayerAutoUpgradeEngine.makeDecisions(in: &universe, policy: AutoUpgradePolicy())
+
+    requireEqual(result.claimedActionChains, 1, "Automation should claim completed action chain rewards")
+    require(result.didQueue, "Claiming an action chain should count as automation activity for UI feedback")
+    requireEqual(universe.actionChains, [], "Claimed action chain should be removed")
+    requireEqual(universe.planets[receiverIndex].resources, startingResources.adding(chain.reward).nonnegative, "Automation claim should grant chain resources")
+    requireEqual(universe.commanderRoster.recruitmentTickets, 1, "Automation claim should grant commander tickets")
+    requireEqual(universe.commanderRoster.trainingData, 50, "Automation claim should grant training data")
+    requireEqual(universe.commanderRoster.pendingRecruits.count, 1, "Automation claim should leave commander drops pending for player selection")
+    requireEqual(universe.commanderRoster.ownedCommanders.count, 0, "Automation claim should not auto-select commander candidates")
+}
+
 func testClaimedHostileActionChainClearsHostileSiteAndSuppressesRefresh() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     GameplayExpansionEngine.refresh(in: &universe)
@@ -8133,6 +8170,7 @@ testGameplayExpansionDoesNotResetDamagedActiveHostileTarget()
 testGameplayExpansionSkipsHostileSitesWhenNeutralTargetsAreBusy()
 testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop()
 testActionChainRewardClaimRequiresCompletedSteps()
+testAutoUpgradeClaimsCompletedActionChainRewardsWithoutSelectingCommanderCandidate()
 testClaimedHostileActionChainClearsHostileSiteAndSuppressesRefresh()
 testHostileActionChainProgressesFromReportsAndRecoveryEvents()
 testActionChainFleetPlannerRecommendsNextHostileMission()

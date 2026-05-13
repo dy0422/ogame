@@ -2911,6 +2911,9 @@ final class AppModel: ObservableObject {
         if result.queuedMissiles > 0 {
             queuedItems.append("\(result.queuedMissiles) 项导弹")
         }
+        if result.claimedActionChains > 0 {
+            queuedItems.append("领取 \(result.claimedActionChains) 条行动链")
+        }
 
         let detail = queuedItems.isEmpty ? "升级" : queuedItems.joined(separator: "、")
         return "托管升级已加入\(detail)。"
