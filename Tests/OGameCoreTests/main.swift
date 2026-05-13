@@ -376,6 +376,29 @@ func testAutoUpgradeFleetStrategyCanBuildShipsWhenAllowed() {
     require(universe.planets[0].shipBuildQueue.isEmpty == false, "Fleet automation should queue ships")
 }
 
+func testAutoUpgradePrioritizesProbeForReadyHostileActionChainScout() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    universe.reports = []
+    for index in universe.planets.indices where universe.planets[index].ownerID == universe.playerFactionID {
+        universe.planets[index].resources = ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000)
+        universe.planets[index].shipInventory = [:]
+        universe.planets[index].shipBuildQueue = []
+    }
+    GameplayExpansionEngine.refresh(in: &universe)
+    let chain = requireHostileActionChain(in: universe)
+    requireEqual(stepStatus(.scoutTarget, in: chain), .ready, "Fixture should expose a ready scout step")
+
+    let policy = AutoUpgradePolicy(strategy: .fleet, allowShipConstruction: true)
+    let result = PlayerAutoUpgradeEngine.makeDecisions(in: &universe, policy: policy)
+
+    require(result.queuedShips > 0, "Fleet automation should queue a ship for a ready hostile action chain")
+    requireEqual(
+        universe.planets[0].shipBuildQueue.first?.unitKind,
+        .ship(.espionageProbe),
+        "Fleet automation should build probes before generic ships when a hostile scout step is ready"
+    )
+}
+
 func testAutoUpgradeRespectsResourceReserveRatio() {
     var universe = StarterUniverseFactory.makeNewGame(seed: 203, playerName: "指挥官")
     let startingResources = ResourceBundle(metal: 100, crystal: 100, deuterium: 100)
@@ -8064,6 +8087,7 @@ try testFleetCommanderIDDefaultsWhenDecodingOlderFleetJSON()
 testAutomationPolicyDefaultsToBalancedEconomySafeMode()
 testAutoUpgradeEconomyStrategyFillsMultipleBuildQueueItems()
 testAutoUpgradeFleetStrategyCanBuildShipsWhenAllowed()
+testAutoUpgradePrioritizesProbeForReadyHostileActionChainScout()
 testAutoUpgradeRespectsResourceReserveRatio()
 try testRuleSetBalanceRulesUseRawValueKeyedJSONObjects()
 try testRuleSetDecodesOlderJSONWithFastSkirmishBalanceDefaults()

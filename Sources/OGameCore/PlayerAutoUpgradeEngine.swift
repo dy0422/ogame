@@ -310,7 +310,7 @@ public enum PlayerAutoUpgradeEngine {
                 continue
             }
 
-            for ship in shipPriorities(for: policy.strategy) {
+            for ship in shipPriorities(for: player, strategy: policy.strategy, in: universe) {
                 guard let cost = QueueEngine.shipBuildCost(on: planetID, in: universe, kind: ship, quantity: 1),
                       canSpend(cost, from: planet.resources, reserveRatio: policy.resourceReserveRatio)
                 else {
@@ -425,6 +425,12 @@ public enum PlayerAutoUpgradeEngine {
         }
     }
 
+    private static func shipPriorities(for player: Faction, strategy: AutoUpgradeStrategy, in universe: Universe) -> [ShipKind] {
+        let baseline = shipPriorities(for: strategy)
+        let actionChainShips = actionChainShipNeeds(for: player, in: universe)
+        return unique(actionChainShips + baseline)
+    }
+
     private static func shipPriorities(for strategy: AutoUpgradeStrategy) -> [ShipKind] {
         switch strategy {
         case .fleet:
@@ -434,6 +440,68 @@ public enum PlayerAutoUpgradeEngine {
         default:
             return [.smallCargo, .espionageProbe, .lightFighter, .recycler, .colonyShip]
         }
+    }
+
+    private static func actionChainShipNeeds(for player: Faction, in universe: Universe) -> [ShipKind] {
+        universe.actionChains
+            .sorted { lhs, rhs in
+                if lhs.expiresAt != rhs.expiresAt {
+                    return lhs.expiresAt < rhs.expiresAt
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            .compactMap { chain in
+                guard chain.kind == .hostileRaid,
+                      let step = chain.steps.first(where: { $0.status != .complete }),
+                      step.status == .ready,
+                      let neededShip = neededShip(for: step.kind),
+                      !hasShipOrQueued(neededShip, for: player, in: universe)
+                else {
+                    return nil
+                }
+
+                return neededShip
+            }
+    }
+
+    private static func neededShip(for stepKind: ActionChain.Step.Kind) -> ShipKind? {
+        switch stepKind {
+        case .scoutTarget:
+            return .espionageProbe
+        case .strikeHostile:
+            return .lightFighter
+        case .recoverSpoils:
+            return .recycler
+        case .secureSector, .buildLogistics:
+            return nil
+        }
+    }
+
+    private static func hasShipOrQueued(_ ship: ShipKind, for player: Faction, in universe: Universe) -> Bool {
+        player.ownedPlanetIDs.contains { planetID in
+            guard let planet = universe.planets.first(where: { $0.id == planetID && $0.ownerID == player.id }) else {
+                return false
+            }
+
+            let inventory = max(planet.shipInventory[ship] ?? 0, 0)
+            let queued = planet.shipBuildQueue.reduce(0) { total, item in
+                guard item.unitKind == .ship(ship) else {
+                    return total
+                }
+                return total + max(item.quantity, 0)
+            }
+            return inventory + queued > 0
+        }
+    }
+
+    private static func unique(_ ships: [ShipKind]) -> [ShipKind] {
+        var seen = Set<ShipKind>()
+        var result: [ShipKind] = []
+        for ship in ships where !seen.contains(ship) {
+            seen.insert(ship)
+            result.append(ship)
+        }
+        return result
     }
 
     private static func defensePriorities(for strategy: AutoUpgradeStrategy) -> [DefenseKind] {
