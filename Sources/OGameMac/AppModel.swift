@@ -132,6 +132,7 @@ final class AppModel: ObservableObject {
                 } else {
                     statusText = "缺少\(lockedSteps.prefix(2).joined(separator: "、"))"
                 }
+                let feedback = ActionChainFeedbackEngine.feedback(for: chain.id, in: universe)
 
                 return ActionChainSummary(
                     id: chain.id,
@@ -145,6 +146,7 @@ final class AppModel: ObservableObject {
                     canClaim: canClaim,
                     quickActionTitle: Self.actionChainQuickActionTitle(for: quickPlan),
                     quickActionDetail: Self.actionChainQuickActionDetail(for: quickPlan),
+                    feedbackText: Self.actionChainFeedbackText(for: feedback),
                     canQuickLaunch: quickPlan.isLaunchable
                 )
             }
@@ -3548,6 +3550,14 @@ final class AppModel: ObservableObject {
         return "\(title)：\(actionChainPlanStatusText(plan.status))"
     }
 
+    private static func actionChainFeedbackText(for feedback: ActionChainFeedback?) -> String? {
+        guard let feedback else {
+            return nil
+        }
+
+        return "\(feedback.title) · \(feedback.detail)"
+    }
+
     private static func actionChainPowerText(for plan: ActionChainFleetActionPlan) -> String {
         guard plan.mission == .attack, plan.requiredPower > 0 else {
             return ""
@@ -3639,6 +3649,7 @@ struct ActionChainSummary: Identifiable {
     let canClaim: Bool
     let quickActionTitle: String?
     let quickActionDetail: String?
+    let feedbackText: String?
     let canQuickLaunch: Bool
 }
 

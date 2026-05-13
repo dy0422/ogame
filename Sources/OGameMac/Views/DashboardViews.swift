@@ -223,10 +223,13 @@ private struct ActionChainRewardRow: View {
                     if let quickActionDetail = summary.quickActionDetail {
                         Label(quickActionDetail, systemImage: "paperplane")
                     }
+                    if let feedbackText = summary.feedbackText {
+                        Label(feedbackText, systemImage: "doc.text.magnifyingglass")
+                    }
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(3)
                 .minimumScaleFactor(0.8)
             }
 

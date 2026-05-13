@@ -1933,6 +1933,95 @@ func testActionChainFleetPlannerChoosesSufficientHostileStrikeOrigin() {
     requireEqual(plan.riskLevel, .low, "Sufficient strike should be marked low risk")
 }
 
+func testActionChainFeedbackSummarizesLatestHostileBattleReport() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    universe.reports = []
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let site = universe.hostileSites.sorted(by: { $0.threatLevel < $1.threatLevel }).first,
+          let targetID = site.targetPlanetID
+    else {
+        fatalError("Expansion should create a hostile site with a target")
+    }
+    let chain = requireHostileActionChain(in: universe)
+    let matchedReportID = UUID(uuidString: "00000000-0000-0000-0000-00000000b701")!
+    let unrelatedReportID = UUID(uuidString: "00000000-0000-0000-0000-00000000b702")!
+    let battleReport = Report(
+        id: matchedReportID,
+        time: universe.gameTime - 20,
+        kind: .battle,
+        title: "Battle at \(site.coordinate.displayText)",
+        summary: "Player raiders broke the hostile screen.",
+        participants: [
+            ReportParticipant(
+                role: .attacker,
+                factionID: universe.playerFactionID,
+                planetID: strategicPlanetID(1),
+                name: "Raider",
+                beforeShips: [.cruiser: 4],
+                afterShips: [.cruiser: 3]
+            ),
+            ReportParticipant(
+                role: .defender,
+                factionID: nil,
+                planetID: targetID,
+                name: site.name,
+                beforeShips: [.lightFighter: 12],
+                afterShips: [:],
+                beforeDefenses: [.rocketLauncher: 10],
+                afterDefenses: [.rocketLauncher: 2]
+            )
+        ],
+        loot: ResourceBundle(metal: 1_500, crystal: 600, deuterium: 120),
+        debris: ResourceBundle(metal: 200_000, crystal: 90_000),
+        losses: ResourceBundle(metal: 10_000, crystal: 4_000, deuterium: 1_000),
+        battleRounds: [
+            BattleRoundSummary(
+                round: 1,
+                attackerPower: 2_400,
+                defenderPower: 1_100,
+                attackerLosses: [.lightFighter: 1],
+                defenderShipLosses: [.lightFighter: 8],
+                defenderDefenseLosses: [.rocketLauncher: 5],
+                rapidFireShots: 3,
+                shieldDamage: 900,
+                hullDamage: 1_600,
+                explodedUnits: 4
+            )
+        ]
+    )
+    universe.reports.append(
+        Report(
+            id: unrelatedReportID,
+            time: universe.gameTime - 10,
+            kind: .battle,
+            title: "Battle elsewhere",
+            summary: "This should not be attached to the hostile action chain.",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: strategicPlanetID(1), name: "Raider"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: strategicPlanetID(99), name: "Wrong Target")
+            ],
+            loot: ResourceBundle(metal: 99_000),
+            debris: ResourceBundle(metal: 99_000),
+            losses: ResourceBundle(metal: 99_000)
+        )
+    )
+    universe.reports.append(battleReport)
+
+    guard let feedback = ActionChainFeedbackEngine.feedback(for: chain.id, in: universe) else {
+        fatalError("Hostile action chain should expose battle feedback after a matching report")
+    }
+
+    requireEqual(feedback.kind, .battle, "Feedback should classify the attached report as battle feedback")
+    requireEqual(feedback.reportID, matchedReportID, "Feedback should ignore newer unrelated battle reports")
+    requireEqual(feedback.loot, battleReport.loot, "Feedback should expose looted resources")
+    requireEqual(feedback.debris, battleReport.debris, "Feedback should expose generated debris")
+    requireEqual(feedback.losses, battleReport.losses, "Feedback should expose resource losses")
+    requireEqual(feedback.moonChancePercent, UniverseTopologyEngine.moonChancePercent(forDebris: battleReport.debris), "Feedback should expose service-style moon chance")
+    requireEqual(feedback.commanderExperienceEstimate, 30, "Feedback should estimate commander experience from battle losses")
+    require(feedback.detail.contains("掠夺"), "Feedback detail should mention loot for quick player reading")
+    require(feedback.detail.contains("月球"), "Feedback detail should mention moon chance for follow-up decisions")
+}
+
 func testClaimedActionChainDoesNotRegenerateOnExpansionRefresh() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     GameplayExpansionEngine.refresh(in: &universe)
@@ -7864,6 +7953,7 @@ testClaimedHostileActionChainClearsHostileSiteAndSuppressesRefresh()
 testHostileActionChainProgressesFromReportsAndRecoveryEvents()
 testActionChainFleetPlannerRecommendsNextHostileMission()
 testActionChainFleetPlannerChoosesSufficientHostileStrikeOrigin()
+testActionChainFeedbackSummarizesLatestHostileBattleReport()
 testClaimedActionChainDoesNotRegenerateOnExpansionRefresh()
 testStrategicAdvisorSurfacesExpansionOpportunities()
 testStrategicAdvisorSurfacesCommanderRecruitmentAndAssignment()
