@@ -36,6 +36,7 @@ enum SidebarDestination: Hashable {
     case settings
     case planet(PlanetID)
     case moon(PlanetID)
+    case starMapSlot(galaxy: Int, system: Int, position: Int)
 }
 
 private struct SidebarView: View {
@@ -187,6 +188,8 @@ private struct DetailView: View {
             } else {
                 DashboardView(model: model)
             }
+        case .starMapSlot(let galaxy, let system, let position):
+            StarMapSlotDetailView(galaxy: galaxy, system: system, position: position, model: model)
         case .fleets:
             FleetOverviewView(model: model)
         case .commanders:
@@ -3867,10 +3870,10 @@ private struct StarMapView: View {
                 slots: model.solarSystemSlots(galaxy: selectedGalaxy, system: selectedSystem)
             )
 
-            StarMapGalaxyStrip(summaries: allPlanets)
+            StarMapGalaxyStrip(summaries: allPlanets, model: model)
 
             ForEach(model.starMapSections) { section in
-                StarMapSectionView(section: section)
+                StarMapSectionView(section: section, model: model)
             }
 
             ExplorationSummaryPanel(model: model)
@@ -3928,6 +3931,11 @@ private struct SolarSystemPanel: View {
                         .contentShape(Rectangle())
                         .onTapGesture {
                             selectedPosition = slot.position
+                            model.selectedDestination = .starMapSlot(
+                                galaxy: slot.coordinate.galaxy,
+                                system: slot.coordinate.system,
+                                position: slot.coordinate.position
+                            )
                         }
                     }
                 }
@@ -3939,6 +3947,215 @@ private struct SolarSystemPanel: View {
             }
         }
         .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct StarMapSlotDetailView: View {
+    let galaxy: Int
+    let system: Int
+    let position: Int
+    @ObservedObject var model: AppModel
+
+    private var slot: SolarSystemSlotSummary? {
+        model.solarSystemSlot(galaxy: galaxy, system: system, position: position)
+    }
+
+    private var navigationTitle: String {
+        slot.map { "\($0.displayName) \($0.coordinate.displayText)" }
+            ?? "[\(galaxy):\(system):\(position)]"
+    }
+
+    var body: some View {
+        GamePage(title: nil, model: model) {
+            if let slot {
+                let planet = slot.planetID.flatMap(model.planet(for:))
+                let specialization = model.colonySpecializationPreview(for: slot)
+
+                StarMapSlotHeroPanel(slot: slot, planet: planet, specialization: specialization)
+                StarMapSlotIntelPanel(slot: slot, specialization: specialization)
+
+                if let planet {
+                    StarMapPlanetIntelPanel(slot: slot, planet: planet, model: model)
+                }
+
+                StarMapFleetDispatchPanel(model: model, slot: slot)
+                    .padding(14)
+                    .frame(maxWidth: 860, alignment: .leading)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.16))
+                    }
+            } else {
+                PanelSurface {
+                    QueueEmptyLine(title: "未找到这个星位", systemImage: "questionmark.circle")
+                }
+                .frame(maxWidth: 860, alignment: .leading)
+            }
+        }
+        .navigationTitle(navigationTitle)
+    }
+}
+
+private struct StarMapSlotHeroPanel: View {
+    let slot: SolarSystemSlotSummary
+    let planet: Planet?
+    let specialization: ColonySpecialization?
+
+    private var displayPlanet: Planet {
+        planet ?? Planet(
+            name: slot.displayName,
+            coordinate: slot.coordinate,
+            ownerID: nil,
+            temperatureCelsius: specialization?.temperatureCelsius ?? 40,
+            maxFields: specialization?.maxFields ?? 180
+        )
+    }
+
+    private var artURL: URL? {
+        slot.role == .expedition ? GameArt.debrisImageURL : GameArt.planetImageURL(for: displayPlanet)
+    }
+
+    private var missionText: String {
+        let names = starMapMissionOptions(for: slot).map(\.localizedName)
+        return names.isEmpty ? "暂无" : names.joined(separator: " / ")
+    }
+
+    var body: some View {
+        PanelSurface {
+            HStack(alignment: .top, spacing: 18) {
+                ServerAssetThumbnail(
+                    url: artURL,
+                    fallbackSystemImage: slot.role.systemImage,
+                    size: 132
+                )
+                .opacity(slot.role == .unknown ? 0.62 : 1)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(slot.displayName)
+                            .font(.largeTitle.bold())
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+
+                        HStack(spacing: 8) {
+                            GameStatusPill(title: slot.coordinate.displayText, systemImage: "scope", tint: .blue)
+                            GameStatusPill(title: slot.role.localizedTitle, systemImage: slot.role.systemImage, tint: slot.role.tint)
+                            if slot.hasMoon {
+                                GameStatusPill(title: "月球", systemImage: "moon.stars", tint: .purple)
+                            }
+                        }
+                    }
+
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 122), alignment: .topLeading)],
+                        alignment: .leading,
+                        spacing: 10
+                    ) {
+                        StrategicMetric(title: "归属", value: slot.ownerName)
+                        StrategicMetric(title: "任务", value: missionText)
+                        StrategicMetric(title: "残骸", value: Formatters.wholeNumber(slot.debrisTotal))
+                        StrategicMetric(title: "月球", value: slot.hasMoon ? "有" : "无")
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct StarMapSlotIntelPanel: View {
+    let slot: SolarSystemSlotSummary
+    let specialization: ColonySpecialization?
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionTitle(title: "星位数据", detail: slot.role.detailText)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 126), alignment: .topLeading)],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    StrategicMetric(title: "状态", value: slot.role.localizedTitle)
+                    StrategicMetric(title: "方圆", value: specialization.map { "\($0.maxFields)" } ?? "-")
+                    StrategicMetric(
+                        title: "温度",
+                        value: specialization.map { "\(Formatters.wholeNumber($0.temperatureCelsius))°C" } ?? "-"
+                    )
+                    StrategicMetric(
+                        title: "太阳",
+                        value: specialization.map { Formatters.percent($0.slotProfile.solarEnergyFactor) } ?? "-"
+                    )
+                    StrategicMetric(
+                        title: "重氢",
+                        value: specialization.map { Formatters.percent($0.slotProfile.deuteriumFactor) } ?? "-"
+                    )
+                }
+
+                if let specialization {
+                    StarMapColonySpecializationPreview(specialization: specialization)
+                } else {
+                    QueueEmptyLine(title: slot.role.detailText, systemImage: slot.role.systemImage)
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct StarMapPlanetIntelPanel: View {
+    let slot: SolarSystemSlotSummary
+    let planet: Planet
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 14) {
+                SectionTitle(title: title, detail: slot.isVisible ? planet.name.displayName : slot.coordinate.displayText)
+
+                if slot.isPlayerOwned {
+                    ResourceGrid(resources: planet.resources)
+
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 126), alignment: .topLeading)],
+                        alignment: .leading,
+                        spacing: 10
+                    ) {
+                        StrategicMetric(title: "能源", value: Formatters.percent(model.energySupplyRatio(for: planet)))
+                        StrategicMetric(title: "建筑队列", value: queueValue(planet.buildQueue.count))
+                        StrategicMetric(title: "造船队列", value: queueValue(planet.shipBuildQueue.count + planet.defenseBuildQueue.count))
+                        StrategicMetric(title: "舰船", value: Formatters.wholeNumber(Double(planet.shipInventory.values.reduce(0, +))))
+                        StrategicMetric(title: "防御", value: Formatters.wholeNumber(Double(planet.defenseInventory.values.reduce(0, +))))
+                    }
+                } else if slot.isVisible {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 126), alignment: .topLeading)],
+                        alignment: .leading,
+                        spacing: 10
+                    ) {
+                        StrategicMetric(title: "名称", value: planet.name.displayName)
+                        StrategicMetric(title: "坐标", value: planet.coordinate.displayText)
+                        StrategicMetric(title: "残骸", value: Formatters.wholeNumber(slot.debrisTotal))
+                        StrategicMetric(title: "月球", value: slot.hasMoon ? "有" : "无")
+                    }
+
+                    QueueEmptyLine(title: "资源库存、舰船和防御需要侦察报告确认。", systemImage: "scope")
+                } else {
+                    QueueEmptyLine(title: "未知区域需要探索或侦察后才会显示完整数据。", systemImage: "questionmark.circle")
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+
+    private var title: String {
+        slot.isPlayerOwned ? "殖民地数据" : "基础情报"
+    }
+
+    private func queueValue(_ count: Int) -> String {
+        count == 0 ? "空闲" : "\(count)"
     }
 }
 
@@ -4014,60 +4231,15 @@ private struct SolarSystemSlotTile: View {
     }
 
     private var statusTitle: String {
-        if slot.isExpedition {
-            return "远征"
-        }
-        if slot.planetID == nil {
-            return "空位"
-        }
-        if slot.isPlayerOwned {
-            return "我的"
-        }
-        if !slot.isVisible {
-            return "未知"
-        }
-        if slot.ownerKind == .ai {
-            return "AI"
-        }
-        return "中立"
+        slot.role.localizedTitle
     }
 
     private var systemImage: String {
-        if slot.isExpedition {
-            return "sparkles"
-        }
-        if slot.planetID == nil {
-            return "circle.dashed"
-        }
-        if slot.isPlayerOwned {
-            return "house.and.flag"
-        }
-        if !slot.isVisible {
-            return "questionmark.circle"
-        }
-        if slot.ownerKind == .ai {
-            return "cpu"
-        }
-        return "globe.asia.australia"
+        slot.role.systemImage
     }
 
     private var tint: Color {
-        if slot.isExpedition {
-            return .purple
-        }
-        if slot.planetID == nil {
-            return .green
-        }
-        if slot.isPlayerOwned {
-            return .blue
-        }
-        if !slot.isVisible {
-            return .secondary
-        }
-        if slot.ownerKind == .ai {
-            return .red
-        }
-        return .orange
+        slot.role.tint
     }
 
     private var backgroundOpacity: Double {
@@ -4438,6 +4610,7 @@ private func starMapMissionOptions(for slot: SolarSystemSlotSummary) -> [Fleet.M
 
 private struct StarMapGalaxyStrip: View {
     let summaries: [StarMapPlanetSummary]
+    @ObservedObject var model: AppModel
 
     var body: some View {
         PanelSurface {
@@ -4450,33 +4623,43 @@ private struct StarMapGalaxyStrip: View {
                     spacing: 8
                 ) {
                     ForEach(summaries) { summary in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Image(systemName: symbol(for: summary))
-                                .foregroundStyle(tint(for: summary))
-                                .frame(width: 18, alignment: .leading)
+                        Button {
+                            model.selectedDestination = .starMapSlot(
+                                galaxy: summary.planet.coordinate.galaxy,
+                                system: summary.planet.coordinate.system,
+                                position: summary.planet.coordinate.position
+                            )
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Image(systemName: symbol(for: summary))
+                                    .foregroundStyle(tint(for: summary))
+                                    .frame(width: 18, alignment: .leading)
 
-                            if summary.hasMoon {
-                                Image(systemName: "moon.stars.fill")
+                                if summary.hasMoon {
+                                    Image(systemName: "moon.stars.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.purple)
+                                }
+
+                                Text(summary.planet.coordinate.displayText)
+                                    .font(.caption.monospacedDigit().weight(.semibold))
+                                    .lineLimit(1)
+
+                                Text(summary.ownerName)
                                     .font(.caption2)
-                                    .foregroundStyle(.purple)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
                             }
-
-                            Text(summary.planet.coordinate.displayText)
-                                .font(.caption.monospacedDigit().weight(.semibold))
-                                .lineLimit(1)
-
-                            Text(summary.ownerName)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(tint(for: summary).opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(tint(for: summary).opacity(0.16))
+                            }
                         }
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(tint(for: summary).opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .stroke(tint(for: summary).opacity(0.16))
-                        }
+                        .buttonStyle(.plain)
+                        .help("打开 \(summary.planet.coordinate.displayText) 详情")
                     }
                 }
             }
@@ -4507,6 +4690,7 @@ private struct StarMapGalaxyStrip: View {
 
 private struct StarMapSectionView: View {
     let section: StarMapPlanetSection
+    @ObservedObject var model: AppModel
 
     var body: some View {
         PanelSurface {
@@ -4518,7 +4702,17 @@ private struct StarMapSectionView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(section.planets) { summary in
-                            StarMapPlanetRow(summary: summary)
+                            Button {
+                                model.selectedDestination = .starMapSlot(
+                                    galaxy: summary.planet.coordinate.galaxy,
+                                    system: summary.planet.coordinate.system,
+                                    position: summary.planet.coordinate.position
+                                )
+                            } label: {
+                                StarMapPlanetRow(summary: summary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("打开 \(summary.planet.coordinate.displayText) 详情")
 
                             if summary.id != section.planets.last?.id {
                                 Divider()
@@ -6139,6 +6333,76 @@ private extension MissileKind {
             return "shield"
         case .interplanetaryMissile:
             return "scope"
+        }
+    }
+}
+
+private extension UniverseTopologyEngine.StarMapSlotRole {
+    var localizedTitle: String {
+        switch self {
+        case .expedition:
+            return "远征"
+        case .empty:
+            return "空位"
+        case .playerOwned:
+            return "我的"
+        case .aiOwned:
+            return "AI"
+        case .neutralOwned:
+            return "中立"
+        case .unknown:
+            return "未知"
+        }
+    }
+
+    var detailText: String {
+        switch self {
+        case .expedition:
+            return "外太空可派远征舰队，主要用于事件、资源和舰船发现。"
+        case .empty:
+            return "空位可派殖民船占领，星位会影响方圆、温度、太阳能和重氢收益。"
+        case .playerOwned:
+            return "己方殖民地可运输资源、驻防或作为舰队出发地。"
+        case .aiOwned:
+            return "AI 势力星球适合先侦察，再根据舰防和资源决定攻击。"
+        case .neutralOwned:
+            return "中立星球可作为殖民或互动目标，先确认派遣任务。"
+        case .unknown:
+            return "未知区域需要探索或侦察后才会显示完整情报。"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .expedition:
+            return "sparkles"
+        case .empty:
+            return "circle.dashed"
+        case .playerOwned:
+            return "house.and.flag"
+        case .aiOwned:
+            return "cpu"
+        case .neutralOwned:
+            return "globe.asia.australia"
+        case .unknown:
+            return "questionmark.circle"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .expedition:
+            return .purple
+        case .empty:
+            return .green
+        case .playerOwned:
+            return .blue
+        case .aiOwned:
+            return .red
+        case .neutralOwned:
+            return .orange
+        case .unknown:
+            return .secondary
         }
     }
 }

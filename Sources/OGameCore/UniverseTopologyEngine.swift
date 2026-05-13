@@ -9,6 +9,15 @@ public enum UniverseTopologyEngine {
         case ice
     }
 
+    public enum StarMapSlotRole: String, Codable, Equatable, Sendable {
+        case expedition
+        case empty
+        case playerOwned
+        case aiOwned
+        case neutralOwned
+        case unknown
+    }
+
     public struct PlanetProfile: Equatable, Sendable {
         public var maxFields: Int
         public var temperatureCelsius: Double
@@ -69,6 +78,36 @@ public enum UniverseTopologyEngine {
         (1...defaultGalaxyCount).contains(coordinate.galaxy) &&
             (1...defaultSystemsPerGalaxy).contains(coordinate.system) &&
             coordinate.position == expeditionPosition
+    }
+
+    public static func starMapSlotRole(
+        for coordinate: Coordinate,
+        hasPlanet: Bool,
+        isVisible: Bool,
+        isPlayerOwned: Bool,
+        ownerKind: Faction.Kind?
+    ) -> StarMapSlotRole {
+        if isExpeditionCoordinate(coordinate) {
+            return .expedition
+        }
+
+        if !hasPlanet {
+            return .empty
+        }
+
+        if isPlayerOwned {
+            return .playerOwned
+        }
+
+        if !isVisible {
+            return .unknown
+        }
+
+        if ownerKind == .ai {
+            return .aiOwned
+        }
+
+        return .neutralOwned
     }
 
     public static func planetProfile(for coordinate: Coordinate, universeSeed: UInt64) -> PlanetProfile {

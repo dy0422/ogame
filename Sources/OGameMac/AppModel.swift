@@ -329,6 +329,12 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func solarSystemSlot(galaxy: Int, system: Int, position: Int) -> SolarSystemSlotSummary? {
+        let normalizedPosition = min(max(position, 1), UniverseTopologyEngine.expeditionPosition)
+        return solarSystemSlots(galaxy: galaxy, system: system)
+            .first { $0.position == normalizedPosition }
+    }
+
     func colonySpecialization(for planet: Planet) -> ColonySpecialization {
         ColonySpecializationEngine.specialization(for: planet)
     }
@@ -3387,6 +3393,16 @@ struct SolarSystemSlotSummary: Identifiable {
     let debrisTotal: Double
 
     var id: Int { position }
+
+    var role: UniverseTopologyEngine.StarMapSlotRole {
+        UniverseTopologyEngine.starMapSlotRole(
+            for: coordinate,
+            hasPlanet: planetID != nil,
+            isVisible: isVisible,
+            isPlayerOwned: isPlayerOwned,
+            ownerKind: ownerKind
+        )
+    }
 }
 
 struct MoonScanSummary: Identifiable {

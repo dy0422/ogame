@@ -1254,6 +1254,75 @@ func testUniverseTopologyUsesServiceStyleCoordinateLimits() {
     require(UniverseTopologyEngine.isExpeditionCoordinate(Coordinate(galaxy: 1, system: 1, position: 16)), "Position 16 should be recognized as expedition space")
 }
 
+func testUniverseTopologyClassifiesStarMapSlotRolesForDetails() {
+    requireEqual(
+        UniverseTopologyEngine.starMapSlotRole(
+            for: Coordinate(galaxy: 1, system: 1, position: UniverseTopologyEngine.expeditionPosition),
+            hasPlanet: false,
+            isVisible: true,
+            isPlayerOwned: false,
+            ownerKind: nil
+        ),
+        .expedition,
+        "Expedition position should be identified for star map detail actions"
+    )
+    requireEqual(
+        UniverseTopologyEngine.starMapSlotRole(
+            for: Coordinate(galaxy: 1, system: 1, position: 8),
+            hasPlanet: false,
+            isVisible: true,
+            isPlayerOwned: false,
+            ownerKind: nil
+        ),
+        .empty,
+        "Empty planet slots should be identified for colonization details"
+    )
+    requireEqual(
+        UniverseTopologyEngine.starMapSlotRole(
+            for: Coordinate(galaxy: 1, system: 1, position: 4),
+            hasPlanet: true,
+            isVisible: true,
+            isPlayerOwned: true,
+            ownerKind: .player
+        ),
+        .playerOwned,
+        "Owned slots should stay distinct from neutral and AI worlds"
+    )
+    requireEqual(
+        UniverseTopologyEngine.starMapSlotRole(
+            for: Coordinate(galaxy: 1, system: 2, position: 5),
+            hasPlanet: true,
+            isVisible: true,
+            isPlayerOwned: false,
+            ownerKind: .ai
+        ),
+        .aiOwned,
+        "Visible AI slots should support hostile detail actions"
+    )
+    requireEqual(
+        UniverseTopologyEngine.starMapSlotRole(
+            for: Coordinate(galaxy: 1, system: 3, position: 6),
+            hasPlanet: true,
+            isVisible: true,
+            isPlayerOwned: false,
+            ownerKind: nil
+        ),
+        .neutralOwned,
+        "Visible unowned worlds should be shown as neutral targets"
+    )
+    requireEqual(
+        UniverseTopologyEngine.starMapSlotRole(
+            for: Coordinate(galaxy: 1, system: 4, position: 7),
+            hasPlanet: true,
+            isVisible: false,
+            isPlayerOwned: false,
+            ownerKind: .ai
+        ),
+        .unknown,
+        "Hidden occupied slots should not reveal their faction role"
+    )
+}
+
 func testUniverseTopologyPlanetProfilesVaryBySlot() {
     let inner = UniverseTopologyEngine.planetProfile(
         for: Coordinate(galaxy: 1, system: 8, position: 2),
@@ -7312,6 +7381,7 @@ testSeededGeneratorEqualityTracksSeedAndState()
 testSeededGeneratorNextIntRespectsClosedRanges()
 try testStarterUniverseIsDeterministicForSeed()
 testUniverseTopologyUsesServiceStyleCoordinateLimits()
+testUniverseTopologyClassifiesStarMapSlotRolesForDetails()
 testUniverseTopologyPlanetProfilesVaryBySlot()
 testUniverseTopologyColonySlotProfilesExposeLongTermTradeoffs()
 testColonySpecializationClassifiesSlotTradeoffs()
