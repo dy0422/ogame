@@ -191,12 +191,43 @@ final class AppModel: ObservableObject {
         return commanderSummaries.filter { !activeIDs.contains($0.id) }
     }
 
+    var pendingCommanderSummaries: [PendingCommanderSummary] {
+        let ownedDefinitionIDs = Set(universe.commanderRoster.ownedCommanders.map(\.definitionID))
+        return universe.commanderRoster.pendingRecruits.compactMap { candidate in
+            guard let definition = CommanderCatalog.definition(id: candidate.definitionID) else {
+                return nil
+            }
+
+            let isDuplicate = ownedDefinitionIDs.contains(definition.id)
+            let previewCommander = OwnedCommander(
+                definitionID: definition.id,
+                rarity: candidate.rarity,
+                acquiredAt: candidate.pulledAt
+            )
+            let shardsGranted = isDuplicate ? Self.duplicateCommanderShardValue(for: candidate.rarity) : 0
+            return PendingCommanderSummary(
+                id: candidate.id,
+                definitionID: definition.id,
+                name: definition.name,
+                title: definition.title,
+                rarity: candidate.rarity,
+                rarityText: Self.commanderRarityText(candidate.rarity),
+                specialtyText: Self.commanderSpecialtyText(definition.specialty),
+                bonusText: CommanderBonusEngine.summaryText(for: previewCommander, in: universe),
+                lore: definition.lore,
+                isDuplicate: isDuplicate,
+                shardsGranted: shardsGranted
+            )
+        }
+    }
+
     var commanderRecruitmentPreview: CommanderRecruitmentPreview {
         let state = universe.commanderRoster.recruitmentState
         return CommanderRecruitmentPreview(
             tickets: universe.commanderRoster.recruitmentTickets,
             trainingData: universe.commanderRoster.trainingData,
             ownedCount: universe.commanderRoster.ownedCommanders.count,
+            pendingCount: universe.commanderRoster.pendingRecruits.count,
             totalPulls: state.totalPulls,
             legendaryPityText: "\(max(0, 40 - state.pullsSinceLegendary)) 抽内必出传奇",
             eliteGuaranteeText: "十连至少精英级"
@@ -887,12 +918,47 @@ final class AppModel: ObservableObject {
         let pullSummary = result.pulls
             .prefix(4)
             .map { pull in
-                pull.isDuplicate ? "\(pull.name)+\(pull.shardsGranted)碎片" : pull.name
+                pull.isDuplicate ? "\(pull.name)待转碎片" : "\(pull.name)候选"
             }
             .joined(separator: "、")
         let extraCount = max(result.pulls.count - 4, 0)
         let suffix = extraCount > 0 ? " 等 \(result.pulls.count) 名结果" : ""
-        autosaveAfterQueueing(successStatus: "已招募 \(result.ticketsSpent) 次：\(pullSummary)\(suffix)。")
+        autosaveAfterQueueing(successStatus: "已招募 \(result.ticketsSpent) 次：\(pullSummary)\(suffix)。请在待选择中确认入库。")
+    }
+
+    func claimPendingCommander(_ candidateID: UUID) {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再确认指挥官。"
+            return
+        }
+
+        guard let result = CommanderRecruitmentEngine.claimPendingRecruit(candidateID, in: &universe) else {
+            statusMessage = "候选指挥官不存在或已经确认。"
+            return
+        }
+
+        autosaveAfterQueueing(successStatus: "已确认指挥官候选：\(Self.commanderClaimText(for: result))。")
+    }
+
+    func claimAllPendingCommanders() {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再确认指挥官。"
+            return
+        }
+
+        let results = CommanderRecruitmentEngine.claimAllPendingRecruits(in: &universe)
+        guard !results.isEmpty else {
+            statusMessage = "暂无待确认的指挥官候选。"
+            return
+        }
+
+        let summary = results
+            .prefix(4)
+            .map(Self.commanderClaimText(for:))
+            .joined(separator: "、")
+        let extraCount = max(results.count - 4, 0)
+        let suffix = extraCount > 0 ? " 等 \(results.count) 名结果" : ""
+        autosaveAfterQueueing(successStatus: "已确认全部指挥官候选：\(summary)\(suffix)。")
     }
 
     func trainCommander(_ commanderID: CommanderID) {
@@ -3263,6 +3329,23 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private static func commanderClaimText(for result: CommanderPullResult) -> String {
+        result.isDuplicate ? "\(result.name)+\(result.shardsGranted)碎片" : result.name
+    }
+
+    private static func duplicateCommanderShardValue(for rarity: CommanderRarity) -> Int {
+        switch rarity {
+        case .common:
+            return 5
+        case .elite:
+            return 10
+        case .epic:
+            return 25
+        case .legendary:
+            return 50
+        }
+    }
+
     private static func commanderSpecialtyText(_ specialty: CommanderSpecialty) -> String {
         switch specialty {
         case .fleetAdmiral:
@@ -3479,9 +3562,32 @@ struct CommanderRecruitmentPreview {
     let tickets: Int
     let trainingData: Int
     let ownedCount: Int
+    let pendingCount: Int
     let totalPulls: Int
     let legendaryPityText: String
     let eliteGuaranteeText: String
+}
+
+struct PendingCommanderSummary: Identifiable {
+    let id: UUID
+    let definitionID: String
+    let name: String
+    let title: String
+    let rarity: CommanderRarity
+    let rarityText: String
+    let specialtyText: String
+    let bonusText: String
+    let lore: String
+    let isDuplicate: Bool
+    let shardsGranted: Int
+
+    var statusText: String {
+        isDuplicate ? "已拥有，确认后转 \(shardsGranted) 碎片" : "确认后加入名册"
+    }
+
+    var actionTitle: String {
+        isDuplicate ? "转为碎片" : "加入麾下"
+    }
 }
 
 struct CommanderSummary: Identifiable {

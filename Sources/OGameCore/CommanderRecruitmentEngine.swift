@@ -1,6 +1,7 @@
 import Foundation
 
 public struct CommanderPullResult: Equatable, Sendable {
+    public var candidateID: UUID?
     public var definitionID: String
     public var name: String
     public var rarity: CommanderRarity
@@ -8,12 +9,14 @@ public struct CommanderPullResult: Equatable, Sendable {
     public var shardsGranted: Int
 
     public init(
+        candidateID: UUID? = nil,
         definitionID: String,
         name: String,
         rarity: CommanderRarity,
         isDuplicate: Bool,
         shardsGranted: Int
     ) {
+        self.candidateID = candidateID
         self.definitionID = definitionID
         self.name = name
         self.rarity = rarity
@@ -56,12 +59,30 @@ public enum CommanderRecruitmentEngine {
                 rarity = .elite
             }
 
-            guard let definition = definition(for: rarity, generator: &generator),
-                  let pull = applyPull(definitionID: definition.id, in: &universe)
-            else {
+            guard let definition = definition(for: rarity, generator: &generator) else {
                 continue
             }
 
+            let candidateID = stableUUID(
+                "pending-commander|\(universe.id.rawValue.uuidString)|\(universe.commanderRoster.recruitmentState.totalPulls)|\(index)|\(definition.id)"
+            )
+            let candidate = PendingCommanderRecruit(
+                id: candidateID,
+                definitionID: definition.id,
+                rarity: definition.rarity,
+                pulledAt: universe.gameTime
+            )
+            let isDuplicate = universe.commanderRoster.ownedCommanders.contains { $0.definitionID == definition.id }
+            let pull = CommanderPullResult(
+                candidateID: candidate.id,
+                definitionID: definition.id,
+                name: definition.name,
+                rarity: definition.rarity,
+                isDuplicate: isDuplicate,
+                shardsGranted: isDuplicate ? duplicateShardValue(for: definition.rarity) : 0
+            )
+
+            universe.commanderRoster.pendingRecruits.append(candidate)
             pulls.append(pull)
             didPullEliteOrBetter = didPullEliteOrBetter || pull.rarity >= .elite
             universe.commanderRoster.recruitmentTickets = max(universe.commanderRoster.recruitmentTickets - 1, 0)
@@ -71,7 +92,23 @@ public enum CommanderRecruitmentEngine {
         return CommanderRecruitmentResult(pulls: pulls, ticketsSpent: pulls.count)
     }
 
-    public static func applyPull(definitionID: String, in universe: inout Universe) -> CommanderPullResult? {
+    public static func claimPendingRecruit(_ candidateID: UUID, in universe: inout Universe) -> CommanderPullResult? {
+        guard let index = universe.commanderRoster.pendingRecruits.firstIndex(where: { $0.id == candidateID }) else {
+            return nil
+        }
+
+        let candidate = universe.commanderRoster.pendingRecruits.remove(at: index)
+        return applyPull(definitionID: candidate.definitionID, candidateID: candidate.id, in: &universe)
+    }
+
+    public static func claimAllPendingRecruits(in universe: inout Universe) -> [CommanderPullResult] {
+        let candidateIDs = universe.commanderRoster.pendingRecruits.map(\.id)
+        return candidateIDs.compactMap { candidateID in
+            claimPendingRecruit(candidateID, in: &universe)
+        }
+    }
+
+    public static func applyPull(definitionID: String, candidateID: UUID? = nil, in universe: inout Universe) -> CommanderPullResult? {
         guard let definition = CommanderCatalog.definition(id: definitionID) else {
             return nil
         }
@@ -80,6 +117,7 @@ public enum CommanderRecruitmentEngine {
             let shards = duplicateShardValue(for: definition.rarity)
             universe.commanderRoster.shardsByDefinitionID[definition.id, default: 0] += shards
             return CommanderPullResult(
+                candidateID: candidateID,
                 definitionID: definition.id,
                 name: definition.name,
                 rarity: definition.rarity,
@@ -104,6 +142,7 @@ public enum CommanderRecruitmentEngine {
         }
 
         return CommanderPullResult(
+            candidateID: candidateID,
             definitionID: definition.id,
             name: definition.name,
             rarity: definition.rarity,

@@ -747,6 +747,7 @@ func testQueueFieldsDefaultWhenDecodingOlderUniverseJSON() throws {
     requireEqual(decoded.artifacts, [], "Older universe JSON should default missing artifacts to empty")
     requireEqual(decoded.crisisState, nil, "Older universe JSON should default missing crisis state to nil")
     requireEqual(decoded.commanderRoster.ownedCommanders, [], "Older universe JSON should default missing commander roster to no commanders")
+    requireEqual(decoded.commanderRoster.pendingRecruits, [], "Older universe JSON should default missing pending commander recruits to empty")
     requireEqual(decoded.commanderRoster.recruitmentTickets, 0, "Older universe JSON should default commander tickets to zero")
     requireEqual(decoded.commanderRoster.trainingData, 0, "Older universe JSON should default commander training data to zero")
     requireEqual(decoded.commanderRoster.recruitmentState.totalPulls, 0, "Older universe JSON should default commander pull counters to zero")
@@ -806,6 +807,8 @@ func testCommanderRecruitmentUsesTicketsAndTenPullGuarantee() {
 
     requireEqual(result.pulls.count, 10, "Ten-pull should return ten results")
     requireEqual(universe.commanderRoster.recruitmentTickets, 0, "Recruitment should spend one ticket per pull")
+    requireEqual(universe.commanderRoster.pendingRecruits.count, 10, "Recruitment should create pending candidates")
+    requireEqual(universe.commanderRoster.ownedCommanders.count, 0, "Recruitment should not add commanders before player selection")
     require(result.pulls.contains { $0.rarity >= .elite }, "Ten-pull should guarantee elite or better")
 }
 
@@ -822,7 +825,28 @@ func testCommanderRecruitmentIsDeterministicForSameSeedAndState() {
     requireEqual(first.commanderRoster, second.commanderRoster, "Same recruitment should produce same roster state")
 }
 
-func testCommanderRecruitmentConvertsDuplicatesToShards() {
+func testCommanderRecruitmentClaimsPendingCandidatesIntoRoster() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 6, playerName: "Commander")
+    universe.commanderRoster.recruitmentTickets = 1
+
+    let recruitment = CommanderRecruitmentEngine.recruit(count: 1, in: &universe)
+    guard let candidateID = recruitment.pulls.first?.candidateID else {
+        fatalError("Recruitment should return a selectable candidate id")
+    }
+
+    let claim = CommanderRecruitmentEngine.claimPendingRecruit(candidateID, in: &universe)
+
+    requireEqual(claim?.candidateID, candidateID, "Claim should report the selected candidate id")
+    requireEqual(universe.commanderRoster.pendingRecruits.count, 0, "Claiming should remove the pending candidate")
+    requireEqual(universe.commanderRoster.ownedCommanders.count, 1, "Claiming should add the commander to the roster")
+    requireEqual(
+        universe.commanderRoster.ownedCommanders.first?.definitionID,
+        recruitment.pulls.first?.definitionID,
+        "Claiming should add the selected commander definition"
+    )
+}
+
+func testCommanderRecruitmentConvertsClaimedDuplicatesToShards() {
     var universe = StarterUniverseFactory.makeNewGame(seed: 7, playerName: "Commander")
     guard let definition = CommanderCatalog.definitions.first(where: { $0.rarity == .epic }) else {
         fatalError("Commander catalog should include an epic commander")
@@ -830,10 +854,14 @@ func testCommanderRecruitmentConvertsDuplicatesToShards() {
     universe.commanderRoster.ownedCommanders = [
         OwnedCommander(definitionID: definition.id, rarity: definition.rarity, acquiredAt: 0)
     ]
+    let candidate = PendingCommanderRecruit(definitionID: definition.id, rarity: definition.rarity, pulledAt: universe.gameTime)
+    universe.commanderRoster.pendingRecruits = [candidate]
 
-    _ = CommanderRecruitmentEngine.applyPull(definitionID: definition.id, in: &universe)
+    let result = CommanderRecruitmentEngine.claimPendingRecruit(candidate.id, in: &universe)
 
+    requireEqual(result?.isDuplicate, true, "Claiming an already-owned candidate should report a duplicate")
     requireEqual(universe.commanderRoster.ownedCommanders.count, 1, "Duplicate commander should not create a second owned copy")
+    requireEqual(universe.commanderRoster.pendingRecruits.count, 0, "Duplicate claim should still clear the pending candidate")
     requireEqual(universe.commanderRoster.shardsByDefinitionID[definition.id], 25, "Duplicate epic should convert to 25 shards")
 }
 
@@ -1845,6 +1873,8 @@ func testTestingResourceGrantIncludesCommanderRecruitmentAccess() {
 
     let recruitment = CommanderRecruitmentEngine.recruit(count: 10, in: &universe)
     requireEqual(recruitment.pulls.count, 10, "Injected commander tickets should allow a ten-pull immediately")
+    requireEqual(universe.commanderRoster.pendingRecruits.count, 10, "Injected commander tickets should still create selectable candidates")
+    requireEqual(universe.commanderRoster.ownedCommanders.count, 0, "Injected commander tickets should not bypass candidate selection")
     requireEqual(
         universe.commanderRoster.recruitmentTickets,
         TestingResourceGrant.infiniteCommanderAmount - 10,
@@ -7417,7 +7447,8 @@ try testQueueFieldsDefaultWhenDecodingOlderUniverseJSON()
 testQueueFieldsRejectExplicitNullWhenDecodingJSON()
 testCommanderRecruitmentUsesTicketsAndTenPullGuarantee()
 testCommanderRecruitmentIsDeterministicForSameSeedAndState()
-testCommanderRecruitmentConvertsDuplicatesToShards()
+testCommanderRecruitmentClaimsPendingCandidatesIntoRoster()
+testCommanderRecruitmentConvertsClaimedDuplicatesToShards()
 testCommanderTrainingConsumesDataAndLevelsWithinCap()
 testCommanderPromotionConsumesShardsAndRaisesStars()
 testFleetLaunchCanAssignAvailableCommanderAndPersistsID()

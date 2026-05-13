@@ -2268,6 +2268,9 @@ private struct CommanderOverviewView: View {
     var body: some View {
         GamePage(title: "指挥官", model: model) {
             CommanderRecruitmentPanel(model: model)
+            if !model.pendingCommanderSummaries.isEmpty {
+                PendingCommanderRecruitmentPanel(model: model)
+            }
             CommanderRosterPanel(model: model)
         }
         .navigationTitle("指挥官")
@@ -2292,6 +2295,7 @@ private struct CommanderRecruitmentPanel: View {
                     spacing: 10
                 ) {
                     StrategicMetric(title: "已拥有", value: "\(preview.ownedCount)")
+                    StrategicMetric(title: "待选择", value: "\(preview.pendingCount)")
                     StrategicMetric(title: "训练数据", value: Formatters.wholeNumber(Double(preview.trainingData)))
                     StrategicMetric(title: "累计招募", value: Formatters.wholeNumber(Double(preview.totalPulls)))
                     StrategicMetric(title: "传奇保底", value: preview.legendaryPityText)
@@ -2322,6 +2326,107 @@ private struct CommanderRecruitmentPanel: View {
             }
         }
         .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct PendingCommanderRecruitmentPanel: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    SectionTitle(title: "待选择候选", detail: "\(model.pendingCommanderSummaries.count) 名")
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        model.claimAllPendingCommanders()
+                    } label: {
+                        Label("全部确认", systemImage: "checkmark.seal")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.pendingCommanderSummaries.isEmpty)
+                }
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(model.pendingCommanderSummaries) { candidate in
+                        PendingCommanderRow(summary: candidate, model: model)
+
+                        if candidate.id != model.pendingCommanderSummaries.last?.id {
+                            Divider()
+                                .padding(.leading, 52)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
+private struct PendingCommanderRow: View {
+    let summary: PendingCommanderSummary
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: summary.isDuplicate ? "square.stack.3d.up" : "person.crop.square.badge.plus")
+                .font(.title2)
+                .foregroundStyle(summary.rarity.tint)
+                .frame(width: 40, height: 40)
+                .background(summary.rarity.tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(summary.name)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    Text(summary.title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    Text(summary.rarityText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(summary.rarity.tint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(summary.rarity.tint.opacity(0.12), in: Capsule())
+                }
+
+                Text(summary.bonusText)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text(summary.lore)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 8) {
+                    StrategicChip(
+                        title: summary.statusText,
+                        systemImage: summary.isDuplicate ? "square.stack.3d.up" : "checkmark.circle",
+                        tint: summary.isDuplicate ? .orange : .green
+                    )
+                    StrategicChip(title: summary.specialtyText, systemImage: "scope", tint: .secondary)
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        model.claimPendingCommander(summary.id)
+                    } label: {
+                        Label(summary.actionTitle, systemImage: summary.isDuplicate ? "square.stack.3d.up" : "person.crop.circle.badge.checkmark")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding(.vertical, 12)
     }
 }
 

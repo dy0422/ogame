@@ -931,8 +931,28 @@ public struct CommanderRecruitmentState: Codable, Equatable, Sendable {
     }
 }
 
+public struct PendingCommanderRecruit: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var definitionID: String
+    public var rarity: CommanderRarity
+    public var pulledAt: TimeInterval
+
+    public init(
+        id: UUID = UUID(),
+        definitionID: String,
+        rarity: CommanderRarity,
+        pulledAt: TimeInterval
+    ) {
+        self.id = id
+        self.definitionID = definitionID
+        self.rarity = rarity
+        self.pulledAt = pulledAt.isFinite ? max(pulledAt, 0) : 0
+    }
+}
+
 public struct CommanderRoster: Codable, Equatable, Sendable {
     public var ownedCommanders: [OwnedCommander]
+    public var pendingRecruits: [PendingCommanderRecruit]
     public var recruitmentTickets: Int
     public var trainingData: Int
     public var shardsByDefinitionID: [String: Int]
@@ -940,16 +960,51 @@ public struct CommanderRoster: Codable, Equatable, Sendable {
 
     public init(
         ownedCommanders: [OwnedCommander] = [],
+        pendingRecruits: [PendingCommanderRecruit] = [],
         recruitmentTickets: Int = 0,
         trainingData: Int = 0,
         shardsByDefinitionID: [String: Int] = [:],
         recruitmentState: CommanderRecruitmentState = CommanderRecruitmentState()
     ) {
         self.ownedCommanders = ownedCommanders
+        self.pendingRecruits = pendingRecruits.filter { !$0.definitionID.isEmpty }
         self.recruitmentTickets = max(recruitmentTickets, 0)
         self.trainingData = max(trainingData, 0)
         self.shardsByDefinitionID = shardsByDefinitionID.filter { !$0.key.isEmpty && $0.value > 0 }
         self.recruitmentState = recruitmentState
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ownedCommanders
+        case pendingRecruits
+        case recruitmentTickets
+        case trainingData
+        case shardsByDefinitionID
+        case recruitmentState
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.init(
+            ownedCommanders: try container.decodeIfPresentStrict([OwnedCommander].self, forKey: .ownedCommanders) ?? [],
+            pendingRecruits: try container.decodeIfPresentStrict([PendingCommanderRecruit].self, forKey: .pendingRecruits) ?? [],
+            recruitmentTickets: try container.decodeIfPresentStrict(Int.self, forKey: .recruitmentTickets) ?? 0,
+            trainingData: try container.decodeIfPresentStrict(Int.self, forKey: .trainingData) ?? 0,
+            shardsByDefinitionID: try container.decodeIfPresentStrict([String: Int].self, forKey: .shardsByDefinitionID) ?? [:],
+            recruitmentState: try container.decodeIfPresentStrict(CommanderRecruitmentState.self, forKey: .recruitmentState) ?? CommanderRecruitmentState()
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+
+        try container.encode(ownedCommanders, forKey: .ownedCommanders)
+        try container.encode(pendingRecruits, forKey: .pendingRecruits)
+        try container.encode(recruitmentTickets, forKey: .recruitmentTickets)
+        try container.encode(trainingData, forKey: .trainingData)
+        try container.encode(shardsByDefinitionID, forKey: .shardsByDefinitionID)
+        try container.encode(recruitmentState, forKey: .recruitmentState)
     }
 }
 
