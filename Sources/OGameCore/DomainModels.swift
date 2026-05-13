@@ -534,6 +534,26 @@ public struct SectorEvent: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+public struct CommanderRewardBundle: Codable, Equatable, Sendable {
+    public var recruitmentTickets: Int
+    public var trainingData: Int
+    public var commanderDropChance: Double
+
+    public init(
+        recruitmentTickets: Int = 0,
+        trainingData: Int = 0,
+        commanderDropChance: Double = 0
+    ) {
+        self.recruitmentTickets = max(recruitmentTickets, 0)
+        self.trainingData = max(trainingData, 0)
+        self.commanderDropChance = commanderDropChance.isFinite ? min(max(commanderDropChance, 0), 1) : 0
+    }
+
+    public var isEmpty: Bool {
+        recruitmentTickets == 0 && trainingData == 0 && commanderDropChance == 0
+    }
+}
+
 public struct HostileSite: Codable, Equatable, Sendable, Identifiable {
     public enum Kind: String, Codable, CaseIterable, Sendable {
         case pirateBase
@@ -549,6 +569,7 @@ public struct HostileSite: Codable, Equatable, Sendable, Identifiable {
     public var threatLevel: Int
     public var requiredPower: Double
     public var reward: ResourceBundle
+    public var commanderReward: CommanderRewardBundle?
     public var expiresAt: TimeInterval
 
     public init(
@@ -560,6 +581,7 @@ public struct HostileSite: Codable, Equatable, Sendable, Identifiable {
         threatLevel: Int,
         requiredPower: Double,
         reward: ResourceBundle,
+        commanderReward: CommanderRewardBundle? = nil,
         expiresAt: TimeInterval
     ) {
         self.id = id
@@ -570,6 +592,7 @@ public struct HostileSite: Codable, Equatable, Sendable, Identifiable {
         self.threatLevel = max(threatLevel, 1)
         self.requiredPower = requiredPower.isFinite ? max(requiredPower, 0) : 0
         self.reward = reward.nonnegative
+        self.commanderReward = commanderReward.flatMap { $0.isEmpty ? nil : $0 }
         self.expiresAt = expiresAt.isFinite ? max(expiresAt, 0) : 0
     }
 }
@@ -615,6 +638,7 @@ public struct ActionChain: Codable, Equatable, Sendable, Identifiable {
     public var detail: String
     public var steps: [Step]
     public var reward: ResourceBundle
+    public var commanderReward: CommanderRewardBundle?
     public var expiresAt: TimeInterval
 
     public init(
@@ -624,6 +648,7 @@ public struct ActionChain: Codable, Equatable, Sendable, Identifiable {
         detail: String,
         steps: [Step],
         reward: ResourceBundle,
+        commanderReward: CommanderRewardBundle? = nil,
         expiresAt: TimeInterval
     ) {
         self.id = id
@@ -632,6 +657,7 @@ public struct ActionChain: Codable, Equatable, Sendable, Identifiable {
         self.detail = detail
         self.steps = steps
         self.reward = reward.nonnegative
+        self.commanderReward = commanderReward.flatMap { $0.isEmpty ? nil : $0 }
         self.expiresAt = expiresAt.isFinite ? max(expiresAt, 0) : 0
     }
 }

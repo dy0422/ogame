@@ -2090,13 +2090,15 @@ final class AppModel: ObservableObject {
             return
         }
 
-        let updatedCount = TestingResourceGrant.grantInfiniteResources(toPlayerIn: &universe)
-        guard updatedCount > 0 else {
+        let result = TestingResourceGrant.grantInfiniteTestingAccess(toPlayerIn: &universe)
+        guard result.updatedPlanetCount > 0 else {
             statusMessage = "没有可注入测试资源的玩家星球。"
             return
         }
 
-        autosaveAfterQueueing(successStatus: "测试资源已注入：\(updatedCount) 个玩家星球获得近似无限资源。")
+        autosaveAfterQueueing(
+            successStatus: "测试资源已注入：\(result.updatedPlanetCount) 个玩家星球获得近似无限资源，指挥官招募令和训练数据已近似无限。"
+        )
     }
 
     func updateDifficulty(_ difficulty: GameSettings.Difficulty) {

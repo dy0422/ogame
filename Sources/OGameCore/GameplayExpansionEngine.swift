@@ -87,6 +87,11 @@ public enum GameplayExpansionEngine {
                 threatLevel: 2,
                 requiredPower: 800,
                 reward: ResourceBundle(metal: 4_000, crystal: 2_000, deuterium: 800),
+                commanderReward: CommanderRewardBundle(
+                    recruitmentTickets: 1,
+                    trainingData: 120,
+                    commanderDropChance: 0.01
+                ),
                 expiresAt: universe.gameTime + hostileDuration
             ),
             HostileSite(
@@ -98,6 +103,11 @@ public enum GameplayExpansionEngine {
                 threatLevel: 3,
                 requiredPower: 1_500,
                 reward: ResourceBundle(metal: 6_000, crystal: 4_000, deuterium: 1_500),
+                commanderReward: CommanderRewardBundle(
+                    recruitmentTickets: 2,
+                    trainingData: 220,
+                    commanderDropChance: 0.03
+                ),
                 expiresAt: universe.gameTime + hostileDuration
             )
         ]
@@ -118,6 +128,7 @@ public enum GameplayExpansionEngine {
                         ActionChain.Step(kind: .recoverSpoils, title: "回收战利品", status: hasRecycler(in: universe) ? .ready : .locked)
                     ],
                     reward: site.reward,
+                    commanderReward: site.commanderReward,
                     expiresAt: min(site.expiresAt, universe.gameTime + actionChainDuration)
                 )
             )
@@ -135,6 +146,7 @@ public enum GameplayExpansionEngine {
                         ActionChain.Step(kind: .buildLogistics, title: "建立补给线", status: universe.tradeRoutes.isEmpty ? .locked : .ready)
                     ],
                     reward: ResourceBundle(metal: 3_000, crystal: 2_000, deuterium: 1_000),
+                    commanderReward: CommanderRewardBundle(recruitmentTickets: 1, trainingData: 80),
                     expiresAt: universe.gameTime + actionChainDuration
                 )
             )

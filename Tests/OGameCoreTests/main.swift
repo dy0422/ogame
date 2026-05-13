@@ -1531,6 +1531,29 @@ func testGameplayExpansionRefreshCreatesThreePhaseGameplayLoops() {
     require(universe.crisisState?.kind == .pirateWarlord, "Late-game expansion should spawn a crisis once the universe matures")
 }
 
+func testGameplayExpansionRewardsCommanderRecruitmentMaterials() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+
+    GameplayExpansionEngine.refresh(in: &universe)
+    let hostileCommanderRewards = universe.hostileSites.compactMap(\.commanderReward)
+    let actionChainCommanderRewards = universe.actionChains.compactMap(\.commanderReward)
+    let hasHostileCommanderReward = hostileCommanderRewards.contains { reward in
+        reward.recruitmentTickets > 0 && reward.trainingData > 0
+    }
+    let hasActionChainCommanderReward = actionChainCommanderRewards.contains { reward in
+        reward.recruitmentTickets > 0 && reward.trainingData > 0
+    }
+
+    require(
+        hasHostileCommanderReward,
+        "PVE hostile sites should advertise commander recruitment and training rewards"
+    )
+    require(
+        hasActionChainCommanderReward,
+        "PVE action chains should carry commander reward payloads for future claim flows"
+    )
+}
+
 func testStrategicAdvisorSurfacesExpansionOpportunities() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     GameplayExpansionEngine.refresh(in: &universe)
@@ -1799,6 +1822,34 @@ func testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources() {
         requireEqual(updated.resources, planet.resources, "Resource grant should not mutate non-player resources")
         requireEqual(updated.storage, planet.storage, "Resource grant should not mutate non-player storage")
     }
+}
+
+func testTestingResourceGrantIncludesCommanderRecruitmentAccess() {
+    var universe = makeStrategicUniverse(playerPlanetCount: 1, aiPlanetCount: 1, neutralPlanetCount: 1)
+    universe.commanderRoster.recruitmentTickets = 2
+    universe.commanderRoster.trainingData = 50
+
+    let result = TestingResourceGrant.grantInfiniteTestingAccess(toPlayerIn: &universe)
+
+    requireEqual(result.updatedPlanetCount, 1, "Combined test grant should still update player planets")
+    requireEqual(
+        universe.commanderRoster.recruitmentTickets,
+        TestingResourceGrant.infiniteCommanderAmount,
+        "Combined test grant should make commander recruitment effectively unlimited"
+    )
+    requireEqual(
+        universe.commanderRoster.trainingData,
+        TestingResourceGrant.infiniteCommanderAmount,
+        "Combined test grant should make commander training effectively unlimited"
+    )
+
+    let recruitment = CommanderRecruitmentEngine.recruit(count: 10, in: &universe)
+    requireEqual(recruitment.pulls.count, 10, "Injected commander tickets should allow a ten-pull immediately")
+    requireEqual(
+        universe.commanderRoster.recruitmentTickets,
+        TestingResourceGrant.infiniteCommanderAmount - 10,
+        "Commander recruitment should still spend tickets so normal rules stay intact"
+    )
 }
 
 func testPlayerObjectivesAwardRewardsOnce() {
@@ -7393,6 +7444,7 @@ testAIIntentSummariesExposeActionPlans()
 testMidgamePlayerObjectivesExposeStrategyDepth()
 testStrategicAdvisorRecommendsVictoryRouteAndAIThreat()
 testGameplayExpansionRefreshCreatesThreePhaseGameplayLoops()
+testGameplayExpansionRewardsCommanderRecruitmentMaterials()
 testStrategicAdvisorSurfacesExpansionOpportunities()
 testStrategicAdvisorSurfacesCommanderRecruitmentAndAssignment()
 testGameplayAuditCountsCommanderSignals()
@@ -7403,6 +7455,7 @@ testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized()
 testColonizationTargetEngineSeedsVisibleEmptySlotForFleetPage()
 testFleetTargetSelectionSeedsEmptyAndExpeditionSlotsForFleetPage()
 testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources()
+testTestingResourceGrantIncludesCommanderRecruitmentAccess()
 testPlayerObjectivesAwardRewardsOnce()
 testPlayerObjectiveStatesExposeProgressAndCompletedRecords()
 testStrategicRankingsScoreFactionStrengthsAndVictoryProgress()

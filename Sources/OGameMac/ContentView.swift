@@ -876,11 +876,11 @@ private struct SettingsPanel: View {
                     Button {
                         model.grantInfiniteResourcesForTesting()
                     } label: {
-                        Label("测试：资源无限", systemImage: "infinity.circle")
+                        Label("测试：资源/指挥官无限", systemImage: "infinity.circle")
                     }
                     .buttonStyle(.bordered)
                     .disabled(!model.canSave)
-                    .help("将玩家所有星球的三项资源和仓储设为超大测试值。")
+                    .help("将玩家资源、仓储、指挥官招募令和训练数据设为超大测试值。")
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -2284,7 +2284,7 @@ private struct CommanderRecruitmentPanel: View {
     var body: some View {
         PanelSurface {
             VStack(alignment: .leading, spacing: 16) {
-                SectionTitle(title: "招募", detail: "\(preview.tickets) 张招募令")
+                SectionTitle(title: "招募", detail: "\(Formatters.wholeNumber(Double(preview.tickets))) 张招募令")
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 150), alignment: .leading)],
@@ -2292,8 +2292,8 @@ private struct CommanderRecruitmentPanel: View {
                     spacing: 10
                 ) {
                     StrategicMetric(title: "已拥有", value: "\(preview.ownedCount)")
-                    StrategicMetric(title: "训练数据", value: "\(preview.trainingData)")
-                    StrategicMetric(title: "累计招募", value: "\(preview.totalPulls)")
+                    StrategicMetric(title: "训练数据", value: Formatters.wholeNumber(Double(preview.trainingData)))
+                    StrategicMetric(title: "累计招募", value: Formatters.wholeNumber(Double(preview.totalPulls)))
                     StrategicMetric(title: "传奇保底", value: preview.legendaryPityText)
                 }
 

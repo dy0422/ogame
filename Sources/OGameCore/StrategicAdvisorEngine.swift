@@ -172,12 +172,13 @@ public enum StrategicAdvisorEngine {
         }
 
         if let hostile = universe.hostileSites.sorted(by: { $0.threatLevel > $1.threatLevel }).first {
+            let rewardText = rewardDetail(resources: hostile.reward, commanderReward: hostile.commanderReward)
             recommendations.append(
                 StrategicAdvisorRecommendation(
                     kind: .hostileSite,
                     priority: .warning,
                     title: "PVE 目标：\(hostile.name)",
-                    detail: "威胁 \(hostile.threatLevel)，建议战力 \(whole(hostile.requiredPower))，奖励约 \(whole(hostile.reward.metal + hostile.reward.crystal + hostile.reward.deuterium)) 资源。",
+                    detail: "威胁 \(hostile.threatLevel)，建议战力 \(whole(hostile.requiredPower))，\(rewardText)。",
                     actionLabel: "准备打击",
                     targetCoordinate: hostile.coordinate
                 )
@@ -199,12 +200,13 @@ public enum StrategicAdvisorEngine {
 
         if let chain = universe.actionChains.sorted(by: { $0.expiresAt < $1.expiresAt }).first {
             let nextStep = chain.steps.first { $0.status != .complete }?.title ?? "领取奖励"
+            let rewardText = rewardDetail(resources: chain.reward, commanderReward: chain.commanderReward)
             recommendations.append(
                 StrategicAdvisorRecommendation(
                     kind: .actionChain,
                     priority: .opportunity,
                     title: "行动链：\(chain.title)",
-                    detail: "下一步：\(nextStep)。完成后可获得 \(whole(chain.reward.metal + chain.reward.crystal + chain.reward.deuterium)) 资源。",
+                    detail: "下一步：\(nextStep)。完成后\(rewardText)。",
                     actionLabel: "查看任务"
                 )
             )
@@ -641,6 +643,23 @@ public enum StrategicAdvisorEngine {
         [resources.metal, resources.crystal, resources.deuterium]
             .filter { $0.isFinite && $0 > 0 }
             .reduce(0, +)
+    }
+
+    private static func rewardDetail(resources: ResourceBundle, commanderReward: CommanderRewardBundle?) -> String {
+        var parts = ["奖励约 \(whole(resourceTotal(resources))) 资源"]
+        if let commanderReward {
+            if commanderReward.recruitmentTickets > 0 {
+                parts.append("\(commanderReward.recruitmentTickets) 张招募令")
+            }
+            if commanderReward.trainingData > 0 {
+                parts.append("\(commanderReward.trainingData) 训练数据")
+            }
+            if commanderReward.commanderDropChance > 0 {
+                parts.append("指挥官掉落概率 \(whole(commanderReward.commanderDropChance * 100))%")
+            }
+        }
+
+        return parts.joined(separator: "，")
     }
 
     private static func whole(_ value: Double) -> String {
