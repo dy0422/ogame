@@ -83,41 +83,49 @@ public enum GameplayExpansionEngine {
         var sites: [HostileSite] = []
 
         if let first = candidates.first {
-            sites.append(HostileSite(
-                id: stableUUID("hostile|pirate|\(universe.seed)|\(first.id.rawValue.uuidString)"),
-                kind: .pirateBase,
-                name: "海盗补给站",
-                coordinate: first.coordinate,
-                targetPlanetID: first.id,
-                threatLevel: 2,
-                requiredPower: 800,
-                reward: ResourceBundle(metal: 4_000, crystal: 2_000, deuterium: 800),
-                commanderReward: CommanderRewardBundle(
-                    recruitmentTickets: 1,
-                    trainingData: 120,
-                    commanderDropChance: 0.01
-                ),
-                expiresAt: universe.gameTime + hostileDuration
-            ))
+            let siteID = stableUUID("hostile|pirate|\(universe.seed)|\(first.id.rawValue.uuidString)")
+            let chainID = stableUUID("action-chain|hostile|\(siteID.uuidString)")
+            if !hasClaimedActionChain(chainID, in: universe) {
+                sites.append(HostileSite(
+                    id: siteID,
+                    kind: .pirateBase,
+                    name: "海盗补给站",
+                    coordinate: first.coordinate,
+                    targetPlanetID: first.id,
+                    threatLevel: 2,
+                    requiredPower: 800,
+                    reward: ResourceBundle(metal: 4_000, crystal: 2_000, deuterium: 800),
+                    commanderReward: CommanderRewardBundle(
+                        recruitmentTickets: 1,
+                        trainingData: 120,
+                        commanderDropChance: 0.01
+                    ),
+                    expiresAt: universe.gameTime + hostileDuration
+                ))
+            }
         }
 
         if let second = candidates.dropFirst().first {
-            sites.append(HostileSite(
-                id: stableUUID("hostile|alien|\(universe.seed)|\(second.id.rawValue.uuidString)"),
-                kind: .alienOutpost,
-                name: "外星前哨",
-                coordinate: second.coordinate,
-                targetPlanetID: second.id,
-                threatLevel: 3,
-                requiredPower: 1_500,
-                reward: ResourceBundle(metal: 6_000, crystal: 4_000, deuterium: 1_500),
-                commanderReward: CommanderRewardBundle(
-                    recruitmentTickets: 2,
-                    trainingData: 220,
-                    commanderDropChance: 0.03
-                ),
-                expiresAt: universe.gameTime + hostileDuration
-            ))
+            let siteID = stableUUID("hostile|alien|\(universe.seed)|\(second.id.rawValue.uuidString)")
+            let chainID = stableUUID("action-chain|hostile|\(siteID.uuidString)")
+            if !hasClaimedActionChain(chainID, in: universe) {
+                sites.append(HostileSite(
+                    id: siteID,
+                    kind: .alienOutpost,
+                    name: "外星前哨",
+                    coordinate: second.coordinate,
+                    targetPlanetID: second.id,
+                    threatLevel: 3,
+                    requiredPower: 1_500,
+                    reward: ResourceBundle(metal: 6_000, crystal: 4_000, deuterium: 1_500),
+                    commanderReward: CommanderRewardBundle(
+                        recruitmentTickets: 2,
+                        trainingData: 220,
+                        commanderDropChance: 0.03
+                    ),
+                    expiresAt: universe.gameTime + hostileDuration
+                ))
+            }
         }
 
         return sites

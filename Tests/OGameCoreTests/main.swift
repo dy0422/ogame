@@ -1721,6 +1721,40 @@ func testActionChainRewardClaimRequiresCompletedSteps() {
     requireEqual(universe.actionChains.count, 1, "Incomplete chain should remain available")
 }
 
+func testClaimedHostileActionChainClearsHostileSiteAndSuppressesRefresh() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let chain = universe.actionChains.first(where: { $0.kind == .hostileRaid }),
+          let site = universe.hostileSites.sorted(by: { $0.threatLevel < $1.threatLevel }).first
+    else {
+        fatalError("Expansion should create a hostile raid chain and site")
+    }
+    universe.hostileSites = [site]
+    universe.actionChains = [
+        ActionChain(
+            id: chain.id,
+            kind: chain.kind,
+            title: chain.title,
+            detail: chain.detail,
+            steps: chain.steps.map { step in
+                ActionChain.Step(kind: step.kind, title: step.title, status: .complete)
+            },
+            reward: chain.reward,
+            commanderReward: chain.commanderReward,
+            expiresAt: chain.expiresAt
+        )
+    ]
+
+    let result = ActionChainRewardEngine.claim(chain.id, in: &universe)
+    requireEqual(result.status, .claimed, "Completed hostile chain should claim")
+    require(!universe.hostileSites.contains { $0.id == site.id }, "Claiming hostile chain should remove the cleared site")
+
+    GameplayExpansionEngine.refresh(in: &universe)
+
+    require(!universe.hostileSites.contains { $0.id == site.id }, "Cleared hostile site should not regenerate after refresh")
+    require(!universe.actionChains.contains { $0.id == chain.id }, "Cleared hostile chain should not regenerate after refresh")
+}
+
 func testHostileActionChainProgressesFromReportsAndRecoveryEvents() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     universe.reports = []
@@ -7781,6 +7815,7 @@ testGameplayExpansionDoesNotResetDamagedActiveHostileTarget()
 testGameplayExpansionSkipsHostileSitesWhenNeutralTargetsAreBusy()
 testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop()
 testActionChainRewardClaimRequiresCompletedSteps()
+testClaimedHostileActionChainClearsHostileSiteAndSuppressesRefresh()
 testHostileActionChainProgressesFromReportsAndRecoveryEvents()
 testActionChainFleetPlannerRecommendsNextHostileMission()
 testClaimedActionChainDoesNotRegenerateOnExpansionRefresh()

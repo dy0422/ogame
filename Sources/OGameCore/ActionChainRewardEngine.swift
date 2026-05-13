@@ -70,6 +70,7 @@ public enum ActionChainRewardEngine {
         }
 
         universe.actionChains.remove(at: chainIndex)
+        clearResolvedHostileSite(for: chain, in: &universe)
         universe.events.append(claimEvent(for: chain, receiver: receiver, commanderDrop: commanderDrop, in: universe))
 
         return ActionChainRewardClaim(
@@ -89,6 +90,16 @@ public enum ActionChainRewardEngine {
 
     private static func firstPlayerPlanetIndex(in universe: Universe) -> Int? {
         universe.planets.firstIndex { $0.ownerID == universe.playerFactionID }
+    }
+
+    private static func clearResolvedHostileSite(for chain: ActionChain, in universe: inout Universe) {
+        guard chain.kind == .hostileRaid else {
+            return
+        }
+
+        universe.hostileSites.removeAll { site in
+            stableUUID("action-chain|hostile|\(site.id.uuidString)") == chain.id
+        }
     }
 
     private static func droppedCommanderCandidate(for chain: ActionChain, in universe: Universe) -> PendingCommanderRecruit? {
