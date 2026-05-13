@@ -166,7 +166,7 @@ public enum ActionChainFleetPlannerEngine {
         var fallback: ActionChainFleetActionPlan?
         var bestLaunchableFallback: ActionChainFleetActionPlan?
         for origin in origins {
-            let ships = recommendedShips(for: mission, on: origin)
+            let ships = recommendedShips(for: mission, on: origin, targetID: targetID, in: universe)
             guard !ships.isEmpty else {
                 continue
             }
@@ -221,14 +221,23 @@ public enum ActionChainFleetPlannerEngine {
         )
     }
 
-    private static func recommendedShips(for mission: Fleet.Mission, on planet: Planet) -> [ShipKind: Int] {
+    private static func recommendedShips(
+        for mission: Fleet.Mission,
+        on planet: Planet,
+        targetID: PlanetID,
+        in universe: Universe
+    ) -> [ShipKind: Int] {
         switch mission {
         case .espionage:
             let probes = max(planet.shipInventory[.espionageProbe] ?? 0, 0)
             return probes > 0 ? [.espionageProbe: 1] : [:]
         case .recycle:
             let recyclers = max(planet.shipInventory[.recycler] ?? 0, 0)
-            return recyclers > 0 ? [.recycler: 1] : [:]
+            guard recyclers > 0 else {
+                return [:]
+            }
+            let needed = neededRecyclerCount(for: targetID, available: recyclers, in: universe)
+            return [.recycler: needed]
         case .attack:
             let priorities: [ShipKind] = [.battlecruiser, .battleship, .cruiser, .heavyFighter, .lightFighter, .bomber, .destroyer, .deathstar]
             return priorities.reduce(into: [:]) { result, kind in
@@ -240,6 +249,52 @@ public enum ActionChainFleetPlannerEngine {
         case .transport, .colonize, .defend, .explore, .returning:
             return FleetMissionPlannerEngine.recommendedShips(for: mission, on: planet)
         }
+    }
+
+    private static func neededRecyclerCount(for targetID: PlanetID, available: Int, in universe: Universe) -> Int {
+        let debris = knownDebris(for: targetID, in: universe)
+        let debrisTotal = resourceTotal(debris)
+        guard debrisTotal > 0,
+              debrisTotal.isFinite,
+              let capacity = universe.ruleSet.shipRules[.recycler]?.cargoCapacity,
+              capacity.isFinite,
+              capacity > 0
+        else {
+            return 1
+        }
+
+        let desired = max(1, Int(ceil(debrisTotal / capacity)))
+        return min(max(available, 1), desired)
+    }
+
+    private static func knownDebris(for targetID: PlanetID, in universe: Universe) -> ResourceBundle {
+        if let planet = universe.planets.first(where: { $0.id == targetID }),
+           resourceTotal(planet.debrisField) > 0
+        {
+            return planet.debrisField
+        }
+
+        return universe.reports
+            .filter { report in
+                report.kind == .battle &&
+                    report.participants.contains { $0.role == .attacker && $0.factionID == universe.playerFactionID } &&
+                    report.participants.contains { $0.role == .defender && $0.planetID == targetID }
+            }
+            .sorted { lhs, rhs in
+                if lhs.time != rhs.time {
+                    return lhs.time > rhs.time
+                }
+                return lhs.id.uuidString > rhs.id.uuidString
+            }
+            .first?
+            .debris ?? .zero
+    }
+
+    private static func resourceTotal(_ resources: ResourceBundle) -> Double {
+        guard resources.metal.isFinite, resources.crystal.isFinite, resources.deuterium.isFinite else {
+            return .infinity
+        }
+        return max(resources.metal, 0) + max(resources.crystal, 0) + max(resources.deuterium, 0)
     }
 
     private static func recommendedCommanderID(

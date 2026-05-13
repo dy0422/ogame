@@ -1985,6 +1985,63 @@ func testActionChainFleetPlannerRecommendsAvailableCommanderForHostileStrike() {
     require(plan.selectedPower >= plan.requiredPower, "Commander-backed strike should still expose sufficient power")
 }
 
+func testActionChainFleetPlannerSizesRecyclerWaveForHostileDebris() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    universe.reports = []
+    guard let originIndex = universe.planets.firstIndex(where: { $0.ownerID == universe.playerFactionID }) else {
+        fatalError("Expansion fixture should include a player origin")
+    }
+    universe.planets[originIndex].resources.deuterium = 1_000_000
+    universe.planets[originIndex].shipInventory[.recycler] = 5
+
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let site = universe.hostileSites.sorted(by: { $0.threatLevel < $1.threatLevel }).first,
+          let targetID = site.targetPlanetID,
+          let targetIndex = universe.planets.firstIndex(where: { $0.id == targetID })
+    else {
+        fatalError("Expansion should create a hostile site with a target")
+    }
+    let largeDebris = ResourceBundle(metal: 30_000, crystal: 15_000)
+    universe.planets[targetIndex].debrisField = largeDebris
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 60,
+            kind: .espionage,
+            title: "Espionage at \(site.coordinate.displayText)",
+            summary: "Intel",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: universe.planets[originIndex].id, name: "Scout"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ]
+        )
+    )
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 30,
+            kind: .battle,
+            title: "Battle at \(site.coordinate.displayText)",
+            summary: "Attacker wins.",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: universe.planets[originIndex].id, name: "Raider"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ],
+            debris: largeDebris
+        )
+    )
+    GameplayExpansionEngine.refresh(in: &universe)
+    let chain = requireHostileActionChain(in: universe)
+
+    let plan = ActionChainFleetPlannerEngine.nextActionPlan(for: chain.id, in: universe)
+    let recyclerCount = plan.ships[.recycler] ?? 0
+
+    requireEqual(plan.stepKind, .recoverSpoils, "Planner should advance to debris recovery after the hostile strike")
+    requireEqual(recyclerCount, 3, "Recovery quick plan should send enough recyclers for known hostile debris")
+    require(
+        testCargoCapacity(plan.ships, ruleSet: universe.ruleSet) >= resourceTotal(largeDebris),
+        "Recovery quick plan should cover the known debris capacity when ships are available"
+    )
+}
+
 func testActionChainFeedbackSummarizesLatestHostileBattleReport() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     universe.reports = []
@@ -8006,6 +8063,7 @@ testHostileActionChainProgressesFromReportsAndRecoveryEvents()
 testActionChainFleetPlannerRecommendsNextHostileMission()
 testActionChainFleetPlannerChoosesSufficientHostileStrikeOrigin()
 testActionChainFleetPlannerRecommendsAvailableCommanderForHostileStrike()
+testActionChainFleetPlannerSizesRecyclerWaveForHostileDebris()
 testActionChainFeedbackSummarizesLatestHostileBattleReport()
 testClaimedActionChainDoesNotRegenerateOnExpansionRefresh()
 testStrategicAdvisorSurfacesExpansionOpportunities()
