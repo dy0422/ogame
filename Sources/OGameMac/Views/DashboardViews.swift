@@ -116,9 +116,11 @@ struct ActionChainRewardsPanel: View {
                 } else {
                     VStack(spacing: 0) {
                         ForEach(summaries) { summary in
-                            ActionChainRewardRow(summary: summary) {
-                                model.claimActionChainReward(summary.id)
-                            }
+                            ActionChainRewardRow(
+                                summary: summary,
+                                quickLaunch: { model.quickLaunchActionChainStep(summary.id) },
+                                claim: { model.claimActionChainReward(summary.id) }
+                            )
 
                             if summary.id != summaries.last?.id {
                                 Divider()
@@ -183,6 +185,7 @@ private struct StrategicAdvisorRow: View {
 
 private struct ActionChainRewardRow: View {
     let summary: ActionChainSummary
+    let quickLaunch: () -> Void
     let claim: () -> Void
 
     var body: some View {
@@ -217,6 +220,9 @@ private struct ActionChainRewardRow: View {
                     Label(summary.commanderRewardText, systemImage: "person.crop.circle.badge.plus")
                     Label(summary.stepText, systemImage: "list.bullet.rectangle")
                     Label(summary.timeText, systemImage: "timer")
+                    if let quickActionDetail = summary.quickActionDetail {
+                        Label(quickActionDetail, systemImage: "paperplane")
+                    }
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -226,15 +232,29 @@ private struct ActionChainRewardRow: View {
 
             Spacer(minLength: 10)
 
-            Button(action: claim) {
-                Label("领取", systemImage: "tray.and.arrow.down")
-                    .labelStyle(.titleAndIcon)
-                    .lineLimit(1)
+            VStack(alignment: .trailing, spacing: 8) {
+                if let quickActionTitle = summary.quickActionTitle {
+                    Button(action: quickLaunch) {
+                        Label(quickActionTitle, systemImage: "paperplane.fill")
+                            .labelStyle(.titleAndIcon)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!summary.canQuickLaunch)
+                    .help(summary.quickActionDetail ?? "按行动链派遣舰队")
+                }
+
+                Button(action: claim) {
+                    Label("领取", systemImage: "tray.and.arrow.down")
+                        .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(!summary.canClaim)
+                .help(summary.canClaim ? "领取行动链奖励" : "条件未满足，暂时不能领取")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(!summary.canClaim)
-            .help(summary.canClaim ? "领取行动链奖励" : "条件未满足，暂时不能领取")
         }
         .padding(.vertical, 10)
         .contentShape(Rectangle())

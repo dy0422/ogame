@@ -120,6 +120,7 @@ final class AppModel: ObservableObject {
             .map { chain in
                 let isExpired = chain.expiresAt <= universe.gameTime
                 let canClaim = ActionChainRewardEngine.canClaim(chain, at: universe.gameTime)
+                let quickPlan = ActionChainFleetPlannerEngine.nextActionPlan(for: chain.id, in: universe)
                 let lockedSteps = chain.steps.filter { $0.status == .locked }.map(\.title)
                 let statusText: String
                 if isExpired {
@@ -141,7 +142,10 @@ final class AppModel: ObservableObject {
                     stepText: chain.steps.map(Self.actionChainStepText(for:)).joined(separator: " · "),
                     timeText: isExpired ? "已过期" : "剩余 \(Self.formattedWholeSeconds(max(chain.expiresAt - universe.gameTime, 0)))",
                     statusText: statusText,
-                    canClaim: canClaim
+                    canClaim: canClaim,
+                    quickActionTitle: Self.actionChainQuickActionTitle(for: quickPlan),
+                    quickActionDetail: Self.actionChainQuickActionDetail(for: quickPlan),
+                    canQuickLaunch: quickPlan.isLaunchable
                 )
             }
     }
@@ -1023,6 +1027,55 @@ final class AppModel: ObservableObject {
             statusMessage = "行动链条件尚未满足，请先完成侦察、打击或回收条件。"
         case .noPlayerPlanet:
             statusMessage = "没有可接收奖励的己方星球。"
+        }
+    }
+
+    func quickLaunchActionChainStep(_ chainID: UUID) {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再派遣行动链舰队。"
+            return
+        }
+
+        let plan = ActionChainFleetPlannerEngine.nextActionPlan(for: chainID, in: universe)
+        guard plan.status != .complete else {
+            statusMessage = "行动链步骤已完成，可以领取奖励。"
+            return
+        }
+        guard plan.status != .missingChain else {
+            statusMessage = "行动链不存在或已经领取。"
+            return
+        }
+        guard plan.status != .unsupported else {
+            statusMessage = "这条行动链暂无可自动派遣的舰队步骤。"
+            return
+        }
+        guard plan.status != .locked else {
+            statusMessage = "行动链下一步条件尚未满足。"
+            return
+        }
+        guard plan.isLaunchable,
+              let originID = plan.originID,
+              let targetID = plan.targetID,
+              let mission = plan.mission
+        else {
+            let blockerText = plan.blockers.isEmpty ? Self.actionChainPlanStatusText(plan.status) : plan.blockers.map(\.localizedName).joined(separator: "、")
+            statusMessage = "无法派遣行动链舰队：\(blockerText)。"
+            return
+        }
+
+        let result = FleetEngine.launchFleet(
+            from: originID,
+            to: targetID,
+            in: &universe,
+            mission: mission,
+            ships: plan.ships
+        )
+
+        switch result {
+        case .launched(let fleet):
+            autosaveAfterQueueing(successStatus: "已按行动链派遣：\(fleetLaunchStatus(for: fleet))")
+        case .failure(let failure):
+            statusMessage = "无法派遣行动链舰队：\(Self.fleetFailureDescription(failure))。"
         }
     }
 
@@ -3451,6 +3504,68 @@ final class AppModel: ObservableObject {
         return parts.isEmpty ? "" : "，" + parts.joined(separator: "，")
     }
 
+    private static func actionChainQuickActionTitle(for plan: ActionChainFleetActionPlan) -> String? {
+        guard let stepKind = plan.stepKind else {
+            return nil
+        }
+
+        switch stepKind {
+        case .scoutTarget:
+            return "派侦察"
+        case .strikeHostile:
+            return "派攻击"
+        case .recoverSpoils:
+            return "派回收"
+        case .secureSector, .buildLogistics:
+            return nil
+        }
+    }
+
+    private static func actionChainQuickActionDetail(for plan: ActionChainFleetActionPlan) -> String? {
+        guard let title = actionChainQuickActionTitle(for: plan) else {
+            return nil
+        }
+        guard plan.status != .complete else {
+            return "步骤已完成"
+        }
+        guard plan.status != .locked else {
+            return "下一步尚未解锁"
+        }
+        guard let mission = plan.mission else {
+            return actionChainPlanStatusText(plan.status)
+        }
+        if plan.isLaunchable {
+            let shipText = plan.ships
+                .sorted { $0.key.rawValue < $1.key.rawValue }
+                .map { "\($0.key.localizedName) x\($0.value)" }
+                .joined(separator: "、")
+            return "\(title)：\(mission.localizedName) · \(shipText)"
+        }
+        if !plan.blockers.isEmpty {
+            return "\(title)：\(plan.blockers.map(\.localizedName).joined(separator: "、"))"
+        }
+        return "\(title)：\(actionChainPlanStatusText(plan.status))"
+    }
+
+    private static func actionChainPlanStatusText(_ status: ActionChainFleetActionPlan.Status) -> String {
+        switch status {
+        case .ready:
+            return "可派遣"
+        case .complete:
+            return "已完成"
+        case .locked:
+            return "未解锁"
+        case .missingChain:
+            return "行动链不存在"
+        case .missingTarget:
+            return "缺少目标"
+        case .unsupported:
+            return "暂无快捷派遣"
+        case .blocked:
+            return "条件不足"
+        }
+    }
+
     private static func duplicateCommanderShardValue(for rarity: CommanderRarity) -> Int {
         switch rarity {
         case .common:
@@ -3513,6 +3628,9 @@ struct ActionChainSummary: Identifiable {
     let timeText: String
     let statusText: String
     let canClaim: Bool
+    let quickActionTitle: String?
+    let quickActionDetail: String?
+    let canQuickLaunch: Bool
 }
 
 struct StarMapPlanetSection: Identifiable {

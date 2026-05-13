@@ -1721,6 +1721,72 @@ func testHostileActionChainProgressesFromReportsAndRecoveryEvents() {
     require(ActionChainRewardEngine.canClaim(chain, at: universe.gameTime), "Fully evidenced hostile chain should become claimable")
 }
 
+func testActionChainFleetPlannerRecommendsNextHostileMission() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    universe.reports = []
+    for index in universe.planets.indices where universe.planets[index].ownerID == universe.playerFactionID {
+        universe.planets[index].resources.deuterium = 1_000_000
+    }
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let site = universe.hostileSites.sorted(by: { $0.threatLevel < $1.threatLevel }).first,
+          let targetID = site.targetPlanetID
+    else {
+        fatalError("Expansion should create a hostile site with a target")
+    }
+
+    var chain = requireHostileActionChain(in: universe)
+    var plan = ActionChainFleetPlannerEngine.nextActionPlan(for: chain.id, in: universe)
+    requireEqual(plan.status, .ready, "Scouting step should be immediately dispatchable")
+    requireEqual(plan.stepKind, .scoutTarget, "Planner should start hostile chain with scouting")
+    requireEqual(plan.mission, .espionage, "Scouting should use espionage mission")
+    requireEqual(plan.targetID, targetID, "Planner should target the hostile site planet")
+    requireEqual(plan.ships[.espionageProbe], 1, "Scouting should send one probe")
+    require(plan.isLaunchable, "Scout plan should be launchable")
+
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 60,
+            kind: .espionage,
+            title: "Espionage at \(site.coordinate.displayText)",
+            summary: "Intel",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: strategicPlanetID(1), name: "Scout"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ]
+        )
+    )
+    GameplayExpansionEngine.refresh(in: &universe)
+    chain = requireHostileActionChain(in: universe)
+    plan = ActionChainFleetPlannerEngine.nextActionPlan(for: chain.id, in: universe)
+    requireEqual(plan.status, .ready, "Strike step should become dispatchable after scouting")
+    requireEqual(plan.stepKind, .strikeHostile, "Planner should advance to the strike step")
+    requireEqual(plan.mission, .attack, "Strike should use attack mission")
+    require((plan.ships[.cruiser] ?? 0) > 0 || (plan.ships[.lightFighter] ?? 0) > 0, "Strike should select combat ships")
+    require(plan.isLaunchable, "Strike plan should be launchable")
+
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 30,
+            kind: .battle,
+            title: "Battle at \(site.coordinate.displayText)",
+            summary: "Attacker wins.",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: strategicPlanetID(1), name: "Raider"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ],
+            debris: ResourceBundle(metal: 2_000, crystal: 1_000)
+        )
+    )
+    GameplayExpansionEngine.refresh(in: &universe)
+    chain = requireHostileActionChain(in: universe)
+    plan = ActionChainFleetPlannerEngine.nextActionPlan(for: chain.id, in: universe)
+    requireEqual(plan.status, .ready, "Recovery step should become dispatchable after the strike")
+    requireEqual(plan.stepKind, .recoverSpoils, "Planner should advance to recovery")
+    requireEqual(plan.mission, .recycle, "Recovery should use recycle mission")
+    requireEqual(plan.ships[.recycler], 1, "Recovery should send one recycler")
+    require(plan.isLaunchable, "Recovery plan should be launchable")
+}
+
 func testClaimedActionChainDoesNotRegenerateOnExpansionRefresh() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     GameplayExpansionEngine.refresh(in: &universe)
@@ -7646,6 +7712,7 @@ testGameplayExpansionRewardsCommanderRecruitmentMaterials()
 testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop()
 testActionChainRewardClaimRequiresCompletedSteps()
 testHostileActionChainProgressesFromReportsAndRecoveryEvents()
+testActionChainFleetPlannerRecommendsNextHostileMission()
 testClaimedActionChainDoesNotRegenerateOnExpansionRefresh()
 testStrategicAdvisorSurfacesExpansionOpportunities()
 testStrategicAdvisorSurfacesCommanderRecruitmentAndAssignment()
