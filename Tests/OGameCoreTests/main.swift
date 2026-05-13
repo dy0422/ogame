@@ -1888,6 +1888,51 @@ func testActionChainFleetPlannerRecommendsNextHostileMission() {
     require(plan.isLaunchable, "Recovery plan should be launchable")
 }
 
+func testActionChainFleetPlannerChoosesSufficientHostileStrikeOrigin() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    universe.reports = []
+    let playerPlanetIDs = universe.planets.filter { $0.ownerID == universe.playerFactionID }.map(\.id)
+    guard playerPlanetIDs.count >= 2,
+          let weakIndex = universe.planets.firstIndex(where: { $0.id == playerPlanetIDs[0] }),
+          let strongIndex = universe.planets.firstIndex(where: { $0.id == playerPlanetIDs[1] })
+    else {
+        fatalError("Expansion fixture should include at least two player planets")
+    }
+    universe.planets[weakIndex].resources.deuterium = 1_000_000
+    universe.planets[strongIndex].resources.deuterium = 1_000_000
+    universe.planets[weakIndex].shipInventory = [.lightFighter: 1, .espionageProbe: 1]
+    universe.planets[strongIndex].shipInventory = [.cruiser: 8, .lightFighter: 12]
+
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let site = universe.hostileSites.sorted(by: { $0.threatLevel < $1.threatLevel }).first,
+          let targetID = site.targetPlanetID
+    else {
+        fatalError("Expansion should create a hostile site")
+    }
+    universe.reports.append(
+        Report(
+            time: universe.gameTime - 60,
+            kind: .espionage,
+            title: "Espionage at \(site.coordinate.displayText)",
+            summary: "Intel",
+            participants: [
+                ReportParticipant(role: .attacker, factionID: universe.playerFactionID, planetID: playerPlanetIDs[0], name: "Scout"),
+                ReportParticipant(role: .defender, factionID: nil, planetID: targetID, name: site.name)
+            ]
+        )
+    )
+    GameplayExpansionEngine.refresh(in: &universe)
+    let chain = requireHostileActionChain(in: universe)
+
+    let plan = ActionChainFleetPlannerEngine.nextActionPlan(for: chain.id, in: universe)
+
+    requireEqual(plan.stepKind, .strikeHostile, "Planner should advance to hostile strike")
+    requireEqual(plan.originID, playerPlanetIDs[1], "Planner should choose the origin whose strike fleet covers required power")
+    require(plan.selectedPower >= plan.requiredPower, "Strike plan should expose enough selected power for the target")
+    require(plan.powerRatio >= 1, "Strike power ratio should show the selected fleet can handle the site")
+    requireEqual(plan.riskLevel, .low, "Sufficient strike should be marked low risk")
+}
+
 func testClaimedActionChainDoesNotRegenerateOnExpansionRefresh() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     GameplayExpansionEngine.refresh(in: &universe)
@@ -7818,6 +7863,7 @@ testActionChainRewardClaimRequiresCompletedSteps()
 testClaimedHostileActionChainClearsHostileSiteAndSuppressesRefresh()
 testHostileActionChainProgressesFromReportsAndRecoveryEvents()
 testActionChainFleetPlannerRecommendsNextHostileMission()
+testActionChainFleetPlannerChoosesSufficientHostileStrikeOrigin()
 testClaimedActionChainDoesNotRegenerateOnExpansionRefresh()
 testStrategicAdvisorSurfacesExpansionOpportunities()
 testStrategicAdvisorSurfacesCommanderRecruitmentAndAssignment()

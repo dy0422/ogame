@@ -3539,12 +3539,21 @@ final class AppModel: ObservableObject {
                 .sorted { $0.key.rawValue < $1.key.rawValue }
                 .map { "\($0.key.localizedName) x\($0.value)" }
                 .joined(separator: "、")
-            return "\(title)：\(mission.localizedName) · \(shipText)"
+            let powerText = actionChainPowerText(for: plan)
+            return "\(title)：\(mission.localizedName) · \(shipText)\(powerText)"
         }
         if !plan.blockers.isEmpty {
             return "\(title)：\(plan.blockers.map(\.localizedName).joined(separator: "、"))"
         }
         return "\(title)：\(actionChainPlanStatusText(plan.status))"
+    }
+
+    private static func actionChainPowerText(for plan: ActionChainFleetActionPlan) -> String {
+        guard plan.mission == .attack, plan.requiredPower > 0 else {
+            return ""
+        }
+
+        return " · \(plan.riskLevel.localizedName) \(formattedWholeNumber(plan.selectedPower))/\(formattedWholeNumber(plan.requiredPower))"
     }
 
     private static func actionChainPlanStatusText(_ status: ActionChainFleetActionPlan.Status) -> String {

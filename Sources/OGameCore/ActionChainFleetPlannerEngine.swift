@@ -1,6 +1,23 @@
 import Foundation
 
 public struct ActionChainFleetActionPlan: Equatable, Sendable {
+    public enum RiskLevel: String, Equatable, Sendable {
+        case low
+        case medium
+        case high
+
+        public var localizedName: String {
+            switch self {
+            case .low:
+                return "低风险"
+            case .medium:
+                return "中风险"
+            case .high:
+                return "高风险"
+            }
+        }
+    }
+
     public enum Status: String, Equatable, Sendable {
         case ready
         case complete
@@ -19,6 +36,8 @@ public struct ActionChainFleetActionPlan: Equatable, Sendable {
     public var targetID: PlanetID?
     public var ships: [ShipKind: Int]
     public var blockers: [FleetMissionPlan.Blocker]
+    public var selectedPower: Double
+    public var requiredPower: Double
 
     public init(
         status: Status,
@@ -28,7 +47,9 @@ public struct ActionChainFleetActionPlan: Equatable, Sendable {
         originID: PlanetID? = nil,
         targetID: PlanetID? = nil,
         ships: [ShipKind: Int] = [:],
-        blockers: [FleetMissionPlan.Blocker] = []
+        blockers: [FleetMissionPlan.Blocker] = [],
+        selectedPower: Double = 0,
+        requiredPower: Double = 0
     ) {
         self.status = status
         self.chainID = chainID
@@ -38,6 +59,8 @@ public struct ActionChainFleetActionPlan: Equatable, Sendable {
         self.targetID = targetID
         self.ships = ships.filter { $0.value > 0 }
         self.blockers = blockers
+        self.selectedPower = selectedPower.isFinite ? max(selectedPower, 0) : 0
+        self.requiredPower = requiredPower.isFinite ? max(requiredPower, 0) : 0
     }
 
     public var isLaunchable: Bool {
@@ -47,6 +70,23 @@ public struct ActionChainFleetActionPlan: Equatable, Sendable {
             targetID != nil &&
             !ships.isEmpty &&
             blockers.isEmpty
+    }
+
+    public var powerRatio: Double {
+        guard requiredPower > 0 else {
+            return selectedPower > 0 ? .infinity : 0
+        }
+        return selectedPower / requiredPower
+    }
+
+    public var riskLevel: RiskLevel {
+        if powerRatio >= 1 {
+            return .low
+        }
+        if powerRatio >= 0.65 {
+            return .medium
+        }
+        return .high
     }
 }
 
@@ -98,6 +138,7 @@ public enum ActionChainFleetPlannerEngine {
             stepKind: step.kind,
             mission: mission,
             targetID: targetID,
+            requiredPower: mission == .attack ? site.requiredPower : 0,
             in: universe
         )
     }
@@ -107,6 +148,7 @@ public enum ActionChainFleetPlannerEngine {
         stepKind: ActionChain.Step.Kind,
         mission: Fleet.Mission,
         targetID: PlanetID,
+        requiredPower: Double,
         in universe: Universe
     ) -> ActionChainFleetActionPlan {
         let origins = universe.planets
@@ -119,11 +161,13 @@ public enum ActionChainFleetPlannerEngine {
             }
 
         var fallback: ActionChainFleetActionPlan?
+        var bestLaunchableFallback: ActionChainFleetActionPlan?
         for origin in origins {
             let ships = recommendedShips(for: mission, on: origin)
             guard !ships.isEmpty else {
                 continue
             }
+            let selectedPower = combatPower(for: ships, ruleSet: universe.ruleSet)
 
             let fleetPlan = FleetMissionPlannerEngine.plan(
                 originID: origin.id,
@@ -140,12 +184,23 @@ public enum ActionChainFleetPlannerEngine {
                 originID: origin.id,
                 targetID: targetID,
                 ships: ships,
-                blockers: fleetPlan.blockers
+                blockers: fleetPlan.blockers,
+                selectedPower: selectedPower,
+                requiredPower: requiredPower
             )
             if actionPlan.isLaunchable {
-                return actionPlan
+                if mission != .attack || actionPlan.powerRatio >= 1 {
+                    return actionPlan
+                }
+                if bestLaunchableFallback == nil || actionPlan.selectedPower > (bestLaunchableFallback?.selectedPower ?? 0) {
+                    bestLaunchableFallback = actionPlan
+                }
             }
             fallback = fallback ?? actionPlan
+        }
+
+        if let bestLaunchableFallback {
+            return bestLaunchableFallback
         }
 
         return fallback ?? ActionChainFleetActionPlan(
@@ -176,6 +231,15 @@ public enum ActionChainFleetPlannerEngine {
             }
         case .transport, .colonize, .defend, .explore, .returning:
             return FleetMissionPlannerEngine.recommendedShips(for: mission, on: planet)
+        }
+    }
+
+    private static func combatPower(for ships: [ShipKind: Int], ruleSet: RuleSet) -> Double {
+        ships.reduce(0) { total, element in
+            guard let rule = ruleSet.shipRules[element.key] else {
+                return total
+            }
+            return total + (max(rule.attack, 0) + max(rule.shield, 0)) * Double(max(element.value, 0))
         }
     }
 
