@@ -1582,6 +1582,73 @@ func testGameplayExpansionRewardsCommanderRecruitmentMaterials() {
     )
 }
 
+func testGameplayExpansionSeedsHostileTargetsWithDefendersAndLoot() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+
+    GameplayExpansionEngine.refresh(in: &universe)
+
+    for site in universe.hostileSites {
+        guard let targetID = site.targetPlanetID,
+              let target = universe.planets.first(where: { $0.id == targetID })
+        else {
+            fatalError("Hostile site should point at a target planet")
+        }
+        let defenderShipCount = target.shipInventory.values.reduce(0) { $0 + max($1, 0) }
+        let defenseCount = target.defenseInventory.values.reduce(0) { $0 + max($1, 0) }
+
+        require(defenderShipCount + defenseCount > 0, "Hostile target should have ships or defenses to fight")
+        require(resourceTotal(target.resources) > 0, "Hostile target should hold lootable resources")
+        requireEqual(target.ownerID, nil, "PVE hostile targets should stay neutral so they do not become full AI colonies")
+    }
+}
+
+func testGameplayExpansionDoesNotResetDamagedActiveHostileTarget() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    GameplayExpansionEngine.refresh(in: &universe)
+    guard let site = universe.hostileSites.first,
+          let targetID = site.targetPlanetID,
+          let targetIndex = universe.planets.firstIndex(where: { $0.id == targetID })
+    else {
+        fatalError("Hostile site should have a target planet")
+    }
+    universe.planets[targetIndex].resources = .zero
+    universe.planets[targetIndex].shipInventory = [:]
+    universe.planets[targetIndex].defenseInventory = [:]
+
+    GameplayExpansionEngine.refresh(in: &universe)
+
+    requireEqual(universe.planets[targetIndex].resources, .zero, "Active hostile site refresh should not reset looted resources")
+    requireEqual(universe.planets[targetIndex].shipInventory, [:], "Active hostile site refresh should not respawn defeated ships")
+    requireEqual(universe.planets[targetIndex].defenseInventory, [:], "Active hostile site refresh should not respawn defeated defenses")
+}
+
+func testGameplayExpansionSkipsHostileSitesWhenNeutralTargetsAreBusy() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    guard let origin = universe.planets.first(where: { $0.ownerID == universe.playerFactionID }) else {
+        fatalError("Expansion universe should include a player origin")
+    }
+    let neutralPlanets = universe.planets.filter { $0.ownerID == nil }
+    require(neutralPlanets.count >= 2, "Expansion fixture should include neutral targets")
+    universe.fleets = neutralPlanets.map { target in
+        Fleet(
+            ownerID: universe.playerFactionID,
+            mission: .explore,
+            origin: origin.coordinate,
+            target: target.coordinate,
+            ships: [.espionageProbe: 1],
+            launchTime: universe.gameTime,
+            arrivalTime: universe.gameTime + 600,
+            returnTime: universe.gameTime + 1_200,
+            originPlanetID: origin.id,
+            targetPlanetID: target.id
+        )
+    }
+
+    GameplayExpansionEngine.refresh(in: &universe)
+
+    require(universe.hostileSites.isEmpty, "Expansion should not create targetless hostile sites when every neutral target is busy")
+}
+
 func testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     guard let receiverIndex = universe.planets.firstIndex(where: { $0.ownerID == universe.playerFactionID }) else {
@@ -7709,6 +7776,9 @@ testMidgamePlayerObjectivesExposeStrategyDepth()
 testStrategicAdvisorRecommendsVictoryRouteAndAIThreat()
 testGameplayExpansionRefreshCreatesThreePhaseGameplayLoops()
 testGameplayExpansionRewardsCommanderRecruitmentMaterials()
+testGameplayExpansionSeedsHostileTargetsWithDefendersAndLoot()
+testGameplayExpansionDoesNotResetDamagedActiveHostileTarget()
+testGameplayExpansionSkipsHostileSitesWhenNeutralTargetsAreBusy()
 testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop()
 testActionChainRewardClaimRequiresCompletedSteps()
 testHostileActionChainProgressesFromReportsAndRecoveryEvents()

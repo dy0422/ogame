@@ -12,8 +12,9 @@ public enum GameplayExpansionEngine {
         }
 
         universe.hostileSites = activeHostileSites(in: universe)
-        if universe.hostileSites.isEmpty {
+        if universe.hostileSites.isEmpty, shouldGenerateHostileSites(in: universe) {
             universe.hostileSites = generatedHostileSites(in: universe)
+            seedHostileTargets(for: universe.hostileSites, in: &universe)
         }
 
         universe.sectorControlSummaries = generatedSectorControl(in: universe)
@@ -69,21 +70,25 @@ public enum GameplayExpansionEngine {
             .sorted { $0.id.uuidString < $1.id.uuidString }
     }
 
-    private static func generatedHostileSites(in universe: Universe) -> [HostileSite] {
-        let candidates = universe.planets
-            .filter { $0.ownerID == nil }
-            .sorted { $0.id.rawValue.uuidString < $1.id.rawValue.uuidString }
-        let fallback = anchorCoordinate(in: universe)
-        let first = candidates.first
-        let second = candidates.dropFirst().first
+    private static func shouldGenerateHostileSites(in universe: Universe) -> Bool {
+        let neutralPlanetCount = universe.planets.filter { $0.ownerID == nil }.count
+        return universe.gameTime >= eventDuration && neutralPlanetCount >= 2
+    }
 
-        return [
-            HostileSite(
-                id: stableUUID("hostile|pirate|\(universe.seed)|\(first?.id.rawValue.uuidString ?? fallback.displayText)"),
+    private static func generatedHostileSites(in universe: Universe) -> [HostileSite] {
+        let activeFleetTargetIDs = Set(universe.fleets.compactMap(\.targetPlanetID))
+        let candidates = universe.planets
+            .filter { $0.ownerID == nil && !activeFleetTargetIDs.contains($0.id) }
+            .sorted { $0.id.rawValue.uuidString < $1.id.rawValue.uuidString }
+        var sites: [HostileSite] = []
+
+        if let first = candidates.first {
+            sites.append(HostileSite(
+                id: stableUUID("hostile|pirate|\(universe.seed)|\(first.id.rawValue.uuidString)"),
                 kind: .pirateBase,
                 name: "海盗补给站",
-                coordinate: first?.coordinate ?? fallback,
-                targetPlanetID: first?.id,
+                coordinate: first.coordinate,
+                targetPlanetID: first.id,
                 threatLevel: 2,
                 requiredPower: 800,
                 reward: ResourceBundle(metal: 4_000, crystal: 2_000, deuterium: 800),
@@ -93,13 +98,16 @@ public enum GameplayExpansionEngine {
                     commanderDropChance: 0.01
                 ),
                 expiresAt: universe.gameTime + hostileDuration
-            ),
-            HostileSite(
-                id: stableUUID("hostile|alien|\(universe.seed)|\(second?.id.rawValue.uuidString ?? fallback.displayText)"),
+            ))
+        }
+
+        if let second = candidates.dropFirst().first {
+            sites.append(HostileSite(
+                id: stableUUID("hostile|alien|\(universe.seed)|\(second.id.rawValue.uuidString)"),
                 kind: .alienOutpost,
                 name: "外星前哨",
-                coordinate: second?.coordinate ?? fallback,
-                targetPlanetID: second?.id,
+                coordinate: second.coordinate,
+                targetPlanetID: second.id,
                 threatLevel: 3,
                 requiredPower: 1_500,
                 reward: ResourceBundle(metal: 6_000, crystal: 4_000, deuterium: 1_500),
@@ -109,8 +117,57 @@ public enum GameplayExpansionEngine {
                     commanderDropChance: 0.03
                 ),
                 expiresAt: universe.gameTime + hostileDuration
+            ))
+        }
+
+        return sites
+    }
+
+    private static func seedHostileTargets(for sites: [HostileSite], in universe: inout Universe) {
+        for site in sites {
+            guard let targetPlanetID = site.targetPlanetID,
+                  let targetIndex = universe.planets.firstIndex(where: { $0.id == targetPlanetID }),
+                  universe.planets[targetIndex].ownerID == nil
+            else {
+                continue
+            }
+
+            let seed = hostileSeed(for: site)
+            universe.planets[targetIndex].resources = universe.planets[targetIndex].resources.adding(seed.resources).nonnegative
+            for (kind, quantity) in seed.ships {
+                universe.planets[targetIndex].shipInventory[kind, default: 0] += quantity
+            }
+            for (kind, quantity) in seed.defenses {
+                universe.planets[targetIndex].defenseInventory[kind, default: 0] += quantity
+            }
+        }
+    }
+
+    private static func hostileSeed(for site: HostileSite) -> (
+        resources: ResourceBundle,
+        ships: [ShipKind: Int],
+        defenses: [DefenseKind: Int]
+    ) {
+        switch site.kind {
+        case .pirateBase:
+            return (
+                resources: ResourceBundle(metal: 2_500, crystal: 1_400, deuterium: 500),
+                ships: [.lightFighter: max(4, site.threatLevel * 2), .smallCargo: 2],
+                defenses: [.rocketLauncher: max(4, site.threatLevel * 2)]
             )
-        ]
+        case .alienOutpost:
+            return (
+                resources: ResourceBundle(metal: 4_000, crystal: 2_400, deuterium: 900),
+                ships: [.lightFighter: max(8, site.threatLevel * 3), .heavyFighter: max(2, site.threatLevel - 1)],
+                defenses: [.rocketLauncher: max(8, site.threatLevel * 3), .lightLaser: max(2, site.threatLevel)]
+            )
+        case .derelictArmada:
+            return (
+                resources: ResourceBundle(metal: 5_000, crystal: 3_000, deuterium: 1_200),
+                ships: [.heavyFighter: max(4, site.threatLevel), .cruiser: max(1, site.threatLevel / 2)],
+                defenses: [.lightLaser: max(4, site.threatLevel)]
+            )
+        }
     }
 
     private static func generatedActionChains(in universe: Universe) -> [ActionChain] {
