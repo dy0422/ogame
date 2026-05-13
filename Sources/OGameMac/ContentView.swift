@@ -2598,9 +2598,9 @@ private struct FleetDispatchPanel: View {
     @Binding var speedPercent: Double
     @Binding var commanderID: CommanderID?
     @State private var missileCount = 1
-    @State private var colonyGalaxy = 1
-    @State private var colonySystem = 1
-    @State private var colonyPosition = 8
+    @State private var targetGalaxy = 1
+    @State private var targetSystem = 1
+    @State private var targetPosition = 8
     let launchCargo: ResourceBundle
 
     private var origin: Planet? {
@@ -2621,10 +2621,6 @@ private struct FleetDispatchPanel: View {
 
     private var originMissileCount: Int {
         model.interplanetaryMissileCount(on: originID)
-    }
-
-    private var canShowColonizationControls: Bool {
-        mission == .colonize || (origin?.shipInventory[.colonyShip, default: 0] ?? 0) > 0
     }
 
     var body: some View {
@@ -2665,14 +2661,12 @@ private struct FleetDispatchPanel: View {
                     CommanderPicker(model: model, selection: $commanderID)
                 }
 
-                if canShowColonizationControls {
-                    ColonizationCoordinateControls(
-                        galaxy: $colonyGalaxy,
-                        system: $colonySystem,
-                        position: $colonyPosition
-                    ) {
-                        selectColonizationTarget()
-                    }
+                FleetTargetCoordinateControls(
+                    galaxy: $targetGalaxy,
+                    system: $targetSystem,
+                    position: $targetPosition
+                ) {
+                    selectFleetTarget()
                 }
 
                 FleetShipSelector(origin: origin, model: model, selectedShips: $selectedShips)
@@ -2741,42 +2735,67 @@ private struct FleetDispatchPanel: View {
         .onChange(of: originMissileCount) { available in
             missileCount = min(max(1, missileCount), max(1, available))
         }
-        .onAppear(perform: seedColonyCoordinateFromOrigin)
+        .onAppear(perform: seedTargetCoordinateFromOrigin)
         .onChange(of: originID) { _ in
-            seedColonyCoordinateFromOrigin()
+            seedTargetCoordinateFromOrigin()
         }
     }
 
-    private func seedColonyCoordinateFromOrigin() {
+    private func seedTargetCoordinateFromOrigin() {
         guard let origin else {
             return
         }
 
-        colonyGalaxy = min(max(origin.coordinate.galaxy, 1), UniverseTopologyEngine.defaultGalaxyCount)
-        colonySystem = min(max(origin.coordinate.system, 1), UniverseTopologyEngine.defaultSystemsPerGalaxy)
+        targetGalaxy = min(max(origin.coordinate.galaxy, 1), UniverseTopologyEngine.defaultGalaxyCount)
+        targetSystem = min(max(origin.coordinate.system, 1), UniverseTopologyEngine.defaultSystemsPerGalaxy)
     }
 
-    private func selectColonizationTarget() {
-        guard let selectedTargetID = model.ensureColonizationTarget(
-            galaxy: colonyGalaxy,
-            system: colonySystem,
-            position: colonyPosition
+    private func selectFleetTarget() {
+        guard let selectedTargetID = model.ensureFleetTarget(
+            galaxy: targetGalaxy,
+            system: targetSystem,
+            position: targetPosition
         ) else {
             return
         }
 
         targetID = selectedTargetID
-        mission = .colonize
-        if selectedShips[.colonyShip, default: 0] == 0,
-           let origin,
-           origin.shipInventory[.colonyShip, default: 0] > 0
-        {
-            selectedShips[.colonyShip] = 1
+        chooseMissionAndShipsForSelectedTarget(selectedTargetID)
+    }
+
+    private func chooseMissionAndShipsForSelectedTarget(_ selectedTargetID: PlanetID) {
+        guard let target = model.planet(for: selectedTargetID) else {
+            return
+        }
+
+        if UniverseTopologyEngine.isExpeditionCoordinate(target.coordinate) {
+            mission = .explore
+            selectFirstAvailableShip([.smallCargo, .largeCargo, .espionageProbe])
+        } else if target.ownerID == nil {
+            mission = .colonize
+            selectFirstAvailableShip([.colonyShip])
+        } else if target.ownerID == model.universe.playerFactionID {
+            mission = .transport
+            selectFirstAvailableShip([.largeCargo, .smallCargo])
+        } else {
+            mission = .espionage
+            selectFirstAvailableShip([.espionageProbe, .smallCargo, .largeCargo])
+        }
+    }
+
+    private func selectFirstAvailableShip(_ priorities: [ShipKind]) {
+        guard let origin else {
+            return
+        }
+
+        for kind in priorities where selectedShips[kind, default: 0] == 0 && origin.shipInventory[kind, default: 0] > 0 {
+            selectedShips[kind] = 1
+            return
         }
     }
 }
 
-private struct ColonizationCoordinateControls: View {
+private struct FleetTargetCoordinateControls: View {
     @Binding var galaxy: Int
     @Binding var system: Int
     @Binding var position: Int
@@ -2788,7 +2807,7 @@ private struct ColonizationCoordinateControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("殖民坐标", systemImage: "scope")
+            Label("目标坐标", systemImage: "scope")
                 .font(.callout.weight(.semibold))
                 .lineLimit(1)
 
@@ -2811,7 +2830,7 @@ private struct ColonizationCoordinateControls: View {
                 Spacer(minLength: 8)
 
                 Button(action: selectAction) {
-                    Label("选择空位", systemImage: "plus.circle")
+                    Label("选择坐标", systemImage: "plus.circle")
                 }
                 .buttonStyle(.bordered)
             }

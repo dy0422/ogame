@@ -1673,6 +1673,46 @@ func testColonizationTargetEngineSeedsVisibleEmptySlotForFleetPage() {
     }
 }
 
+func testFleetTargetSelectionSeedsEmptyAndExpeditionSlotsForFleetPage() {
+    var universe = makeFleetUniverse(originResources: ResourceBundle(metal: 20_000, crystal: 20_000, deuterium: 20_000))
+    let emptyCoordinate = Coordinate(galaxy: 1, system: 4, position: 9)
+    let expeditionCoordinate = Coordinate(galaxy: 1, system: 4, position: UniverseTopologyEngine.expeditionPosition)
+
+    guard let colonyTargetID = FleetTargetSelectionEngine.ensureTarget(
+        at: emptyCoordinate,
+        visibleTo: fleetPlayerID(),
+        in: &universe
+    ) else {
+        fatalError("Fleet page should be able to select an empty planet slot")
+    }
+    let colonyTarget = requirePlanet(colonyTargetID, in: universe, "Selected empty planet slot should become a target")
+    requireEqual(colonyTarget.coordinate, emptyCoordinate, "Empty slot target should preserve coordinate")
+    require(UniverseTopologyEngine.isValidPlanetCoordinate(colonyTarget.coordinate), "Empty slot target should be a planet coordinate")
+
+    guard let expeditionTargetID = FleetTargetSelectionEngine.ensureTarget(
+        at: expeditionCoordinate,
+        visibleTo: fleetPlayerID(),
+        in: &universe
+    ) else {
+        fatalError("Fleet page should be able to select the expedition slot")
+    }
+    let expeditionTarget = requirePlanet(expeditionTargetID, in: universe, "Selected expedition slot should become a target")
+    requireEqual(expeditionTarget.coordinate, expeditionCoordinate, "Expedition target should preserve coordinate")
+    require(UniverseTopologyEngine.isExpeditionCoordinate(expeditionTarget.coordinate), "Expedition target should use position 16")
+
+    let exploration = FleetEngine.launchFleet(
+        from: fleetPlanetID(1),
+        to: expeditionTargetID,
+        in: &universe,
+        mission: .explore,
+        ships: [.smallCargo: 1],
+        cargo: .zero
+    )
+    guard case .launched = exploration else {
+        fatalError("Fleet page selected expedition target should be launchable for exploration")
+    }
+}
+
 func testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources() {
     var universe = makeStrategicUniverse(playerPlanetCount: 2, aiPlanetCount: 1, neutralPlanetCount: 1)
     let playerPlanetIDs = Set(universe.factions.first { $0.id == universe.playerFactionID }?.ownedPlanetIDs ?? [])
@@ -7291,6 +7331,7 @@ testStarterUniverseProvidesServiceStyleColonyPool()
 testServiceStyleMoonChanceUsesDebrisThresholdAndCap()
 testColonizationAppliesTopologyProfileAndExpeditionSlotCannotBeColonized()
 testColonizationTargetEngineSeedsVisibleEmptySlotForFleetPage()
+testFleetTargetSelectionSeedsEmptyAndExpeditionSlotsForFleetPage()
 testTestingResourceGrantSetsPlayerOwnedPlanetsToInfiniteResources()
 testPlayerObjectivesAwardRewardsOnce()
 testPlayerObjectiveStatesExposeProgressAndCompletedRecords()

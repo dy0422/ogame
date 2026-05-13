@@ -1015,32 +1015,31 @@ final class AppModel: ObservableObject {
         launchFleet(originID: origin.id, targetID: targetID, mission: mission, ships: plan.ships, cargo: .zero)
     }
 
-    func ensureColonizationTarget(galaxy: Int, system: Int, position: Int) -> PlanetID? {
+    func ensureFleetTarget(galaxy: Int, system: Int, position: Int) -> PlanetID? {
         let coordinate = Coordinate(galaxy: galaxy, system: system, position: position)
-        guard UniverseTopologyEngine.isValidPlanetCoordinate(coordinate) else {
-            statusMessage = "无法选择殖民坐标：请输入有效星位。"
+        guard UniverseTopologyEngine.isValidPlanetCoordinate(coordinate) ||
+            UniverseTopologyEngine.isExpeditionCoordinate(coordinate)
+        else {
+            statusMessage = "无法选择目标坐标：请输入有效星位。"
             return nil
         }
 
-        if let existing = universe.planets.first(where: { $0.coordinate == coordinate }),
-           existing.ownerID != nil
-        {
-            statusMessage = "无法选择殖民坐标：\(coordinate.displayText) 已被占领。"
-            return nil
-        }
-
-        guard let targetID = ColonizationTargetEngine.ensureNeutralTarget(
+        guard let targetID = FleetTargetSelectionEngine.ensureTarget(
             at: coordinate,
             visibleTo: universe.playerFactionID,
             in: &universe
         ) else {
-            statusMessage = "无法选择殖民坐标：目标星位不可用。"
+            statusMessage = "无法选择目标坐标：目标星位不可用。"
             return nil
         }
 
         refreshStrategicState()
-        statusMessage = "已选择殖民坐标 \(coordinate.displayText)。"
+        statusMessage = "已选择目标坐标 \(coordinate.displayText)。"
         return targetID
+    }
+
+    func ensureColonizationTarget(galaxy: Int, system: Int, position: Int) -> PlanetID? {
+        ensureFleetTarget(galaxy: galaxy, system: system, position: position)
     }
 
     func recallFleet(_ fleet: Fleet) {
@@ -3015,44 +3014,11 @@ final class AppModel: ObservableObject {
             return existing.id
         }
 
-        if UniverseTopologyEngine.isValidPlanetCoordinate(slot.coordinate) {
-            return ColonizationTargetEngine.ensureNeutralTarget(
-                at: slot.coordinate,
-                visibleTo: universe.playerFactionID,
-                in: &universe
-            )
-        }
-
-        guard UniverseTopologyEngine.isExpeditionCoordinate(slot.coordinate) else {
-            return nil
-        }
-
-        let profile = UniverseTopologyEngine.planetProfile(for: slot.coordinate, universeSeed: universe.seed)
-        let planetID = PlanetID(Self.stablePlaceholderUUID(payload: "star-map-target|\(universe.id.rawValue.uuidString)|\(slot.coordinate.displayText)"))
-        let displayName = slot.isExpedition ? "外太空 \(slot.coordinate.displayText)" : "未占领 \(slot.coordinate.displayText)"
-        let planet = Planet(
-            id: planetID,
-            name: displayName,
-            coordinate: slot.coordinate,
-            ownerID: nil,
-            resources: slot.isExpedition ? .zero : ResourceBundle(metal: 120, crystal: 60, deuterium: 20),
-            temperatureCelsius: profile.temperatureCelsius,
-            debrisField: .zero,
-            maxFields: slot.isExpedition ? 1 : profile.maxFields
+        return FleetTargetSelectionEngine.ensureTarget(
+            at: slot.coordinate,
+            visibleTo: universe.playerFactionID,
+            in: &universe
         )
-        universe.planets.append(planet)
-        universe.explorationRecords.append(
-            ExplorationRecord(
-                factionID: universe.playerFactionID,
-                targetPlanetID: planetID,
-                exploredAt: universe.gameTime,
-                discoveredResources: planet.resources,
-                discoveredDebris: planet.debrisField,
-                discoveredOwnerID: nil,
-                discoveredNeutral: !slot.isExpedition
-            )
-        )
-        return planetID
     }
 
     private func factionName(for factionID: FactionID) -> String {
