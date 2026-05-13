@@ -104,6 +104,48 @@ final class AppModel: ObservableObject {
         StrategicAdvisorEngine.recommendations(in: universe)
     }
 
+    var actionChainSummaries: [ActionChainSummary] {
+        universe.actionChains
+            .sorted { lhs, rhs in
+                let lhsClaimable = ActionChainRewardEngine.canClaim(lhs, at: universe.gameTime)
+                let rhsClaimable = ActionChainRewardEngine.canClaim(rhs, at: universe.gameTime)
+                if lhsClaimable != rhsClaimable {
+                    return lhsClaimable
+                }
+                if lhs.expiresAt != rhs.expiresAt {
+                    return lhs.expiresAt < rhs.expiresAt
+                }
+                return lhs.title < rhs.title
+            }
+            .map { chain in
+                let isExpired = chain.expiresAt <= universe.gameTime
+                let canClaim = ActionChainRewardEngine.canClaim(chain, at: universe.gameTime)
+                let lockedSteps = chain.steps.filter { $0.status == .locked }.map(\.title)
+                let statusText: String
+                if isExpired {
+                    statusText = "已过期"
+                } else if canClaim {
+                    statusText = "可领取"
+                } else if lockedSteps.isEmpty {
+                    statusText = "等待推进"
+                } else {
+                    statusText = "缺少\(lockedSteps.prefix(2).joined(separator: "、"))"
+                }
+
+                return ActionChainSummary(
+                    id: chain.id,
+                    title: chain.title.displayName,
+                    detail: chain.detail.displayName,
+                    rewardText: Self.actionChainResourceText(chain.reward),
+                    commanderRewardText: Self.actionChainCommanderRewardText(chain.commanderReward),
+                    stepText: chain.steps.map(Self.actionChainStepText(for:)).joined(separator: " · "),
+                    timeText: isExpired ? "已过期" : "剩余 \(Self.formattedWholeSeconds(max(chain.expiresAt - universe.gameTime, 0)))",
+                    statusText: statusText,
+                    canClaim: canClaim
+                )
+            }
+    }
+
     var availableBuildingKinds: [BuildingKind] {
         BuildingKind.allCases.filter { kind in
             universe.ruleSet.buildingRules[kind] != nil && !kind.isMoonFacility
@@ -959,6 +1001,29 @@ final class AppModel: ObservableObject {
         let extraCount = max(results.count - 4, 0)
         let suffix = extraCount > 0 ? " 等 \(results.count) 名结果" : ""
         autosaveAfterQueueing(successStatus: "已确认全部指挥官候选：\(summary)\(suffix)。")
+    }
+
+    func claimActionChainReward(_ chainID: UUID) {
+        guard canSave else {
+            statusMessage = "自动存档载入失败。请先开始新游戏再领取行动链奖励。"
+            return
+        }
+
+        let result = ActionChainRewardEngine.claim(chainID, in: &universe)
+        switch result.status {
+        case .claimed:
+            let title = result.title.isEmpty ? "行动链" : result.title
+            let commanderText = Self.actionChainClaimCommanderText(result)
+            autosaveAfterQueueing(successStatus: "已领取\(title)奖励：\(Self.actionChainResourceText(result.resources))\(commanderText)。")
+        case .notFound:
+            statusMessage = "行动链不存在或已经领取。"
+        case .expired:
+            statusMessage = "行动链已过期，无法领取奖励。"
+        case .locked:
+            statusMessage = "行动链条件尚未满足，请先完成侦察、打击或回收条件。"
+        case .noPlayerPlanet:
+            statusMessage = "没有可接收奖励的己方星球。"
+        }
     }
 
     func trainCommander(_ commanderID: CommanderID) {
@@ -3333,6 +3398,59 @@ final class AppModel: ObservableObject {
         result.isDuplicate ? "\(result.name)+\(result.shardsGranted)碎片" : result.name
     }
 
+    private static func actionChainResourceText(_ resources: ResourceBundle) -> String {
+        "金 \(formattedWholeNumber(resources.metal)) / 晶 \(formattedWholeNumber(resources.crystal)) / 重 \(formattedWholeNumber(resources.deuterium))"
+    }
+
+    private static func actionChainCommanderRewardText(_ reward: CommanderRewardBundle?) -> String {
+        guard let reward else {
+            return "无指挥官奖励"
+        }
+
+        var parts: [String] = []
+        if reward.recruitmentTickets > 0 {
+            parts.append("招募令 +\(reward.recruitmentTickets)")
+        }
+        if reward.trainingData > 0 {
+            parts.append("训练数据 +\(reward.trainingData)")
+        }
+        if reward.commanderDropChance > 0 {
+            parts.append("候选掉落 \(formattedPercent(reward.commanderDropChance))")
+        }
+        return parts.isEmpty ? "无指挥官奖励" : parts.joined(separator: " / ")
+    }
+
+    private static func actionChainStepText(for step: ActionChain.Step) -> String {
+        let status: String
+        switch step.status {
+        case .ready:
+            status = "已满足"
+        case .locked:
+            status = "未满足"
+        case .complete:
+            status = "完成"
+        }
+        return "\(step.title)：\(status)"
+    }
+
+    private static func actionChainClaimCommanderText(_ result: ActionChainRewardClaim) -> String {
+        var parts: [String] = []
+        if let reward = result.commanderReward {
+            if reward.recruitmentTickets > 0 {
+                parts.append("招募令 +\(reward.recruitmentTickets)")
+            }
+            if reward.trainingData > 0 {
+                parts.append("训练数据 +\(reward.trainingData)")
+            }
+        }
+        if let commanderDrop = result.commanderDrop,
+           let definition = CommanderCatalog.definition(id: commanderDrop.definitionID) {
+            parts.append("候选指挥官 \(definition.name)")
+        }
+
+        return parts.isEmpty ? "" : "，" + parts.joined(separator: "，")
+    }
+
     private static func duplicateCommanderShardValue(for rarity: CommanderRarity) -> Int {
         switch rarity {
         case .common:
@@ -3383,6 +3501,18 @@ final class AppModel: ObservableObject {
         formatter.zeroFormattingBehavior = .dropAll
         return formatter
     }()
+}
+
+struct ActionChainSummary: Identifiable {
+    let id: UUID
+    let title: String
+    let detail: String
+    let rewardText: String
+    let commanderRewardText: String
+    let stepText: String
+    let timeText: String
+    let statusText: String
+    let canClaim: Bool
 }
 
 struct StarMapPlanetSection: Identifiable {

@@ -1582,6 +1582,48 @@ func testGameplayExpansionRewardsCommanderRecruitmentMaterials() {
     )
 }
 
+func testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop() {
+    var universe = makeExpansionUniverse(gameTime: 9_000)
+    guard let receiverIndex = universe.planets.firstIndex(where: { $0.ownerID == universe.playerFactionID }) else {
+        fatalError("Expansion universe should include a player planet")
+    }
+
+    let receiverID = universe.planets[receiverIndex].id
+    let startingResources = universe.planets[receiverIndex].resources
+    let reward = ResourceBundle(metal: 1_200, crystal: 800, deuterium: 300)
+    let commanderReward = CommanderRewardBundle(recruitmentTickets: 2, trainingData: 180, commanderDropChance: 1)
+    let chain = ActionChain(
+        id: UUID(uuidString: "00000000-0000-0000-0000-00000000a701")!,
+        kind: .hostileRaid,
+        title: "清剿测试据点",
+        detail: "验证 PVE 行动链奖励领取闭环。",
+        steps: [
+            ActionChain.Step(kind: .scoutTarget, title: "侦察目标", status: .ready),
+            ActionChain.Step(kind: .strikeHostile, title: "打击据点", status: .ready),
+            ActionChain.Step(kind: .recoverSpoils, title: "回收战利品", status: .complete)
+        ],
+        reward: reward,
+        commanderReward: commanderReward,
+        expiresAt: universe.gameTime + 600
+    )
+    universe.actionChains = [chain]
+
+    let result = ActionChainRewardEngine.claim(chain.id, in: &universe)
+
+    requireEqual(result.status, .claimed, "Ready action chain should be claimable")
+    requireEqual(result.receivingPlanetID, receiverID, "Claim should report the planet receiving resources")
+    requireEqual(result.resources, reward, "Claim result should expose granted resources")
+    requireEqual(result.commanderReward, commanderReward, "Claim result should expose commander rewards")
+    require(result.commanderDrop != nil, "Guaranteed commander drop should create a selectable pending candidate")
+    requireEqual(universe.planets[receiverIndex].resources, startingResources.adding(reward).nonnegative, "Claim should grant resources to the first player planet")
+    requireEqual(universe.commanderRoster.recruitmentTickets, commanderReward.recruitmentTickets, "Claim should grant recruitment tickets")
+    requireEqual(universe.commanderRoster.trainingData, commanderReward.trainingData, "Claim should grant training data")
+    requireEqual(universe.commanderRoster.pendingRecruits.count, 1, "Commander drops should wait for player selection")
+    requireEqual(universe.commanderRoster.ownedCommanders.count, 0, "Commander drops should not bypass candidate selection")
+    require(universe.actionChains.isEmpty, "Claimed action chain should be removed to prevent duplicate rewards")
+    require(universe.events.contains { $0.kind == .system && $0.title == "行动链奖励领取" }, "Claim should add a readable system event")
+}
+
 func testStrategicAdvisorSurfacesExpansionOpportunities() {
     var universe = makeExpansionUniverse(gameTime: 9_000)
     GameplayExpansionEngine.refresh(in: &universe)
@@ -7476,6 +7518,7 @@ testMidgamePlayerObjectivesExposeStrategyDepth()
 testStrategicAdvisorRecommendsVictoryRouteAndAIThreat()
 testGameplayExpansionRefreshCreatesThreePhaseGameplayLoops()
 testGameplayExpansionRewardsCommanderRecruitmentMaterials()
+testActionChainRewardClaimGrantsResourcesCommanderMaterialsAndPendingDrop()
 testStrategicAdvisorSurfacesExpansionOpportunities()
 testStrategicAdvisorSurfacesCommanderRecruitmentAndAssignment()
 testGameplayAuditCountsCommanderSignals()

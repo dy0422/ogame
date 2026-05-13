@@ -95,6 +95,44 @@ struct StrategicAdvisorPanel: View {
     }
 }
 
+struct ActionChainRewardsPanel: View {
+    @ObservedObject var model: AppModel
+
+    private var summaries: [ActionChainSummary] {
+        model.actionChainSummaries
+    }
+
+    var body: some View {
+        PanelSurface {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionTitle(title: "行动链奖励", detail: "PVE 据点与星区任务")
+
+                if summaries.isEmpty {
+                    Label("暂无可追踪行动链", systemImage: "checklist.unchecked")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(summaries) { summary in
+                            ActionChainRewardRow(summary: summary) {
+                                model.claimActionChainReward(summary.id)
+                            }
+
+                            if summary.id != summaries.last?.id {
+                                Divider()
+                                    .padding(.leading, 42)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 860, alignment: .leading)
+    }
+}
+
 private struct StrategicAdvisorRow: View {
     let recommendation: StrategicAdvisorRecommendation
     let action: () -> Void
@@ -137,6 +175,66 @@ private struct StrategicAdvisorRow: View {
             }
             .buttonStyle(.borderless)
             .controlSize(.small)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct ActionChainRewardRow: View {
+    let summary: ActionChainSummary
+    let claim: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: summary.canClaim ? "checkmark.seal.fill" : "lock.open.trianglebadge.exclamationmark")
+                .font(.headline)
+                .foregroundStyle(summary.canClaim ? Color.green : Color.orange)
+                .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(summary.title)
+                        .font(.callout.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+
+                    Text(summary.statusText)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(summary.canClaim ? Color.green : Color.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background((summary.canClaim ? Color.green : Color.orange).opacity(0.1), in: Capsule())
+                }
+
+                Text(summary.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Label(summary.rewardText, systemImage: "shippingbox")
+                    Label(summary.commanderRewardText, systemImage: "person.crop.circle.badge.plus")
+                    Label(summary.stepText, systemImage: "list.bullet.rectangle")
+                    Label(summary.timeText, systemImage: "timer")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+            }
+
+            Spacer(minLength: 10)
+
+            Button(action: claim) {
+                Label("领取", systemImage: "tray.and.arrow.down")
+                    .labelStyle(.titleAndIcon)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(!summary.canClaim)
+            .help(summary.canClaim ? "领取行动链奖励" : "条件未满足，暂时不能领取")
         }
         .padding(.vertical, 10)
         .contentShape(Rectangle())

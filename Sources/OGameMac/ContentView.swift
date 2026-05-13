@@ -224,6 +224,7 @@ private struct DashboardView: View {
             CommandCenterStrip(model: model)
             CommanderBriefingPanel(model: model)
             StrategicAdvisorPanel(model: model)
+            ActionChainRewardsPanel(model: model)
             PlayerObjectivesPanel(states: model.playerObjectiveStates)
             if let settlement = model.victorySettlementSummary {
                 VictorySettlementPanel(summary: settlement, model: model)
