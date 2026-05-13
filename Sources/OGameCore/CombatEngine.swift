@@ -155,7 +155,21 @@ public enum CombatEngine {
         )
         universe.reports.append(report)
         let commanderXP = max(25, (attackerLosses.totalAmount + defenderLosses.totalAmount) / 500)
+        let commanderBefore = commander(for: fleet.commanderID, in: universe)
         CommanderGrowthEngine.addExperience(commanderXP, to: fleet.commanderID, in: &universe)
+        if let commanderBefore,
+           let commanderAfter = commander(for: fleet.commanderID, in: universe)
+        {
+            universe.events.append(
+                commanderExperienceEvent(
+                    for: commanderAfter,
+                    previousLevel: commanderBefore.level,
+                    awardedExperience: commanderXP,
+                    fleet: fleet,
+                    reportID: reportID
+                )
+            )
+        }
         createMoonIfEligible(
             targetIndex: targetIndex,
             reportID: reportID,
@@ -642,6 +656,45 @@ public enum CombatEngine {
         ]
     }
 
+    private static func commander(for commanderID: CommanderID?, in universe: Universe) -> OwnedCommander? {
+        guard let commanderID else {
+            return nil
+        }
+
+        return universe.commanderRoster.ownedCommanders.first { $0.id == commanderID }
+    }
+
+    private static func commanderExperienceEvent(
+        for commander: OwnedCommander,
+        previousLevel: Int,
+        awardedExperience: Double,
+        fleet: Fleet,
+        reportID: UUID
+    ) -> GameEvent {
+        let definition = CommanderCatalog.definition(id: commander.definitionID)
+        let commanderName = definition?.name ?? definition?.title ?? "指挥官"
+        let levelText = commander.level > previousLevel ? "，等级提升至 \(commander.level)" : ""
+        return GameEvent(
+            id: EventID(
+                stableUUID(
+                    namespace: "0013",
+                    payload: [
+                        "commander-combat-xp",
+                        reportID.uuidString,
+                        commander.id.rawValue.uuidString,
+                        fleet.id.rawValue.uuidString,
+                        String(fleet.arrivalTime),
+                        String(awardedExperience)
+                    ].joined(separator: "|")
+                )
+            ),
+            time: fleet.arrivalTime,
+            kind: .combat,
+            title: "指挥官实战经验",
+            message: "\(commanderName) 从 \(fleet.target.displayText) 战斗获得经验 +\(wholeNumber(awardedExperience))\(levelText)。"
+        )
+    }
+
     private static func createMoonIfEligible(
         targetIndex: Int,
         reportID: UUID,
@@ -937,6 +990,14 @@ public enum CombatEngine {
 
     private static func safe(_ value: Double) -> Double {
         value.isFinite ? max(value, 0) : 0
+    }
+
+    private static func wholeNumber(_ value: Double) -> String {
+        guard value.isFinite, abs(value) <= Double(Int.max) else {
+            return "未知"
+        }
+
+        return String(Int(value.rounded()))
     }
 
     private static func stableUUID(namespace: String, payload: String) -> UUID {

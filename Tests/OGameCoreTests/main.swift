@@ -988,6 +988,15 @@ func testAttackMissionGrantsCommanderExperience() {
         fatalError("Expected commander to remain in roster")
     }
     require(updated.experience > 0 || updated.level > commander.level, "Commander should gain XP from resolved combat")
+    require(
+        setup.universe.events.contains { event in
+            event.kind == .combat &&
+                event.title == "指挥官实战经验" &&
+                event.message.contains("林远航") &&
+                event.message.contains("经验")
+        },
+        "Resolved commander-led combat should add a readable XP event"
+    )
 }
 
 func testUniverseModelRoundTripsThroughJSON() throws {
