@@ -46,7 +46,12 @@ public enum PlayerAutoUpgradeEngine {
 
         var result = PlayerAutoUpgradeResult()
         result.claimedActionChains += claimCompletedActionChains(in: &universe)
-        let shouldQueueShipsFirst = policy.allowShipConstruction && shouldQueueShipsBeforeInfrastructure(
+        let canQueueShips = policy.allowShipConstruction && shouldQueueShips(
+            for: player,
+            policy: policy,
+            in: universe
+        )
+        let shouldQueueShipsFirst = canQueueShips && shouldQueueShipsBeforeInfrastructure(
             for: player,
             policy: policy,
             in: universe
@@ -57,7 +62,7 @@ public enum PlayerAutoUpgradeEngine {
 
         result.queuedBuildings += queueBuildings(for: player, policy: policy, in: &universe)
         result.queuedResearch += queueResearch(for: player, policy: policy, in: &universe)
-        if policy.allowShipConstruction && !shouldQueueShipsFirst {
+        if canQueueShips && !shouldQueueShipsFirst {
             result.queuedShips += queueShips(for: player, policy: policy, in: &universe)
         }
         if policy.allowDefenseConstruction {
@@ -98,6 +103,9 @@ public enum PlayerAutoUpgradeEngine {
         in universe: inout Universe
     ) -> Int {
         var queued = 0
+        let preserveForCoreFleet = policy.allowShipConstruction &&
+            policy.strategy == .fleet &&
+            !coreFleetShipNeeds(for: player, strategy: policy.strategy, in: universe).isEmpty
         for planetID in player.ownedPlanetIDs {
             guard let planetIndex = universe.planets.firstIndex(where: { $0.id == planetID && $0.ownerID == player.id }),
                   universe.planets[planetIndex].buildQueue.count < policy.maxBuildQueueDepthPerPlanet
@@ -125,7 +133,8 @@ public enum PlayerAutoUpgradeEngine {
                         player: player,
                         ruleSet: universe.ruleSet,
                         strategy: policy.strategy,
-                        reserveForFirstShip: reserveForFirstShip
+                        reserveForFirstShip: reserveForFirstShip,
+                        preserveForCoreFleet: preserveForCoreFleet
                     ) else {
                         continue
                     }
@@ -163,11 +172,26 @@ public enum PlayerAutoUpgradeEngine {
     ) -> Bool {
         switch policy.strategy {
         case .fleet:
-            return true
+            return shouldQueueShips(for: player, policy: policy, in: universe)
         case .balanced:
             return ownedShipCount(for: player, in: universe) == 0
         case .economy, .research, .defense, .lowRiskOffline:
             return false
+        }
+    }
+
+    private static func shouldQueueShips(
+        for player: Faction,
+        policy: AutoUpgradePolicy,
+        in universe: Universe
+    ) -> Bool {
+        switch policy.strategy {
+        case .fleet:
+            return ownedShipCount(for: player, in: universe) > 0 ||
+                hasFirstShipFoundation(for: player, in: universe) ||
+                !actionChainShipNeeds(for: player, in: universe).isEmpty
+        case .balanced, .economy, .research, .defense, .lowRiskOffline:
+            return true
         }
     }
 
@@ -193,13 +217,24 @@ public enum PlayerAutoUpgradeEngine {
         }
     }
 
+    private static func hasFirstShipFoundation(for player: Faction, in universe: Universe) -> Bool {
+        player.ownedPlanetIDs.contains { planetID in
+            guard let planet = universe.planets.first(where: { $0.id == planetID && $0.ownerID == player.id }) else {
+                return false
+            }
+
+            return firstShipReserveFoundationMet(on: planet)
+        }
+    }
+
     private static func shouldQueueBuilding(
         _ kind: BuildingKind,
         on planet: Planet,
         player: Faction,
         ruleSet: RuleSet,
         strategy: AutoUpgradeStrategy,
-        reserveForFirstShip: Bool
+        reserveForFirstShip: Bool,
+        preserveForCoreFleet: Bool
     ) -> Bool {
         let energy = EconomyEngine.energyState(for: planet, ruleSet: ruleSet, research: player.technology)
         if energy.available < 0 && (kind == .solarPlant || kind == .fusionReactor) {
@@ -217,6 +252,10 @@ public enum PlayerAutoUpgradeEngine {
 
         if let target = targets[kind], projectedBuildingLevel(kind, on: planet) < target {
             return true
+        }
+
+        if preserveForCoreFleet {
+            return false
         }
 
         return foundationTargetsMet(targets, on: planet)
@@ -268,9 +307,18 @@ public enum PlayerAutoUpgradeEngine {
         }
 
         var queued = 0
+        let coreFleetComplete = coreFleetShipNeeds(for: player, strategy: policy.strategy, in: universe).isEmpty
         while researchQueueDepth(for: player.id, in: universe) < policy.maxResearchQueueDepth {
             var didQueue = false
-            for technology in researchPriorities(for: policy.strategy) where universe.ruleSet.researchRules[technology] != nil {
+            for technology in researchPriorities(for: policy.strategy)
+                where universe.ruleSet.researchRules[technology] != nil &&
+                shouldQueueResearch(
+                    technology,
+                    for: player,
+                    strategy: policy.strategy,
+                    coreFleetComplete: coreFleetComplete
+                )
+            {
                 guard let cost = QueueEngine.researchCost(for: player.id, in: universe, technology: technology),
                       let resources = researchPaymentResources(for: player, in: universe),
                       canSpend(cost, from: resources, reserveRatio: policy.resourceReserveRatio)
@@ -434,6 +482,38 @@ public enum PlayerAutoUpgradeEngine {
         return nil
     }
 
+    private static func shouldQueueResearch(
+        _ technology: TechnologyKind,
+        for player: Faction,
+        strategy: AutoUpgradeStrategy,
+        coreFleetComplete: Bool
+    ) -> Bool {
+        guard strategy == .fleet else {
+            return true
+        }
+
+        let coreTargets: [TechnologyKind: Int] = [
+            .combustionDrive: 2,
+            .energy: 1,
+            .impulseDrive: 1,
+            .espionage: 1,
+            .computer: 2
+        ]
+        let projectedLevels = player.technology.levels.merging(
+            Dictionary(uniqueKeysWithValues: player.researchQueue.map { ($0.technologyKind, $0.targetLevel) })
+        ) { current, queued in
+            max(current, queued)
+        }
+        if let target = coreTargets[technology] {
+            return (projectedLevels[technology] ?? 0) < target
+        }
+
+        let hasUnmetCoreTarget = coreTargets.contains { coreTechnology, target in
+            (projectedLevels[coreTechnology] ?? 0) < target
+        }
+        return !hasUnmetCoreTarget && coreFleetComplete
+    }
+
     private static func canSpend(_ cost: ResourceBundle, from resources: ResourceBundle, reserveRatio: Double) -> Bool {
         let reserve = resources.scaled(by: min(max(reserveRatio, 0), 0.8))
         return resources.subtracting(reserve).canAfford(cost)
@@ -448,7 +528,7 @@ public enum PlayerAutoUpgradeEngine {
         case .research:
             return [.computer, .energy, .espionage, .astrophysics, .impulseDrive, .hyperspaceDrive, .weapons, .shielding, .armor, .combustionDrive]
         case .fleet:
-            return [.combustionDrive, .impulseDrive, .weapons, .armor, .shielding, .computer, .espionage, .astrophysics, .energy, .hyperspaceDrive]
+            return [.combustionDrive, .energy, .impulseDrive, .espionage, .computer, .weapons, .armor, .shielding, .astrophysics, .hyperspaceDrive]
         case .defense, .lowRiskOffline:
             return [.energy, .weapons, .shielding, .armor, .computer, .espionage, .astrophysics, .combustionDrive, .impulseDrive, .hyperspaceDrive]
         case .economy, .balanced:
@@ -457,9 +537,10 @@ public enum PlayerAutoUpgradeEngine {
     }
 
     private static func shipPriorities(for player: Faction, strategy: AutoUpgradeStrategy, in universe: Universe) -> [ShipKind] {
-        let baseline = shipPriorities(for: strategy)
         let actionChainShips = actionChainShipNeeds(for: player, in: universe)
-        return unique(actionChainShips + baseline)
+        let coreFleetShips = coreFleetShipNeeds(for: player, strategy: strategy, in: universe)
+        let baseline = strategy == .fleet && !coreFleetShips.isEmpty ? [] : shipPriorities(for: strategy)
+        return unique(actionChainShips + coreFleetShips + baseline)
     }
 
     private static func shipPriorities(for strategy: AutoUpgradeStrategy) -> [ShipKind] {
@@ -495,6 +576,23 @@ public enum PlayerAutoUpgradeEngine {
             }
     }
 
+    private static func coreFleetShipNeeds(for player: Faction, strategy: AutoUpgradeStrategy, in universe: Universe) -> [ShipKind] {
+        guard strategy == .fleet else {
+            return []
+        }
+
+        let desiredCore: [(ShipKind, Int)] = [
+            (.smallCargo, 1),
+            (.espionageProbe, 1),
+            (.lightFighter, 4),
+            (.colonyShip, 1),
+            (.recycler, 1)
+        ]
+        return desiredCore.compactMap { ship, desiredCount in
+            totalShipOrQueuedCount(ship, for: player, in: universe) < desiredCount ? ship : nil
+        }
+    }
+
     private static func neededShip(for stepKind: ActionChain.Step.Kind) -> ShipKind? {
         switch stepKind {
         case .scoutTarget:
@@ -509,19 +607,23 @@ public enum PlayerAutoUpgradeEngine {
     }
 
     private static func hasShipOrQueued(_ ship: ShipKind, for player: Faction, in universe: Universe) -> Bool {
-        player.ownedPlanetIDs.contains { planetID in
+        totalShipOrQueuedCount(ship, for: player, in: universe) > 0
+    }
+
+    private static func totalShipOrQueuedCount(_ ship: ShipKind, for player: Faction, in universe: Universe) -> Int {
+        player.ownedPlanetIDs.reduce(0) { total, planetID in
             guard let planet = universe.planets.first(where: { $0.id == planetID && $0.ownerID == player.id }) else {
-                return false
+                return total
             }
 
             let inventory = max(planet.shipInventory[ship] ?? 0, 0)
-            let queued = planet.shipBuildQueue.reduce(0) { total, item in
+            let queued = planet.shipBuildQueue.reduce(0) { queuedTotal, item in
                 guard item.unitKind == .ship(ship) else {
-                    return total
+                    return queuedTotal
                 }
-                return total + max(item.quantity, 0)
+                return queuedTotal + max(item.quantity, 0)
             }
-            return inventory + queued > 0
+            return total + inventory + queued
         }
     }
 

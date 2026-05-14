@@ -367,6 +367,9 @@ func testAutoUpgradeEconomyStrategyFillsMultipleBuildQueueItems() {
 func testAutoUpgradeFleetStrategyCanBuildShipsWhenAllowed() {
     var universe = StarterUniverseFactory.makeNewGame(seed: 202, playerName: "指挥官")
     universe.planets[0].resources = ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000)
+    universe.planets[0].buildingLevels[.metalMine] = 2
+    universe.planets[0].buildingLevels[.crystalMine] = 2
+    universe.planets[0].buildingLevels[.solarPlant] = 3
     universe.planets[0].buildingLevels[.roboticsFactory] = 1
     universe.planets[0].buildingLevels[.shipyard] = 1
     let policy = AutoUpgradePolicy(strategy: .fleet, allowShipConstruction: true)
@@ -374,6 +377,93 @@ func testAutoUpgradeFleetStrategyCanBuildShipsWhenAllowed() {
     _ = PlayerAutoUpgradeEngine.makeDecisions(in: &universe, policy: policy)
 
     require(universe.planets[0].shipBuildQueue.isEmpty == false, "Fleet automation should queue ships")
+}
+
+func testAutoUpgradeFleetStrategyBuildsFoundationBeforeFirstShipWhenResourcesAreTight() {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 203, playerName: "指挥官")
+    let policy = AutoUpgradePolicy(strategy: .fleet, resourceReserveRatio: 0, allowShipConstruction: true)
+
+    let result = PlayerAutoUpgradeEngine.makeDecisions(in: &universe, policy: policy)
+
+    requireEqual(result.queuedShips, 0, "Fleet automation should not spend the tight opening stockpile on a first ship before the foundation is stable")
+    require(result.queuedBuildings > 0, "Fleet automation should invest tight opening resources into the foundation first")
+}
+
+func testAutoUpgradeFleetStrategyBuildsMissingCoreFleetBeforeExtraCargo() {
+    var probeUniverse = automationShipUniverse(existingShips: [.smallCargo: 2])
+    _ = PlayerAutoUpgradeEngine.makeDecisions(in: &probeUniverse, policy: AutoUpgradePolicy(strategy: .fleet, allowShipConstruction: true))
+    requireEqual(
+        probeUniverse.planets[0].shipBuildQueue.first?.unitKind,
+        .ship(.espionageProbe),
+        "Fleet automation should build a missing probe before adding extra cargo"
+    )
+
+    var fighterUniverse = automationShipUniverse(existingShips: [.smallCargo: 2, .espionageProbe: 1, .lightFighter: 3])
+    _ = PlayerAutoUpgradeEngine.makeDecisions(in: &fighterUniverse, policy: AutoUpgradePolicy(strategy: .fleet, allowShipConstruction: true))
+    requireEqual(
+        fighterUniverse.planets[0].shipBuildQueue.first?.unitKind,
+        .ship(.lightFighter),
+        "Fleet automation should finish an early combat wing before adding extra cargo"
+    )
+
+    var colonyUniverse = automationShipUniverse(existingShips: [.smallCargo: 2, .espionageProbe: 1, .lightFighter: 4])
+    _ = PlayerAutoUpgradeEngine.makeDecisions(in: &colonyUniverse, policy: AutoUpgradePolicy(strategy: .fleet, allowShipConstruction: true))
+    requireEqual(
+        colonyUniverse.planets[0].shipBuildQueue.first?.unitKind,
+        .ship(.colonyShip),
+        "Fleet automation should build a first colony ship once the scout and combat core exist"
+    )
+}
+
+func testAutoUpgradeFleetStrategyDoesNotBuildExtraCargoWhenCoreShipIsTechBlocked() {
+    var universe = automationShipUniverse(existingShips: [.smallCargo: 2, .espionageProbe: 1, .lightFighter: 4, .recycler: 1])
+    if let playerIndex = universe.factions.firstIndex(where: { $0.id == universe.playerFactionID }) {
+        universe.factions[playerIndex].technology.levels[.impulseDrive] = nil
+    }
+
+    _ = PlayerAutoUpgradeEngine.makeDecisions(in: &universe, policy: AutoUpgradePolicy(strategy: .fleet, allowShipConstruction: true))
+
+    require(
+        universe.planets[0].shipBuildQueue.isEmpty,
+        "Fleet automation should preserve resources for blocked core tech instead of building extra cargo"
+    )
+}
+
+func testAutoUpgradeFleetResearchTurnsToImpulseAfterCorePrerequisites() {
+    var universe = automationShipUniverse(existingShips: [.smallCargo: 1])
+    if let playerIndex = universe.factions.firstIndex(where: { $0.id == universe.playerFactionID }) {
+        universe.factions[playerIndex].technology.levels = [.combustionDrive: 2, .energy: 1]
+        universe.factions[playerIndex].researchQueue = []
+    }
+    universe.planets[0].resources = ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000)
+
+    _ = PlayerAutoUpgradeEngine.makeDecisions(
+        in: &universe,
+        policy: AutoUpgradePolicy(strategy: .fleet, maxResearchQueueDepth: 1, allowShipConstruction: false)
+    )
+
+    let player = universe.factions.first { $0.id == universe.playerFactionID }
+    requireEqual(
+        player?.researchQueue.first?.technologyKind,
+        .impulseDrive,
+        "Fleet automation should unlock impulse drive after combustion 2 and energy 1 instead of over-leveling earlier techs"
+    )
+}
+
+func automationShipUniverse(existingShips: [ShipKind: Int]) -> Universe {
+    var universe = StarterUniverseFactory.makeNewGame(seed: 204, playerName: "指挥官")
+    universe.planets[0].resources = ResourceBundle(metal: 100_000, crystal: 100_000, deuterium: 100_000)
+    universe.planets[0].buildingLevels[.roboticsFactory] = 1
+    universe.planets[0].buildingLevels[.shipyard] = 2
+    universe.planets[0].buildingLevels[.researchLab] = 1
+    universe.planets[0].shipInventory = existingShips
+    universe.planets[0].shipBuildQueue = []
+    if let playerIndex = universe.factions.firstIndex(where: { $0.id == universe.playerFactionID }) {
+        universe.factions[playerIndex].technology.levels[.espionage] = 1
+        universe.factions[playerIndex].technology.levels[.impulseDrive] = 1
+        universe.factions[playerIndex].technology.levels[.combustionDrive] = 2
+    }
+    return universe
 }
 
 func testAutoUpgradePrioritizesProbeForReadyHostileActionChainScout() {
@@ -1506,6 +1596,8 @@ func testGameplayAuditAutoplayReachesNaturalFleetLoop() {
     )
     require(result.balance.firstShipAt != nil, "Autoplay audit should naturally build a first ship in the fast-skirmish window")
     require(result.balance.firstFleetLaunchAt != nil, "Autoplay audit should naturally launch a first fleet in the fast-skirmish window")
+    require(result.balance.firstCombatAt != nil, "Autoplay audit should naturally reach first combat instead of repeating low-value exploration forever")
+    require(result.balance.firstColonizationAt != nil, "Autoplay audit should naturally establish a colony once colony ships are available")
     require(
         !result.auditNotes.contains { $0.kind == .earlyFleetBlocked },
         "A mature autoplay loop should not report the early fleet as blocked"
@@ -8197,6 +8289,10 @@ try testFleetCommanderIDDefaultsWhenDecodingOlderFleetJSON()
 testAutomationPolicyDefaultsToBalancedEconomySafeMode()
 testAutoUpgradeEconomyStrategyFillsMultipleBuildQueueItems()
 testAutoUpgradeFleetStrategyCanBuildShipsWhenAllowed()
+testAutoUpgradeFleetStrategyBuildsFoundationBeforeFirstShipWhenResourcesAreTight()
+testAutoUpgradeFleetStrategyBuildsMissingCoreFleetBeforeExtraCargo()
+testAutoUpgradeFleetStrategyDoesNotBuildExtraCargoWhenCoreShipIsTechBlocked()
+testAutoUpgradeFleetResearchTurnsToImpulseAfterCorePrerequisites()
 testAutoUpgradePrioritizesProbeForReadyHostileActionChainScout()
 testAutoUpgradeRespectsResourceReserveRatio()
 try testRuleSetBalanceRulesUseRawValueKeyedJSONObjects()

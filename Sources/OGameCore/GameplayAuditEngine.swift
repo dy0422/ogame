@@ -126,35 +126,65 @@ public enum GameplayAuditEngine {
     }
 
     private static func performAdvisorDrivenFleetAction(in universe: inout Universe) {
-        guard let origin = playerOrigin(in: universe),
-              !universe.fleets.contains(where: { $0.ownerID == universe.playerFactionID && $0.phase != .completed })
-        else {
+        guard let origin = playerOrigin(in: universe) else {
             return
         }
 
         if (origin.shipInventory[.espionageProbe] ?? 0) > 0,
            !universe.reports.contains(where: { $0.kind == .espionage }),
+           !hasActivePlayerFleet(mission: .espionage, in: universe),
            let target = firstAIPlanet(in: universe) {
-            _ = FleetEngine.launchFleet(from: origin.id, to: target.id, in: &universe, mission: .espionage, ships: [.espionageProbe: 1])
-            return
-        }
-
-        if (origin.shipInventory[.smallCargo] ?? 0) > 0,
-           let target = firstNeutralPlanet(in: universe) {
-            _ = FleetEngine.launchFleet(from: origin.id, to: target.id, in: &universe, mission: .explore, ships: [.smallCargo: 1])
-            return
-        }
-
-        if (origin.shipInventory[.colonyShip] ?? 0) > 0,
-           let target = firstNeutralPlanet(in: universe) {
-            _ = FleetEngine.launchFleet(from: origin.id, to: target.id, in: &universe, mission: .colonize, ships: [.colonyShip: 1])
-            return
+            if launchAdvisorFleet(from: origin.id, to: target.id, in: &universe, mission: .espionage, ships: [.espionageProbe: 1]) {
+                return
+            }
         }
 
         if (origin.shipInventory[.lightFighter] ?? 0) >= 4,
            let target = firstAIPlanet(in: universe),
-           !universe.reports.contains(where: { $0.kind == .battle }) {
-            _ = FleetEngine.launchFleet(from: origin.id, to: target.id, in: &universe, mission: .attack, ships: [.lightFighter: 4])
+           !universe.reports.contains(where: { $0.kind == .battle }),
+           !hasActivePlayerFleet(mission: .attack, in: universe) {
+            if launchAdvisorFleet(from: origin.id, to: target.id, in: &universe, mission: .attack, ships: [.lightFighter: 4]) {
+                return
+            }
+        }
+
+        if (origin.shipInventory[.colonyShip] ?? 0) > 0,
+           !universe.events.contains(where: { $0.title == "Colony Established" }),
+           !hasActivePlayerFleet(mission: .colonize, in: universe),
+           let target = firstNeutralPlanet(in: universe) {
+            if launchAdvisorFleet(from: origin.id, to: target.id, in: &universe, mission: .colonize, ships: [.colonyShip: 1]) {
+                return
+            }
+        }
+
+        if (origin.shipInventory[.smallCargo] ?? 0) > 0,
+           !universe.events.contains(where: { $0.kind == .exploration }),
+           !hasActivePlayerFleet(mission: .explore, in: universe),
+           let target = firstNeutralPlanet(in: universe) {
+            _ = launchAdvisorFleet(from: origin.id, to: target.id, in: &universe, mission: .explore, ships: [.smallCargo: 1])
+        }
+    }
+
+    private static func hasActivePlayerFleet(mission: Fleet.Mission, in universe: Universe) -> Bool {
+        universe.fleets.contains { fleet in
+            fleet.ownerID == universe.playerFactionID &&
+                fleet.mission == mission &&
+                fleet.phase != .completed
+        }
+    }
+
+    private static func launchAdvisorFleet(
+        from originID: PlanetID,
+        to targetID: PlanetID,
+        in universe: inout Universe,
+        mission: Fleet.Mission,
+        ships: [ShipKind: Int]
+    ) -> Bool {
+        switch FleetEngine.launchFleet(from: originID, to: targetID, in: &universe, mission: mission, ships: ships) {
+        case .launched:
+            return true
+        case .failure:
+            return false
         }
     }
 
